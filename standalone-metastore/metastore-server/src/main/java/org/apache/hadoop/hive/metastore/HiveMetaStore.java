@@ -55,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -113,6 +114,7 @@ import org.apache.hadoop.hive.metastore.events.AlterISchemaEvent;
 import org.apache.hadoop.hive.metastore.events.AlterPartitionEvent;
 import org.apache.hadoop.hive.metastore.events.AlterSchemaVersionEvent;
 import org.apache.hadoop.hive.metastore.events.AlterTableEvent;
+import org.apache.hadoop.hive.metastore.events.CommitCompactionEvent;
 import org.apache.hadoop.hive.metastore.events.CommitTxnEvent;
 import org.apache.hadoop.hive.metastore.events.ConfigChangeEvent;
 import org.apache.hadoop.hive.metastore.events.CreateCatalogEvent;
@@ -3569,24 +3571,33 @@ public class HiveMetaStore extends ThriftHiveMetastore {
     public List<Table> get_table_objects_by_name(final String dbName, final List<String> tableNames)
         throws MetaException, InvalidOperationException, UnknownDBException {
       String[] parsedDbName = parseDbName(dbName, conf);
-      return getTableObjectsInternal(parsedDbName[CAT_NAME], parsedDbName[DB_NAME], tableNames, null);
+      return getTableObjectsInternal(parsedDbName[CAT_NAME], parsedDbName[DB_NAME], tableNames, null, null);
     }
 
     @Override
     public GetTablesResult get_table_objects_by_name_req(GetTablesRequest req) throws TException {
       String catName = req.isSetCatName() ? req.getCatName() : getDefaultCatalog(conf);
       return new GetTablesResult(getTableObjectsInternal(catName, req.getDbName(),
-          req.getTblNames(), req.getCapabilities()));
+          req.getTblNames(), req.getCapabilities(), req.getProjectionSpec()));
     }
 
     private List<Table> getTableObjectsInternal(String catName, String dbName,
                                                 List<String> tableNames,
-                                                ClientCapabilities capabilities)
+                                                ClientCapabilities capabilities,
+                                                GetProjectionsSpec projectionsSpec)
             throws MetaException, InvalidOperationException, UnknownDBException {
       if (isInTest) {
         assertClientHasCapability(capabilities, ClientCapability.TEST_CAPABILITY,
             "Hive tests", "get_table_objects_by_name_req");
       }
+
+      if (projectionsSpec != null) {
+        if (!projectionsSpec.isSetFieldList() && (projectionsSpec.isSetIncludeParamKeyPattern() ||
+                projectionsSpec.isSetExcludeParamKeyPattern())) {
+          throw new InvalidOperationException("Include and Exclude Param key are not supported.");
+        }
+      }
+
       List<Table> tables = new ArrayList<>();
       startMultiTableFunction("get_multi_table", dbName, tableNames);
       Exception ex = null;
@@ -3620,11 +3631,11 @@ public class HiveMetaStore extends ThriftHiveMetastore {
         while (startIndex < distinctTableNames.size()) {
           int endIndex = Math.min(startIndex + tableBatchSize, distinctTableNames.size());
           tables.addAll(ms.getTableObjectsByName(catName, dbName, distinctTableNames.subList(
-              startIndex, endIndex)));
+              startIndex, endIndex), projectionsSpec));
           startIndex = endIndex;
         }
         for (Table t : tables) {
-          if (MetaStoreUtils.isInsertOnlyTableParam(t.getParameters())) {
+          if (t.getParameters() != null && MetaStoreUtils.isInsertOnlyTableParam(t.getParameters())) {
             assertClientHasCapability(capabilities, ClientCapability.INSERT_ONLY_TABLES,
                 "insert-only tables", "get_table_req");
           }
@@ -7043,7 +7054,7 @@ public class HiveMetaStore extends ThriftHiveMetastore {
     public List<Partition> get_partitions_by_names(final String dbName, final String tblName,
                                                    final List<String> partNames)
             throws TException {
-      return get_partitions_by_names(dbName, tblName, partNames);
+      return get_partitions_by_names(dbName, tblName, partNames, false, null, null);
     }
 
     @Override
@@ -8376,6 +8387,11 @@ public class HiveMetaStore extends ThriftHiveMetastore {
       if (listeners != null && !listeners.isEmpty()) {
         MetaStoreListenerNotifier.notifyEvent(listeners, EventType.COMMIT_TXN,
                 new CommitTxnEvent(rqst.getTxnid(), this));
+        Optional<CompactionInfo> compactionInfo = getTxnHandler().getCompactionByTxnId(rqst.getTxnid());
+        if (compactionInfo.isPresent()) {
+          MetaStoreListenerNotifier.notifyEvent(listeners, EventType.COMMIT_COMPACTION,
+              new CommitCompactionEvent(rqst.getTxnid(), compactionInfo.get(), this));
+        }
       }
     }
 

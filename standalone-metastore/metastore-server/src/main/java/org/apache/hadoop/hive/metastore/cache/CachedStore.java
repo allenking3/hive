@@ -1650,6 +1650,12 @@ public class CachedStore implements RawStore, Configurable {
     return tables;
   }
 
+  @Override
+  public List<Table> getTableObjectsByName(String catName, String db, List<String> tbl_names,
+          GetProjectionsSpec projectionsSpec) throws MetaException, UnknownDBException {
+    return getTableObjectsByName(catName, db, tbl_names, null);
+  }
+
   @Override public List<String> getAllTables(String catName, String dbName) throws MetaException {
     return rawStore.getAllTables(catName, dbName);
   }
@@ -1756,7 +1762,7 @@ public class CachedStore implements RawStore, Configurable {
   /**
    * getPartitionSpecsByFilterAndProjection interface is currently non-cacheable.
    */ public List<Partition> getPartitionSpecsByFilterAndProjection(Table table,
-      GetPartitionsProjectionSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
+      GetProjectionsSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
       throws MetaException, NoSuchObjectException {
     return rawStore.getPartitionSpecsByFilterAndProjection(table, projectionSpec, filterSpec);
   }

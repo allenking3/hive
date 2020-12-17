@@ -31,6 +31,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.sql.Statement;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -93,7 +94,7 @@ import org.apache.hadoop.hive.metastore.api.FileMetadataExprType;
 import org.apache.hadoop.hive.metastore.api.Function;
 import org.apache.hadoop.hive.metastore.api.FunctionType;
 import org.apache.hadoop.hive.metastore.api.GetPartitionsFilterSpec;
-import org.apache.hadoop.hive.metastore.api.GetPartitionsProjectionSpec;
+import org.apache.hadoop.hive.metastore.api.GetProjectionsSpec;
 import org.apache.hadoop.hive.metastore.api.HiveObjectPrivilege;
 import org.apache.hadoop.hive.metastore.api.HiveObjectRef;
 import org.apache.hadoop.hive.metastore.api.HiveObjectType;
@@ -1840,12 +1841,13 @@ public class ObjectStore implements RawStore, Configurable {
   }
 
   @Override
-  public List<Table> getTableObjectsByName(String catName, String db, List<String> tbl_names)
-      throws MetaException, UnknownDBException {
+  public List<Table> getTableObjectsByName(String catName, String db, List<String> tbl_names,
+      GetProjectionsSpec projectionSpec) throws MetaException, UnknownDBException {
     List<Table> tables = new ArrayList<>();
     boolean committed = false;
-    Query dbExistsQuery = null;
     Query query = null;
+    List<MTable> mtables = null;
+
     try {
       openTransaction();
       db = normalizeIdentifier(db);
@@ -1855,20 +1857,69 @@ public class ObjectStore implements RawStore, Configurable {
       for (String t : tbl_names) {
         lowered_tbl_names.add(normalizeIdentifier(t));
       }
+
       query = pm.newQuery(MTable.class);
       query.setFilter("database.name == db && database.catalogName == cat && tbl_names.contains(tableName)");
       query.declareParameters("java.lang.String db, java.lang.String cat, java.util.Collection tbl_names");
-      Collection mtables = (Collection) query.execute(db, catName, lowered_tbl_names);
+
+      List<String> projectionFields = null;
+
+      // If a projection specification has been set, validate it and translate it to JDO columns.
+      if (projectionSpec != null) {
+        //Validate the projection fields for multi-valued fields.
+        projectionFields = TableFields.getMFieldNames(projectionSpec.getFieldList());
+      }
+
+      // If the JDO translation resulted in valid JDO columns names, use it to create a projection for the JDO query.
+      if (projectionFields != null) {
+        // fetch partially filled tables using result clause
+        query.setResult(Joiner.on(',').join(projectionFields));
+      }
+
+      if (projectionFields == null) {
+        mtables = (List<MTable>) query.execute(db, catName, lowered_tbl_names);
+      } else {
+        if (projectionFields.size() > 1) {
+          // Execute the query to fetch the partial results.
+          List<Object[]> results = (List<Object[]>) query.execute(db, catName, lowered_tbl_names);
+          // Declare the tables array to return the list of tables
+          mtables = new ArrayList<>(results.size());
+          // Iterate through each row of the result and create the MTable object.
+          for (Object[] row : results) {
+            MTable mtable = new MTable();
+            int i = 0;
+            for (Object val : row) {
+              MetaStoreServerUtils.setNestedProperty(mtable, projectionFields.get(i), val, true);
+              i++;
+            }
+            mtables.add(mtable);
+          }
+        } else if (projectionFields.size() == 1) {
+          // Execute the query to fetch the partial results.
+          List<Object> results = (List<Object>) query.execute(db, catName, lowered_tbl_names);
+          // Iterate through each row of the result and create the MTable object.
+          mtables = new ArrayList<>(results.size());
+          for (Object row : results) {
+            MTable mtable = new MTable();
+            MetaStoreServerUtils.setNestedProperty(mtable, projectionFields.get(0), row, true);
+            mtables.add(mtable);
+          }
+        }
+      }
+
       if (mtables == null || mtables.isEmpty()) {
-        // Need to differentiate between an unmatched pattern and a non-existent database
-        dbExistsQuery = pm.newQuery(MDatabase.class, "name == db && catalogName == cat");
-        dbExistsQuery.declareParameters("java.lang.String db, java.lang.String cat");
-        dbExistsQuery.setUnique(true);
-        dbExistsQuery.setResult("name");
-        String dbNameIfExists = (String) dbExistsQuery.execute(db, catName);
-        if (org.apache.commons.lang3.StringUtils.isEmpty(dbNameIfExists)) {
-          throw new UnknownDBException("Could not find database " +
-              DatabaseName.getQualified(catName, db));
+        Database tempDB = null;
+        NoSuchObjectException ex = null;
+        try {
+          tempDB = getDatabase(catName, db);
+        } catch(NoSuchObjectException nsoe) {
+          ex = nsoe;
+        }
+
+        if (tempDB == null) {
+          final String errorMessage = (ex == null ? "" : (": " + ex.getMessage()));
+          throw new UnknownDBException("Could not find database " + DatabaseName.getQualified(catName, db) +
+                  errorMessage);
         }
       } else {
         for (Iterator iter = mtables.iterator(); iter.hasNext(); ) {
@@ -1876,8 +1927,8 @@ public class ObjectStore implements RawStore, Configurable {
           // Retrieve creation metadata if needed
           if (TableType.MATERIALIZED_VIEW.toString().equals(tbl.getTableType())) {
             tbl.setCreationMetadata(
-                convertToCreationMetadata(
-                    getCreationMetadata(tbl.getCatName(), tbl.getDbName(), tbl.getTableName())));
+                    convertToCreationMetadata(
+                            getCreationMetadata(tbl.getCatName(), tbl.getDbName(), tbl.getTableName())));
           }
           tables.add(tbl);
         }
@@ -1885,11 +1936,14 @@ public class ObjectStore implements RawStore, Configurable {
       committed = commitTransaction();
     } finally {
       rollbackAndCleanup(committed, query);
-      if (dbExistsQuery != null) {
-        dbExistsQuery.closeAll();
-      }
     }
     return tables;
+  }
+
+  @Override
+  public List<Table> getTableObjectsByName(String catName, String db, List<String> tbl_names)
+          throws MetaException, UnknownDBException {
+    return getTableObjectsByName(catName, db, tbl_names, null);
   }
 
   /** Makes shallow copy of a list to avoid DataNucleus mucking with our objects. */
@@ -1912,7 +1966,7 @@ public class ObjectStore implements RawStore, Configurable {
       // for backwards compatibility with old metastore persistence
       if (mtbl.getViewOriginalText() != null) {
         tableType = TableType.VIRTUAL_VIEW.toString();
-      } else if (Boolean.parseBoolean(mtbl.getParameters().get("EXTERNAL"))) {
+      } else if (mtbl.getParameters() != null && Boolean.parseBoolean(mtbl.getParameters().get("EXTERNAL"))) {
         tableType = TableType.EXTERNAL_TABLE.toString();
       } else {
         tableType = TableType.MANAGED_TABLE.toString();
@@ -1920,11 +1974,11 @@ public class ObjectStore implements RawStore, Configurable {
     }
     Map<String, String> parameters = convertMap(mtbl.getParameters());
     boolean isAcidTable = TxnUtils.isAcidTable(parameters);
-    final Table t = new Table(mtbl.getTableName(), mtbl.getDatabase().getName(), mtbl
-        .getOwner(), mtbl.getCreateTime(), mtbl.getLastAccessTime(), mtbl
-        .getRetention(), convertToStorageDescriptor(mtbl.getSd(), false, isAcidTable),
-        convertToFieldSchemas(mtbl.getPartitionKeys()), parameters,
-        mtbl.getViewOriginalText(), mtbl.getViewExpandedText(), tableType);
+    final Table t = new Table(mtbl.getTableName(), mtbl.getDatabase() != null ? mtbl.getDatabase().getName() : null,
+        mtbl.getOwner(), mtbl.getCreateTime(), mtbl.getLastAccessTime(), mtbl.getRetention(),
+        convertToStorageDescriptor(mtbl.getSd(), false, isAcidTable),
+        convertToFieldSchemas(mtbl.getPartitionKeys()), parameters, mtbl.getViewOriginalText(),
+        mtbl.getViewExpandedText(), tableType);
 
     if (Strings.isNullOrEmpty(mtbl.getOwnerType())) {
       // Before the ownerType exists in an old Hive schema, USER was the default type for owner.
@@ -1936,7 +1990,7 @@ public class ObjectStore implements RawStore, Configurable {
 
     t.setId(mtbl.getId());
     t.setRewriteEnabled(mtbl.isRewriteEnabled());
-    t.setCatName(mtbl.getDatabase().getCatalogName());
+    t.setCatName(mtbl.getDatabase() != null ? mtbl.getDatabase().getCatalogName() : null);
     t.setWriteId(mtbl.getWriteId());
     return t;
   }
@@ -4230,7 +4284,7 @@ public class ObjectStore implements RawStore, Configurable {
 
   @Override
   public List<Partition> getPartitionSpecsByFilterAndProjection(final Table table,
-      GetPartitionsProjectionSpec partitionsProjectSpec,
+      GetProjectionsSpec partitionsProjectSpec,
       final GetPartitionsFilterSpec filterSpec) throws MetaException, NoSuchObjectException {
     List<String> fieldList = null;
     String inputIncludePattern = null;
@@ -9380,7 +9434,7 @@ public class ObjectStore implements RawStore, Configurable {
       GetPartitionsFilterSpec fs = new GetPartitionsFilterSpec();
       fs.setFilterMode(PartitionFilterMode.BY_NAMES);
       fs.setFilters(partNames);
-      GetPartitionsProjectionSpec ps = new GetPartitionsProjectionSpec();
+      GetProjectionsSpec ps = new GetProjectionsSpec();
       ps.setIncludeParamKeyPattern(StatsSetupConst.COLUMN_STATS_ACCURATE + '%');
       ps.setFieldList(Lists.newArrayList("writeId", "parameters", "values"));
       List<Partition> parts = getPartitionSpecsByFilterAndProjection(table, ps, fs);
@@ -10800,53 +10854,89 @@ public class ObjectStore implements RawStore, Configurable {
 
   @Override
   public void cleanNotificationEvents(int olderThan) {
-    boolean commited = false;
-    Query query = null;
-    try {
-      openTransaction();
-      long tmp = System.currentTimeMillis() / 1000 - olderThan;
-      int tooOld = (tmp > Integer.MAX_VALUE) ? 0 : (int) tmp;
-      query = pm.newQuery(MNotificationLog.class, "eventTime < tooOld");
-      query.declareParameters("java.lang.Integer tooOld");
+    final int eventBatchSize = MetastoreConf.getIntVar(conf, MetastoreConf.ConfVars.EVENT_CLEAN_MAX_EVENTS);
 
-      int max_events = MetastoreConf.getIntVar(conf, MetastoreConf.ConfVars.EVENT_CLEAN_MAX_EVENTS);
-      max_events = max_events > 0 ? max_events : Integer.MAX_VALUE;
-      query.setRange(0, max_events);
-      query.setOrdering("eventId ascending");
+    final long ageSec = olderThan;
+    final Instant now = Instant.now();
 
-      List<MNotificationLog> toBeRemoved = (List) query.execute(tooOld);
-      int iteration = 0;
-      int eventCount = 0;
-      long minEventId = 0;
-      long minEventTime = 0;
-      long maxEventId = 0;
-      long maxEventTime = 0;
-      while (CollectionUtils.isNotEmpty(toBeRemoved)) {
-        int listSize = toBeRemoved.size();
-        if (iteration == 0) {
-          MNotificationLog firstNotification = toBeRemoved.get(0);
-          minEventId = firstNotification.getEventId();
-          minEventTime = firstNotification.getEventTime();
-        }
-        MNotificationLog lastNotification = toBeRemoved.get(listSize - 1);
-        maxEventId = lastNotification.getEventId();
-        maxEventTime = lastNotification.getEventTime();
-        pm.deletePersistentAll(toBeRemoved);
-        eventCount += listSize;
-        iteration++;
-        toBeRemoved = (List) query.execute(tooOld);
-      }
-      if (iteration == 0) {
-        LOG.info("No Notification events found to be cleaned with eventTime < {}.", tooOld);
-      } else {
-        LOG.info("Notification Cleaned {} events with eventTime < {} in {} iteration, " +
-            "minimum eventId {} (with eventTime {}) and maximum eventId {} (with eventTime {})",
-            eventCount, tooOld, iteration, minEventId, minEventTime, maxEventId, maxEventTime);
-      }
-      commited = commitTransaction();
-    } finally {
-      rollbackAndCleanup(commited, query);
+    final int tooOld = Math.toIntExact(now.getEpochSecond() - ageSec);
+
+    final Optional<Integer> batchSize = (eventBatchSize > 0) ? Optional.of(eventBatchSize) : Optional.empty();
+
+    final long start = System.nanoTime();
+    int deleteCount = doCleanNotificationEvents(tooOld, batchSize);
+
+    if (deleteCount == 0) {
+      LOG.info("No Notification events found to be cleaned with eventTime < {}", tooOld);
+    } else {
+      int batchCount = 0;
+      do {
+        batchCount = doCleanNotificationEvents(tooOld, batchSize);
+        deleteCount += batchCount;
+      } while (batchCount > 0);
     }
+
+    final long finish = System.nanoTime();
+
+    LOG.info("Deleted {} notification events older than epoch:{} in {}ms", deleteCount, tooOld,
+        TimeUnit.NANOSECONDS.toMillis(finish - start));
+  }
+
+  private int doCleanNotificationEvents(final int ageSec, final Optional<Integer> batchSize) {
+    final Transaction tx = pm.currentTransaction();
+    int eventsCount = 0;
+
+    try {
+      tx.begin();
+
+      try (Query query = pm.newQuery(MNotificationLog.class, "eventTime <= tooOld")) {
+        query.declareParameters("java.lang.Integer tooOld");
+        query.setOrdering("eventId ascending");
+        if (batchSize.isPresent()) {
+          query.setRange(0, batchSize.get());
+        }
+
+        List<MNotificationLog> events = (List) query.execute(ageSec);
+        if (CollectionUtils.isNotEmpty(events)) {
+          eventsCount = events.size();
+
+          if (LOG.isDebugEnabled()) {
+            int minEventTime, maxEventTime;
+            long minEventId, maxEventId;
+            Iterator<MNotificationLog> iter = events.iterator();
+            MNotificationLog firstNotification = iter.next();
+
+            minEventTime = maxEventTime = firstNotification.getEventTime();
+            minEventId = maxEventId = firstNotification.getEventId();
+
+            while (iter.hasNext()) {
+              MNotificationLog notification = iter.next();
+              minEventTime = Math.min(minEventTime, notification.getEventTime());
+              maxEventTime = Math.max(maxEventTime, notification.getEventTime());
+              minEventId = Math.min(minEventId, notification.getEventId());
+              maxEventId = Math.max(maxEventId, notification.getEventId());
+            }
+
+            LOG.debug(
+                "Remove notification batch of {} events with eventTime < {}, min eventId {}, max eventId {}, min eventTime {}, max eventTime {}",
+                eventsCount, ageSec, minEventId, maxEventId, minEventTime, maxEventTime);
+          }
+
+          pm.deletePersistentAll(events);
+        }
+      }
+
+      tx.commit();
+    } catch (Exception e) {
+      LOG.error("Unable to delete batch of notification events", e);
+      eventsCount = 0;
+    } finally {
+      if (tx.isActive()) {
+        tx.rollback();
+      }
+    }
+
+    return eventsCount;
   }
 
   @Override

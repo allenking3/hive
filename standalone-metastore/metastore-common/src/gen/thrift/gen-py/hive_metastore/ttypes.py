@@ -17700,17 +17700,19 @@ class GetTablesRequest(object):
      - catName
      - processorCapabilities
      - processorIdentifier
+     - projectionSpec
 
     """
 
 
-    def __init__(self, dbName=None, tblNames=None, capabilities=None, catName=None, processorCapabilities=None, processorIdentifier=None,):
+    def __init__(self, dbName=None, tblNames=None, capabilities=None, catName=None, processorCapabilities=None, processorIdentifier=None, projectionSpec=None,):
         self.dbName = dbName
         self.tblNames = tblNames
         self.capabilities = capabilities
         self.catName = catName
         self.processorCapabilities = processorCapabilities
         self.processorIdentifier = processorIdentifier
+        self.projectionSpec = projectionSpec
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -17762,6 +17764,12 @@ class GetTablesRequest(object):
                     self.processorIdentifier = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
                 else:
                     iprot.skip(ftype)
+            elif fid == 7:
+                if ftype == TType.STRUCT:
+                    self.projectionSpec = GetProjectionsSpec()
+                    self.projectionSpec.read(iprot)
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -17801,6 +17809,10 @@ class GetTablesRequest(object):
         if self.processorIdentifier is not None:
             oprot.writeFieldBegin('processorIdentifier', TType.STRING, 6)
             oprot.writeString(self.processorIdentifier.encode('utf-8') if sys.version_info[0] == 2 else self.processorIdentifier)
+            oprot.writeFieldEnd()
+        if self.projectionSpec is not None:
+            oprot.writeFieldBegin('projectionSpec', TType.STRUCT, 7)
+            self.projectionSpec.write(oprot)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -23770,7 +23782,7 @@ class AlterTableResponse(object):
         return not (self == other)
 
 
-class GetPartitionsProjectionSpec(object):
+class GetProjectionsSpec(object):
     """
     Attributes:
      - fieldList
@@ -23823,7 +23835,7 @@ class GetPartitionsProjectionSpec(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('GetPartitionsProjectionSpec')
+        oprot.writeStructBegin('GetProjectionsSpec')
         if self.fieldList is not None:
             oprot.writeFieldBegin('fieldList', TType.LIST, 1)
             oprot.writeListBegin(TType.STRING, len(self.fieldList))
@@ -24076,7 +24088,7 @@ class GetPartitionsRequest(object):
                     iprot.skip(ftype)
             elif fid == 7:
                 if ftype == TType.STRUCT:
-                    self.projectionSpec = GetPartitionsProjectionSpec()
+                    self.projectionSpec = GetProjectionsSpec()
                     self.projectionSpec.read(iprot)
                 else:
                     iprot.skip(ftype)
@@ -28226,6 +28238,7 @@ GetTablesRequest.thrift_spec = (
     (4, TType.STRING, 'catName', 'UTF8', None, ),  # 4
     (5, TType.LIST, 'processorCapabilities', (TType.STRING, 'UTF8', False), None, ),  # 5
     (6, TType.STRING, 'processorIdentifier', 'UTF8', None, ),  # 6
+    (7, TType.STRUCT, 'projectionSpec', [GetProjectionsSpec, None], None, ),  # 7
 )
 all_structs.append(GetTablesResult)
 GetTablesResult.thrift_spec = (
@@ -28719,8 +28732,8 @@ AlterTableRequest.thrift_spec = (
 all_structs.append(AlterTableResponse)
 AlterTableResponse.thrift_spec = (
 )
-all_structs.append(GetPartitionsProjectionSpec)
-GetPartitionsProjectionSpec.thrift_spec = (
+all_structs.append(GetProjectionsSpec)
+GetProjectionsSpec.thrift_spec = (
     None,  # 0
     (1, TType.LIST, 'fieldList', (TType.STRING, 'UTF8', False), None, ),  # 1
     (2, TType.STRING, 'includeParamKeyPattern', 'UTF8', None, ),  # 2
@@ -28752,7 +28765,7 @@ GetPartitionsRequest.thrift_spec = (
     (4, TType.BOOL, 'withAuth', None, None, ),  # 4
     (5, TType.STRING, 'user', 'UTF8', None, ),  # 5
     (6, TType.LIST, 'groupNames', (TType.STRING, 'UTF8', False), None, ),  # 6
-    (7, TType.STRUCT, 'projectionSpec', [GetPartitionsProjectionSpec, None], None, ),  # 7
+    (7, TType.STRUCT, 'projectionSpec', [GetProjectionsSpec, None], None, ),  # 7
     (8, TType.STRUCT, 'filterSpec', [GetPartitionsFilterSpec, None], None, ),  # 8
     (9, TType.LIST, 'processorCapabilities', (TType.STRING, 'UTF8', False), None, ),  # 9
     (10, TType.STRING, 'processorIdentifier', 'UTF8', None, ),  # 10

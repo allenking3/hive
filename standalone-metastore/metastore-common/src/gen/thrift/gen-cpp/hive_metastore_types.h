@@ -908,7 +908,7 @@ class AlterTableRequest;
 
 class AlterTableResponse;
 
-class GetPartitionsProjectionSpec;
+class GetProjectionsSpec;
 
 class GetPartitionsFilterSpec;
 
@@ -11415,12 +11415,13 @@ void swap(GetTableResult &a, GetTableResult &b);
 std::ostream& operator<<(std::ostream& out, const GetTableResult& obj);
 
 typedef struct _GetTablesRequest__isset {
-  _GetTablesRequest__isset() : tblNames(false), capabilities(false), catName(false), processorCapabilities(false), processorIdentifier(false) {}
+  _GetTablesRequest__isset() : tblNames(false), capabilities(false), catName(false), processorCapabilities(false), processorIdentifier(false), projectionSpec(false) {}
   bool tblNames :1;
   bool capabilities :1;
   bool catName :1;
   bool processorCapabilities :1;
   bool processorIdentifier :1;
+  bool projectionSpec :1;
 } _GetTablesRequest__isset;
 
 class GetTablesRequest : public virtual ::apache::thrift::TBase {
@@ -11438,6 +11439,7 @@ class GetTablesRequest : public virtual ::apache::thrift::TBase {
   std::string catName;
   std::vector<std::string>  processorCapabilities;
   std::string processorIdentifier;
+  GetProjectionsSpec projectionSpec;
 
   _GetTablesRequest__isset __isset;
 
@@ -11452,6 +11454,8 @@ class GetTablesRequest : public virtual ::apache::thrift::TBase {
   void __set_processorCapabilities(const std::vector<std::string> & val);
 
   void __set_processorIdentifier(const std::string& val);
+
+  void __set_projectionSpec(const GetProjectionsSpec& val);
 
   bool operator == (const GetTablesRequest & rhs) const
   {
@@ -11476,6 +11480,10 @@ class GetTablesRequest : public virtual ::apache::thrift::TBase {
     if (__isset.processorIdentifier != rhs.__isset.processorIdentifier)
       return false;
     else if (__isset.processorIdentifier && !(processorIdentifier == rhs.processorIdentifier))
+      return false;
+    if (__isset.projectionSpec != rhs.__isset.projectionSpec)
+      return false;
+    else if (__isset.projectionSpec && !(projectionSpec == rhs.projectionSpec))
       return false;
     return true;
   }
@@ -15519,27 +15527,27 @@ void swap(AlterTableResponse &a, AlterTableResponse &b);
 
 std::ostream& operator<<(std::ostream& out, const AlterTableResponse& obj);
 
-typedef struct _GetPartitionsProjectionSpec__isset {
-  _GetPartitionsProjectionSpec__isset() : fieldList(false), includeParamKeyPattern(false), excludeParamKeyPattern(false) {}
+typedef struct _GetProjectionsSpec__isset {
+  _GetProjectionsSpec__isset() : fieldList(false), includeParamKeyPattern(false), excludeParamKeyPattern(false) {}
   bool fieldList :1;
   bool includeParamKeyPattern :1;
   bool excludeParamKeyPattern :1;
-} _GetPartitionsProjectionSpec__isset;
+} _GetProjectionsSpec__isset;
 
-class GetPartitionsProjectionSpec : public virtual ::apache::thrift::TBase {
+class GetProjectionsSpec : public virtual ::apache::thrift::TBase {
  public:
 
-  GetPartitionsProjectionSpec(const GetPartitionsProjectionSpec&);
-  GetPartitionsProjectionSpec& operator=(const GetPartitionsProjectionSpec&);
-  GetPartitionsProjectionSpec() : includeParamKeyPattern(), excludeParamKeyPattern() {
+  GetProjectionsSpec(const GetProjectionsSpec&);
+  GetProjectionsSpec& operator=(const GetProjectionsSpec&);
+  GetProjectionsSpec() : includeParamKeyPattern(), excludeParamKeyPattern() {
   }
 
-  virtual ~GetPartitionsProjectionSpec() noexcept;
+  virtual ~GetProjectionsSpec() noexcept;
   std::vector<std::string>  fieldList;
   std::string includeParamKeyPattern;
   std::string excludeParamKeyPattern;
 
-  _GetPartitionsProjectionSpec__isset __isset;
+  _GetProjectionsSpec__isset __isset;
 
   void __set_fieldList(const std::vector<std::string> & val);
 
@@ -15547,7 +15555,7 @@ class GetPartitionsProjectionSpec : public virtual ::apache::thrift::TBase {
 
   void __set_excludeParamKeyPattern(const std::string& val);
 
-  bool operator == (const GetPartitionsProjectionSpec & rhs) const
+  bool operator == (const GetProjectionsSpec & rhs) const
   {
     if (!(fieldList == rhs.fieldList))
       return false;
@@ -15557,11 +15565,11 @@ class GetPartitionsProjectionSpec : public virtual ::apache::thrift::TBase {
       return false;
     return true;
   }
-  bool operator != (const GetPartitionsProjectionSpec &rhs) const {
+  bool operator != (const GetProjectionsSpec &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const GetPartitionsProjectionSpec & ) const;
+  bool operator < (const GetProjectionsSpec & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -15569,9 +15577,9 @@ class GetPartitionsProjectionSpec : public virtual ::apache::thrift::TBase {
   virtual void printTo(std::ostream& out) const;
 };
 
-void swap(GetPartitionsProjectionSpec &a, GetPartitionsProjectionSpec &b);
+void swap(GetProjectionsSpec &a, GetProjectionsSpec &b);
 
-std::ostream& operator<<(std::ostream& out, const GetPartitionsProjectionSpec& obj);
+std::ostream& operator<<(std::ostream& out, const GetProjectionsSpec& obj);
 
 typedef struct _GetPartitionsFilterSpec__isset {
   _GetPartitionsFilterSpec__isset() : filterMode(false), filters(false) {}
@@ -15697,7 +15705,7 @@ class GetPartitionsRequest : public virtual ::apache::thrift::TBase {
   bool withAuth;
   std::string user;
   std::vector<std::string>  groupNames;
-  GetPartitionsProjectionSpec projectionSpec;
+  GetProjectionsSpec projectionSpec;
   GetPartitionsFilterSpec filterSpec;
   std::vector<std::string>  processorCapabilities;
   std::string processorIdentifier;
@@ -15717,7 +15725,7 @@ class GetPartitionsRequest : public virtual ::apache::thrift::TBase {
 
   void __set_groupNames(const std::vector<std::string> & val);
 
-  void __set_projectionSpec(const GetPartitionsProjectionSpec& val);
+  void __set_projectionSpec(const GetProjectionsSpec& val);
 
   void __set_filterSpec(const GetPartitionsFilterSpec& val);
 

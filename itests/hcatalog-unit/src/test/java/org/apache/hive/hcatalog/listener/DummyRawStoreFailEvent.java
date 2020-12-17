@@ -20,7 +20,7 @@ package org.apache.hive.hcatalog.listener;
 
 import org.apache.hadoop.hive.common.TableName;
 import org.apache.hadoop.hive.metastore.api.GetPartitionsFilterSpec;
-import org.apache.hadoop.hive.metastore.api.GetPartitionsProjectionSpec;
+import org.apache.hadoop.hive.metastore.api.GetProjectionsSpec;
 import org.apache.hadoop.hive.metastore.api.ISchemaName;
 import org.apache.hadoop.hive.metastore.api.ListStoredProcedureRequest;
 import org.apache.hadoop.hive.metastore.api.SQLAllTableConstraints;
@@ -383,6 +383,12 @@ public class DummyRawStoreFailEvent implements RawStore, Configurable {
   }
 
   @Override
+  public List<Table> getTableObjectsByName(String catName, String dbName, List<String> tableNames,
+          GetProjectionsSpec projectionSpec) throws MetaException, UnknownDBException {
+    return objectStore.getTableObjectsByName(catName, dbName, tableNames, projectionSpec);
+  }
+
+  @Override
   public List<String> getAllTables(String catName, String dbName) throws MetaException {
     return objectStore.getAllTables(catName, dbName);
   }
@@ -447,7 +453,7 @@ public class DummyRawStoreFailEvent implements RawStore, Configurable {
 
   @Override
   public List<Partition> getPartitionSpecsByFilterAndProjection(Table table,
-      GetPartitionsProjectionSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
+      GetProjectionsSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
       throws MetaException, NoSuchObjectException {
     return objectStore.getPartitionSpecsByFilterAndProjection(table, projectionSpec, filterSpec);
   }

@@ -445,6 +445,22 @@ public interface RawStore extends Configurable {
       throws MetaException, UnknownDBException;
 
   /**
+   * @param catName catalog name
+   * @param dbname
+   *        The name of the database from which to retrieve the tables
+   * @param tableNames
+   *        The names of the tables to retrieve.
+   * @param projectionSpec
+   *        Projection Specification containing the columns that need to be returned.
+   * @return A list of the tables retrievable from the database
+   *          whose names are in the list tableNames.
+   *         If there are duplicate names, only one instance of the table will be returned
+   * @throws MetaException failure in querying the RDBMS.
+   */
+  List<Table> getTableObjectsByName(String catName, String dbname, List<String> tableNames,
+                                    GetProjectionsSpec projectionSpec) throws MetaException, UnknownDBException;
+
+  /**
    * Get all tables in a database.
    * @param catName catalog name.
    * @param dbName database name.
@@ -596,7 +612,7 @@ public interface RawStore extends Configurable {
    * @throws NoSuchObjectException when table isn't found
    */
   List<Partition> getPartitionSpecsByFilterAndProjection(Table table,
-      GetPartitionsProjectionSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
+      GetProjectionsSpec projectionSpec, GetPartitionsFilterSpec filterSpec)
       throws MetaException, NoSuchObjectException;
   /**
    * Get partitions using an already parsed expression.
@@ -1329,7 +1345,8 @@ public interface RawStore extends Configurable {
 
   /**
    * Remove older notification events.
-   * @param olderThan Remove any events older than a given number of seconds
+   *
+   * @param olderThan Remove any events older or equal to a given number of seconds
    */
   void cleanNotificationEvents(int olderThan);
 

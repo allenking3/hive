@@ -30853,6 +30853,11 @@ void GetTablesRequest::__set_processorIdentifier(const std::string& val) {
   this->processorIdentifier = val;
 __isset.processorIdentifier = true;
 }
+
+void GetTablesRequest::__set_projectionSpec(const GetProjectionsSpec& val) {
+  this->projectionSpec = val;
+__isset.projectionSpec = true;
+}
 std::ostream& operator<<(std::ostream& out, const GetTablesRequest& obj)
 {
   obj.printTo(out);
@@ -30954,6 +30959,14 @@ uint32_t GetTablesRequest::read(::apache::thrift::protocol::TProtocol* iprot) {
           xfer += iprot->skip(ftype);
         }
         break;
+      case 7:
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += this->projectionSpec.read(iprot);
+          this->__isset.projectionSpec = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
       default:
         xfer += iprot->skip(ftype);
         break;
@@ -31018,6 +31031,11 @@ uint32_t GetTablesRequest::write(::apache::thrift::protocol::TProtocol* oprot) c
     xfer += oprot->writeString(this->processorIdentifier);
     xfer += oprot->writeFieldEnd();
   }
+  if (this->__isset.projectionSpec) {
+    xfer += oprot->writeFieldBegin("projectionSpec", ::apache::thrift::protocol::T_STRUCT, 7);
+    xfer += this->projectionSpec.write(oprot);
+    xfer += oprot->writeFieldEnd();
+  }
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
   return xfer;
@@ -31031,6 +31049,7 @@ void swap(GetTablesRequest &a, GetTablesRequest &b) {
   swap(a.catName, b.catName);
   swap(a.processorCapabilities, b.processorCapabilities);
   swap(a.processorIdentifier, b.processorIdentifier);
+  swap(a.projectionSpec, b.projectionSpec);
   swap(a.__isset, b.__isset);
 }
 
@@ -31041,6 +31060,7 @@ GetTablesRequest::GetTablesRequest(const GetTablesRequest& other1156) {
   catName = other1156.catName;
   processorCapabilities = other1156.processorCapabilities;
   processorIdentifier = other1156.processorIdentifier;
+  projectionSpec = other1156.projectionSpec;
   __isset = other1156.__isset;
 }
 GetTablesRequest& GetTablesRequest::operator=(const GetTablesRequest& other1157) {
@@ -31050,6 +31070,7 @@ GetTablesRequest& GetTablesRequest::operator=(const GetTablesRequest& other1157)
   catName = other1157.catName;
   processorCapabilities = other1157.processorCapabilities;
   processorIdentifier = other1157.processorIdentifier;
+  projectionSpec = other1157.projectionSpec;
   __isset = other1157.__isset;
   return *this;
 }
@@ -31062,6 +31083,7 @@ void GetTablesRequest::printTo(std::ostream& out) const {
   out << ", " << "catName="; (__isset.catName ? (out << to_string(catName)) : (out << "<null>"));
   out << ", " << "processorCapabilities="; (__isset.processorCapabilities ? (out << to_string(processorCapabilities)) : (out << "<null>"));
   out << ", " << "processorIdentifier="; (__isset.processorIdentifier ? (out << to_string(processorIdentifier)) : (out << "<null>"));
+  out << ", " << "projectionSpec="; (__isset.projectionSpec ? (out << to_string(projectionSpec)) : (out << "<null>"));
   out << ")";
 }
 
@@ -41393,29 +41415,29 @@ void AlterTableResponse::printTo(std::ostream& out) const {
 }
 
 
-GetPartitionsProjectionSpec::~GetPartitionsProjectionSpec() noexcept {
+GetProjectionsSpec::~GetProjectionsSpec() noexcept {
 }
 
 
-void GetPartitionsProjectionSpec::__set_fieldList(const std::vector<std::string> & val) {
+void GetProjectionsSpec::__set_fieldList(const std::vector<std::string> & val) {
   this->fieldList = val;
 }
 
-void GetPartitionsProjectionSpec::__set_includeParamKeyPattern(const std::string& val) {
+void GetProjectionsSpec::__set_includeParamKeyPattern(const std::string& val) {
   this->includeParamKeyPattern = val;
 }
 
-void GetPartitionsProjectionSpec::__set_excludeParamKeyPattern(const std::string& val) {
+void GetProjectionsSpec::__set_excludeParamKeyPattern(const std::string& val) {
   this->excludeParamKeyPattern = val;
 }
-std::ostream& operator<<(std::ostream& out, const GetPartitionsProjectionSpec& obj)
+std::ostream& operator<<(std::ostream& out, const GetProjectionsSpec& obj)
 {
   obj.printTo(out);
   return out;
 }
 
 
-uint32_t GetPartitionsProjectionSpec::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t GetProjectionsSpec::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -41484,10 +41506,10 @@ uint32_t GetPartitionsProjectionSpec::read(::apache::thrift::protocol::TProtocol
   return xfer;
 }
 
-uint32_t GetPartitionsProjectionSpec::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t GetProjectionsSpec::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("GetPartitionsProjectionSpec");
+  xfer += oprot->writeStructBegin("GetProjectionsSpec");
 
   xfer += oprot->writeFieldBegin("fieldList", ::apache::thrift::protocol::T_LIST, 1);
   {
@@ -41514,7 +41536,7 @@ uint32_t GetPartitionsProjectionSpec::write(::apache::thrift::protocol::TProtoco
   return xfer;
 }
 
-void swap(GetPartitionsProjectionSpec &a, GetPartitionsProjectionSpec &b) {
+void swap(GetProjectionsSpec &a, GetProjectionsSpec &b) {
   using ::std::swap;
   swap(a.fieldList, b.fieldList);
   swap(a.includeParamKeyPattern, b.includeParamKeyPattern);
@@ -41522,22 +41544,22 @@ void swap(GetPartitionsProjectionSpec &a, GetPartitionsProjectionSpec &b) {
   swap(a.__isset, b.__isset);
 }
 
-GetPartitionsProjectionSpec::GetPartitionsProjectionSpec(const GetPartitionsProjectionSpec& other1473) {
+GetProjectionsSpec::GetProjectionsSpec(const GetProjectionsSpec& other1473) {
   fieldList = other1473.fieldList;
   includeParamKeyPattern = other1473.includeParamKeyPattern;
   excludeParamKeyPattern = other1473.excludeParamKeyPattern;
   __isset = other1473.__isset;
 }
-GetPartitionsProjectionSpec& GetPartitionsProjectionSpec::operator=(const GetPartitionsProjectionSpec& other1474) {
+GetProjectionsSpec& GetProjectionsSpec::operator=(const GetProjectionsSpec& other1474) {
   fieldList = other1474.fieldList;
   includeParamKeyPattern = other1474.includeParamKeyPattern;
   excludeParamKeyPattern = other1474.excludeParamKeyPattern;
   __isset = other1474.__isset;
   return *this;
 }
-void GetPartitionsProjectionSpec::printTo(std::ostream& out) const {
+void GetProjectionsSpec::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
-  out << "GetPartitionsProjectionSpec(";
+  out << "GetProjectionsSpec(";
   out << "fieldList=" << to_string(fieldList);
   out << ", " << "includeParamKeyPattern=" << to_string(includeParamKeyPattern);
   out << ", " << "excludeParamKeyPattern=" << to_string(excludeParamKeyPattern);
@@ -41827,7 +41849,7 @@ void GetPartitionsRequest::__set_groupNames(const std::vector<std::string> & val
 __isset.groupNames = true;
 }
 
-void GetPartitionsRequest::__set_projectionSpec(const GetPartitionsProjectionSpec& val) {
+void GetPartitionsRequest::__set_projectionSpec(const GetProjectionsSpec& val) {
   this->projectionSpec = val;
 }
 

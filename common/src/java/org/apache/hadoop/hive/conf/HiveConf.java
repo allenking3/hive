@@ -613,12 +613,18 @@ public class HiveConf extends Configuration {
       true,
       "This configuration will add a deny policy on the target database for all users except hive"
         + " to avoid any update to the target database"),
+    REPL_RANGER_CLIENT_READ_TIMEOUT("hive.repl.ranger.client.read.timeout", "300s",
+            new TimeValidator(TimeUnit.SECONDS), "Ranger client read timeout for Ranger REST API calls."),
     REPL_INCLUDE_ATLAS_METADATA("hive.repl.include.atlas.metadata", false,
             "Indicates if Atlas metadata should be replicated along with Hive data and metadata or not."),
     REPL_ATLAS_ENDPOINT("hive.repl.atlas.endpoint", null,
             "Atlas endpoint of the current cluster hive database is getting replicated from/to."),
     REPL_ATLAS_REPLICATED_TO_DB("hive.repl.atlas.replicatedto", null,
             "Target hive database name Atlas metadata of source hive database is being replicated to."),
+    REPL_ATLAS_CLIENT_READ_TIMEOUT("hive.repl.atlas.client.read.timeout", "7200s",
+            new TimeValidator(TimeUnit.SECONDS), "Atlas client read timeout for Atlas REST API calls."),
+    REPL_EXTERNAL_CLIENT_CONNECT_TIMEOUT("hive.repl.external.client.connect.timeout", "10s",
+            new TimeValidator(TimeUnit.SECONDS), "Client connect timeout for REST API calls to external service."),
     REPL_SOURCE_CLUSTER_NAME("hive.repl.source.cluster.name", null,
             "Name of the source cluster for the replication."),
     REPL_TARGET_CLUSTER_NAME("hive.repl.target.cluster.name", null,
@@ -1838,6 +1844,9 @@ public class HiveConf extends Configuration {
     // materialized views
     HIVE_MATERIALIZED_VIEW_ENABLE_AUTO_REWRITING("hive.materializedview.rewriting", true,
         "Whether to try to rewrite queries using the materialized views enabled for rewriting"),
+    HIVE_MATERIALIZED_VIEW_ENABLE_AUTO_REWRITING_SQL("hive.materializedview.rewriting.sql", true,
+        "Whether to try to rewrite queries using the materialized views enabled for rewriting by comparing the sql " +
+                "query text with the materialized views query text"),
     HIVE_MATERIALIZED_VIEW_REWRITING_SELECTION_STRATEGY("hive.materializedview.rewriting.strategy", "heuristic",
         new StringSet("heuristic", "costbased"),
         "The strategy that should be used to cost and select the materialized view rewriting. \n" +
@@ -1924,6 +1933,8 @@ public class HiveConf extends Configuration {
     HIVEMAPAGGRHASHMINREDUCTION("hive.map.aggr.hash.min.reduction", (float) 0.99,
         "Hash aggregation will be turned off if the ratio between hash  table size and input rows is bigger than this number. \n" +
         "Set to 1 to make sure hash aggregation is never turned off."),
+    HIVEMAPAGGRHASHMINREDUCTIONLOWERBOUND("hive.map.aggr.hash.min.reduction.lower.bound", (float) 0.4,
+        "Lower bound of Hash aggregate reduction filter. See also: hive.map.aggr.hash.min.reduction"),
     HIVEMAPAGGRHASHMINREDUCTIONSTATSADJUST("hive.map.aggr.hash.min.reduction.stats", true,
         "Whether the value for hive.map.aggr.hash.min.reduction should be set statically using stats estimates. \n" +
         "If this is enabled, the default value for hive.map.aggr.hash.min.reduction is only used as an upper-bound\n" +
@@ -2595,6 +2606,8 @@ public class HiveConf extends Configuration {
     HIVE_SHARED_WORK_DPPUNION_OPTIMIZATION("hive.optimize.shared.work.dppunion", true,
         "Enables dppops unioning. This optimization will enable to merge multiple tablescans with different "
             + "dynamic filters into a single one (with a more complex filter)"),
+    HIVE_SHARED_WORK_DPPUNION_MERGE_EVENTOPS("hive.optimize.shared.work.dppunion.merge.eventops", true,
+        "Enables DPPUnion to merge EventOperators (right now this is used during DynamicPartitionPruning)"),
     HIVE_SHARED_WORK_DOWNSTREAM_MERGE("hive.optimize.shared.work.downstream.merge", true,
         "Analyzes and merges equiv downstream operators after a successful shared work optimization step."),
     HIVE_COMBINE_EQUIVALENT_WORK_OPTIMIZATION("hive.combine.equivalent.work.optimization", true, "Whether to " +
@@ -3113,8 +3126,8 @@ public class HiveConf extends Configuration {
     HIVE_COMPACTOR_COMPACT_MM("hive.compactor.compact.insert.only", true,
         "Whether the compactor should compact insert-only tables. A safety switch."),
     COMPACTOR_CRUD_QUERY_BASED("hive.compactor.crud.query.based", false,
-        "Means Major compaction on full CRUD tables is done as a query, "
-        + "and minor compaction will be disabled."),
+        "Means compaction on full CRUD tables is done via queries. "
+        + "Compactions on insert-only tables will always run via queries regardless of the value of this configuration."),
     SPLIT_GROUPING_MODE("hive.split.grouping.mode", "query", new StringSet("query", "compactor"),
         "This is set to compactor from within the query based compactor. This enables the Tez SplitGrouper "
         + "to group splits based on their bucket number, so that all rows from different bucket files "
@@ -3544,6 +3557,8 @@ public class HiveConf extends Configuration {
         "partition columns or non-partition columns while displaying columns in describe\n" +
         "table. From 0.12 onwards, they are displayed separately. This flag will let you\n" +
         "get old behavior, if desired. See, test-case in patch for HIVE-6689."),
+    HIVE_LINEAGE_INFO("hive.lineage.hook.info.enabled", false,
+        "Whether Hive provides lineage information to hooks."),
 
     HIVE_SSL_PROTOCOL_BLACKLIST("hive.ssl.protocol.blacklist", "SSLv2,SSLv3",
         "SSL Versions to disable for all Hive Servers"),
@@ -4581,6 +4596,11 @@ public class HiveConf extends Configuration {
         new TimeValidator(TimeUnit.SECONDS),
         "How frequently (in seconds) LLAP should check for buffers marked for proactive eviction and" +
          "proceed with their eviction."),
+    LLAP_IO_PROACTIVE_EVICTION_INSTANT_DEALLOC("hive.llap.io.proactive.eviction.instant.dealloc", false,
+        "Experimental feature: when set to true, buffer deallocation will happen as soon as proactive eviction " +
+         "notifications are received by the daemon. Sweep phase of proactive eviction will only do the cache policy " +
+         "cleanup in this case. This can increase cache hit ratio but might scale bad in a workload that generates " +
+         "many proactive eviction events."),
     LLAP_IO_SHARE_OBJECT_POOLS("hive.llap.io.share.object.pools", false,
         "Whether to used shared object pools in LLAP IO. A safety flag."),
     LLAP_AUTO_ALLOW_UBER("hive.llap.auto.allow.uber", false,
@@ -4910,8 +4930,9 @@ public class HiveConf extends Configuration {
       "Sleep duration (in milliseconds) to wait before retrying on error when obtaining a\n" +
       "connection to LLAP daemon from Tez AM.",
       "llap.task.communicator.connection.sleep-between-retries-millis"),
-    LLAP_TASK_UMBILICAL_SERVER_PORT("hive.llap.daemon.umbilical.port", 0,
-      "LLAP task umbilical server RPC port"),
+    LLAP_TASK_UMBILICAL_SERVER_PORT("hive.llap.daemon.umbilical.port", "0",
+      "LLAP task umbilical server RPC port or range of ports to try in case "
+          + "the first port is occupied"),
     LLAP_DAEMON_WEB_PORT("hive.llap.daemon.web.port", 15002, "LLAP daemon web UI port.",
       "llap.daemon.service.port"),
     LLAP_DAEMON_WEB_SSL("hive.llap.daemon.web.ssl", false,

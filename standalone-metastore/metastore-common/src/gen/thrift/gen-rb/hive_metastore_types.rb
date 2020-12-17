@@ -732,7 +732,7 @@ class AlterTableRequest; end
 
 class AlterTableResponse; end
 
-class GetPartitionsProjectionSpec; end
+class GetProjectionsSpec; end
 
 class GetPartitionsFilterSpec; end
 
@@ -5040,6 +5040,7 @@ class GetTablesRequest
   CATNAME = 4
   PROCESSORCAPABILITIES = 5
   PROCESSORIDENTIFIER = 6
+  PROJECTIONSPEC = 7
 
   FIELDS = {
     DBNAME => {:type => ::Thrift::Types::STRING, :name => 'dbName'},
@@ -5047,7 +5048,8 @@ class GetTablesRequest
     CAPABILITIES => {:type => ::Thrift::Types::STRUCT, :name => 'capabilities', :class => ::ClientCapabilities, :optional => true},
     CATNAME => {:type => ::Thrift::Types::STRING, :name => 'catName', :optional => true},
     PROCESSORCAPABILITIES => {:type => ::Thrift::Types::LIST, :name => 'processorCapabilities', :element => {:type => ::Thrift::Types::STRING}, :optional => true},
-    PROCESSORIDENTIFIER => {:type => ::Thrift::Types::STRING, :name => 'processorIdentifier', :optional => true}
+    PROCESSORIDENTIFIER => {:type => ::Thrift::Types::STRING, :name => 'processorIdentifier', :optional => true},
+    PROJECTIONSPEC => {:type => ::Thrift::Types::STRUCT, :name => 'projectionSpec', :class => ::GetProjectionsSpec, :optional => true}
   }
 
   def struct_fields; FIELDS; end
@@ -6609,7 +6611,7 @@ class AlterTableResponse
   ::Thrift::Struct.generate_accessors self
 end
 
-class GetPartitionsProjectionSpec
+class GetProjectionsSpec
   include ::Thrift::Struct, ::Thrift::Struct_Union
   FIELDLIST = 1
   INCLUDEPARAMKEYPATTERN = 2
@@ -6687,7 +6689,7 @@ class GetPartitionsRequest
     WITHAUTH => {:type => ::Thrift::Types::BOOL, :name => 'withAuth', :optional => true},
     USER => {:type => ::Thrift::Types::STRING, :name => 'user', :optional => true},
     GROUPNAMES => {:type => ::Thrift::Types::LIST, :name => 'groupNames', :element => {:type => ::Thrift::Types::STRING}, :optional => true},
-    PROJECTIONSPEC => {:type => ::Thrift::Types::STRUCT, :name => 'projectionSpec', :class => ::GetPartitionsProjectionSpec},
+    PROJECTIONSPEC => {:type => ::Thrift::Types::STRUCT, :name => 'projectionSpec', :class => ::GetProjectionsSpec},
     FILTERSPEC => {:type => ::Thrift::Types::STRUCT, :name => 'filterSpec', :class => ::GetPartitionsFilterSpec},
     PROCESSORCAPABILITIES => {:type => ::Thrift::Types::LIST, :name => 'processorCapabilities', :element => {:type => ::Thrift::Types::STRING}, :optional => true},
     PROCESSORIDENTIFIER => {:type => ::Thrift::Types::STRING, :name => 'processorIdentifier', :optional => true},

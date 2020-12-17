@@ -1454,7 +1454,8 @@ struct GetTablesRequest {
   3: optional ClientCapabilities capabilities,
   4: optional string catName,
   5: optional list<string> processorCapabilities,
-  6: optional string processorIdentifier
+  6: optional string processorIdentifier,
+  7: optional GetProjectionsSpec projectionSpec
 }
 
 struct GetTablesResult {
@@ -1939,7 +1940,7 @@ struct AlterTableResponse {
  * Partitions can be filtered by names, by values or by partition expressions.
  */
 
-struct GetPartitionsProjectionSpec {
+struct GetProjectionsSpec {
    // fieldList is a list of dot separated strings which represent the fields which must be returned.
    // Any other field which is not in the fieldList may be unset in the returned partitions (it
    //   is up to the implementation to decide whether it chooses to include or exclude such fields).
@@ -1951,9 +1952,11 @@ struct GetPartitionsProjectionSpec {
    1: list<string> fieldList;
    // SQL-92 compliant regex pattern for param keys to be included
    // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
+   // Currently this is unsupported when fetching tables.
    2: string includeParamKeyPattern;
    // SQL-92 compliant regex pattern for param keys to be excluded
    // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
+   // Current this is unsupported  when fetching tables.
    3: string excludeParamKeyPattern;
 }
 
@@ -1979,8 +1982,8 @@ struct GetPartitionsRequest {
    4: optional bool withAuth,
    5: optional string user,
    6: optional list<string> groupNames,
-   7: GetPartitionsProjectionSpec projectionSpec
-   8: GetPartitionsFilterSpec filterSpec, // TODO not yet implemented. Must be present but ignored
+   7: GetProjectionsSpec projectionSpec
+   8: GetPartitionsFilterSpec filterSpec,
    9: optional list<string> processorCapabilities,
    10: optional string processorIdentifier,
    11: optional string validWriteIdList

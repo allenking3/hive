@@ -599,6 +599,9 @@ public class HiveMetaStoreClientPreCatalog implements IMetaStoreClient, AutoClos
     try {
       if (null != client) {
         client.shutdown();
+        if ((transport == null) || !transport.isOpen()) {
+          LOG.info("Closed a connection to metastore, current connections: " + connCount.decrementAndGet());
+        }
       }
     } catch (TException e) {
       LOG.debug("Unable to shutdown metastore client. Will try closing transport directly.", e);
@@ -3266,6 +3269,13 @@ public class HiveMetaStoreClientPreCatalog implements IMetaStoreClient, AutoClos
   public List<Table> getTableObjectsByName(String catName, String dbName,
                                            List<String> tableNames) throws MetaException,
       InvalidOperationException, UnknownDBException, TException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public List<Table> getTables(String catName, String dbName, List<String> tableNames,
+                                           GetProjectionsSpec projectionsSpec) throws MetaException,
+          InvalidOperationException, UnknownDBException, TException {
     throw new UnsupportedOperationException();
   }
 

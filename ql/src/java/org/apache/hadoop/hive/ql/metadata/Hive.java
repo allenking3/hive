@@ -31,6 +31,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.META_TABLE_STORAGE;
 import static org.apache.hadoop.hive.metastore.utils.MetaStoreUtils.getDefaultCatalog;
 import static org.apache.hadoop.hive.ql.io.AcidUtils.getFullTableName;
+import static org.apache.hadoop.hive.ql.optimizer.calcite.rules.views.HiveMaterializedViewUtils.extractTable;
 import static org.apache.hadoop.hive.serde.serdeConstants.SERIALIZATION_FORMAT;
 import static org.apache.hadoop.hive.serde.serdeConstants.STRING_TYPE_NAME;
 
@@ -1682,13 +1683,7 @@ public class Hive {
       List<RelOptMaterialization> result = new ArrayList<>();
       for (RelOptMaterialization materialization : materializedViews) {
         final RelNode viewScan = materialization.tableRel;
-        final Table materializedViewTable;
-        if (viewScan instanceof Project) {
-          // There is a Project on top (due to nullability)
-          materializedViewTable = ((RelOptHiveTable) viewScan.getInput(0).getTable()).getHiveTableMD();
-        } else {
-          materializedViewTable = ((RelOptHiveTable) viewScan.getTable()).getHiveTableMD();
-        }
+        final Table materializedViewTable = extractTable(materialization);
         final Boolean outdated = HiveMaterializedViewUtils.isOutdatedMaterializedView(
             materializedViewTable, currentTxnWriteIds, defaultTimeWindow, tablesUsed, false);
         if (outdated == null) {
@@ -1885,7 +1880,7 @@ public class Hive {
             HiveMaterializedViewsRegistry.get().getRewritingMaterializedView(
                 materializedViewTable.getDbName(), materializedViewTable.getTableName());
         if (materialization != null) {
-          Table cachedMaterializedViewTable = HiveMaterializedViewUtils.extractTable(materialization);
+          Table cachedMaterializedViewTable = extractTable(materialization);
           if (cachedMaterializedViewTable.equals(materializedViewTable)) {
             // It is in the cache and up to date
             if (outdated) {
@@ -1940,6 +1935,58 @@ public class Hive {
           .stream()
           .map(Table::new)
           .collect(Collectors.toList());
+    } catch (Exception e) {
+      throw new HiveException(e);
+    }
+  }
+
+  /**
+   * Get the materialized views from the metastore or from the registry which has the same query definition as the
+   * specified sql query text. It is guaranteed that it will always return an up-to-date version wrt metastore.
+   * This method filters out outdated Materialized views. It compares the transaction ids of the passed usedTables and
+   * the materialized view using the txnMgr.
+   * @param querySql extended query text (has fully qualified identifiers)
+   * @param tablesUsed List of tables to verify whether materialized view is outdated
+   * @param txnMgr Transaction manager to get open transactions affects used tables.
+   * @return List of materialized views has matching query definition with querySql
+   * @throws HiveException - an exception is thrown during validation or unable to pull transaction ids
+   */
+  public List<RelOptMaterialization> getMaterializedViewsBySql(
+          String querySql, List<String> tablesUsed, HiveTxnManager txnMgr) throws HiveException {
+
+    List<RelOptMaterialization> materializedViews =
+            HiveMaterializedViewsRegistry.get().getRewritingMaterializedViews(querySql);
+    if (materializedViews.isEmpty()) {
+      return Collections.emptyList();
+    }
+
+    final String validTxnsList = conf.get(ValidTxnList.VALID_TXNS_KEY);
+    final ValidTxnWriteIdList currentTxnWriteIds = txnMgr.getValidWriteIds(tablesUsed, validTxnsList);
+    final long defaultTimeWindow =
+            HiveConf.getTimeVar(conf, HiveConf.ConfVars.HIVE_MATERIALIZED_VIEW_REWRITING_TIME_WINDOW,
+                    TimeUnit.MILLISECONDS);
+    try {
+      // Final result
+      List<RelOptMaterialization> result = new ArrayList<>();
+      for (RelOptMaterialization materialization : materializedViews) {
+        Table materializedViewTable = extractTable(materialization);
+        final Boolean outdated = HiveMaterializedViewUtils.isOutdatedMaterializedView(
+                materializedViewTable, currentTxnWriteIds, defaultTimeWindow, tablesUsed, false);
+        if (outdated == null) {
+          LOG.debug("Unable to determine if Materialized view " + materializedViewTable.getFullyQualifiedName() +
+                  " contents are outdated. It may uses external tables?");
+          continue;
+        }
+
+        if (outdated) {
+          LOG.debug("Materialized view " + materializedViewTable.getFullyQualifiedName() +
+                  " ignored for rewriting as its contents are outdated");
+          continue;
+        }
+
+        result.add(materialization);
+      }
+      return result;
     } catch (Exception e) {
       throw new HiveException(e);
     }
@@ -2506,11 +2553,16 @@ public class Hive {
     return destPath;
   }
 
-  public static void listFilesInsideAcidDirectory(Path acidDir, FileSystem srcFs, List<Path> newFiles)
+  public static void listFilesInsideAcidDirectory(Path acidDir, FileSystem srcFs, List<Path> newFiles, PathFilter filter)
           throws IOException {
     // list out all the files/directory in the path
-    FileStatus[] acidFiles;
-    acidFiles = srcFs.listStatus(acidDir);
+    FileStatus[] acidFiles = null;
+    if (filter != null) {
+      acidFiles = srcFs.listStatus(acidDir, filter);
+    } else {
+      acidFiles = srcFs.listStatus(acidDir);
+    }
+
     if (acidFiles == null) {
       LOG.debug("No files added by this query in: " + acidDir);
       return;
@@ -2521,19 +2573,19 @@ public class Hive {
       if (!acidFile.isDirectory()) {
         newFiles.add(acidFile.getPath());
       } else {
-        listFilesInsideAcidDirectory(acidFile.getPath(), srcFs, newFiles);
+        listFilesInsideAcidDirectory(acidFile.getPath(), srcFs, newFiles, null);
       }
     }
   }
 
-  private void listFilesCreatedByQuery(Path loadPath, long writeId, int stmtId,
-                                             boolean isInsertOverwrite, List<Path> newFiles) throws HiveException {
-    Path acidDir = new Path(loadPath, AcidUtils.baseOrDeltaSubdir(isInsertOverwrite, writeId, writeId, stmtId));
+  private void listFilesCreatedByQuery(Path loadPath, long writeId, int stmtId, boolean isInsertOverwrite,
+      List<Path> newFiles) throws HiveException {
     try {
       FileSystem srcFs = loadPath.getFileSystem(conf);
-      listFilesInsideAcidDirectory(acidDir, srcFs, newFiles);
+      PathFilter filter = new AcidUtils.IdPathFilter(writeId, stmtId);
+      listFilesInsideAcidDirectory(loadPath, srcFs, newFiles, filter);
     } catch (FileNotFoundException e) {
-      LOG.info("directory does not exist: " + acidDir);
+      LOG.info("directory does not exist: " + loadPath);
     } catch (IOException e) {
       LOG.error("Error listing files", e);
       throw new HiveException(e);
@@ -2692,9 +2744,9 @@ private void constructOneLBLocationMap(FileStatus fSta,
    * @return Set of valid partitions
    * @throws HiveException
    */
-  private Set<Path> getValidPartitionsInPath(
-      int numDP, int numLB, Path loadPath, Long writeId, int stmtId,
-      boolean isMmTable, boolean isInsertOverwrite, boolean isDirectInsert) throws HiveException {
+  private Set<Path> getValidPartitionsInPath(int numDP, int numLB, Path loadPath, Long writeId, int stmtId,
+      boolean isMmTable, boolean isInsertOverwrite, boolean isDirectInsert, AcidUtils.Operation operation,
+      Set<String> dynamiPartitionSpecs) throws HiveException {
     Set<Path> validPartitions = new HashSet<Path>();
     try {
       FileSystem fs = loadPath.getFileSystem(conf);
@@ -2716,14 +2768,26 @@ private void constructOneLBLocationMap(FileStatus fSta,
         //       we have multiple statements anyway is union.
         Utilities.FILE_OP_LOGGER.trace(
             "Looking for dynamic partitions in {} ({} levels)", loadPath, numDP);
+        int stmtIdToUse = -1;
+        if (isDirectInsert) {
+          stmtIdToUse = stmtId;
+        }
         Path[] leafStatus = Utilities.getDirectInsertDirectoryCandidates(
-            fs, loadPath, numDP, null, writeId, -1, conf, isInsertOverwrite);
+            fs, loadPath, numDP, null, writeId, stmtIdToUse, conf, isInsertOverwrite, operation);
         for (Path p : leafStatus) {
           Path dpPath = p.getParent(); // Skip the MM directory that we have found.
           if (Utilities.FILE_OP_LOGGER.isTraceEnabled()) {
             Utilities.FILE_OP_LOGGER.trace("Found DP " + dpPath);
           }
-          validPartitions.add(dpPath);
+          String partitionSpec = dpPath.toString().substring(loadPath.toString().length() + 1);
+          if (isInsertOverwrite) {
+            if (dynamiPartitionSpecs == null || dynamiPartitionSpecs.contains(partitionSpec)) {
+              validPartitions.add(dpPath);
+            }
+          }
+          else {
+            validPartitions.add(dpPath);
+          }
         }
       }
     } catch (IOException e) {
@@ -2764,7 +2828,7 @@ private void constructOneLBLocationMap(FileStatus fSta,
       final String tableName, final Map<String, String> partSpec, final LoadFileType loadFileType,
       final int numDP, final int numLB, final boolean isAcid, final long writeId, final int stmtId,
       final boolean resetStatistics, final AcidUtils.Operation operation,
-      boolean isInsertOverwrite, boolean isDirectInsert) throws HiveException {
+      boolean isInsertOverwrite, boolean isDirectInsert, Set<String> dynamiPartitionSpecs) throws HiveException {
 
     PerfLogger perfLogger = SessionState.getPerfLogger();
     perfLogger.perfLogBegin("MoveTask", PerfLogger.LOAD_DYNAMIC_PARTITIONS);
@@ -2772,7 +2836,7 @@ private void constructOneLBLocationMap(FileStatus fSta,
     // Get all valid partition paths and existing partitions for them (if any)
     final Table tbl = getTable(tableName);
     final Set<Path> validPartitions = getValidPartitionsInPath(numDP, numLB, loadPath, writeId, stmtId,
-        AcidUtils.isInsertOnlyTable(tbl.getParameters()), isInsertOverwrite, isDirectInsert);
+        AcidUtils.isInsertOnlyTable(tbl.getParameters()), isInsertOverwrite, isDirectInsert, operation, dynamiPartitionSpecs);
 
     final int partsToLoad = validPartitions.size();
     final AtomicInteger partitionsLoaded = new AtomicInteger(0);
