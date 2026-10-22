@@ -9,29 +9,49 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.client;
 
+import static org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil.cleanDb;
+import static org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil.getConnection;
+import static org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil.prepDb;
+import static org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil.queryToString;
+import static org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil.setConfValues;
+import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import java.sql.Statement;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import javax.jdo.JDOObjectNotFoundException;
 import javax.jdo.PersistenceManager;
+import javax.jdo.Query;
+import javax.jdo.Transaction;
 
+import org.apache.curator.shaded.com.google.common.collect.Lists;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.ObjectStore;
 import org.apache.hadoop.hive.metastore.ObjectStoreTestHook;
@@ -49,6 +69,7 @@ import org.apache.hadoop.hive.metastore.api.ScheduledQueryMaintenanceRequestType
 import org.apache.hadoop.hive.metastore.api.ScheduledQueryPollRequest;
 import org.apache.hadoop.hive.metastore.api.ScheduledQueryPollResponse;
 import org.apache.hadoop.hive.metastore.api.ScheduledQueryProgressInfo;
+import org.apache.hadoop.hive.metastore.api.TxnType;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf.ConfVars;
 import org.apache.hadoop.hive.metastore.minihms.AbstractMetaStoreService;
@@ -62,7 +83,7 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-import org.mockito.Matchers;
+import org.mockito.ArgumentMatchers;
 
 /**
  * Tests handling of scheduled queries related calls to the metastore.
@@ -85,8 +106,7 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
 
   @Before
   public void setUp() throws Exception {
-    client = metaStore.getClient();
-
+    prepareMetastoreClientWithAutoDisable("-1", "0");
   }
 
   @After
@@ -206,6 +226,55 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
   }
 
   @Test
+  public void testDeleteWithOpenTxn() throws Exception {
+    if (!Objects.equals(client.getConfigValue(String.valueOf(ConfVars.THRIFT_URIS), ""), "")) {
+      System.out.println("It is not possible to create open transaction from here in Remote mode. So, skipping the test case");
+      return;
+    }
+    String testCaseNS = "delwithopentxn";
+    String replPolicy = "db100";
+    // insert
+    ScheduledQuery schq = createScheduledQuery3(createKey(replPolicy, testCaseNS));
+    ScheduledQueryMaintenanceRequest r = new ScheduledQueryMaintenanceRequest();
+    r.setType(ScheduledQueryMaintenanceRequestType.CREATE);
+    r.setScheduledQuery(schq);
+    client.scheduledQueryMaintenance(r);
+    // wait 2 sec to have the query execution
+    Thread.sleep(2000);
+    // invoke poll to create a dependent execution
+    ScheduledQueryPollRequest pollRequest = new ScheduledQueryPollRequest(testCaseNS);
+    client.scheduledQueryPoll(pollRequest);
+    Configuration conf = metaStore.getConf();
+    cleanDb(conf);
+    setConfValues(conf);
+    prepDb(conf);
+    String query = "select \"DB_ID\" from \"DBS\" where \"NAME\" = '" + "default" + "' and \"CTLG_NAME\" = '" + "hive" + "'";
+    String[] output = queryToString(conf, query).split("\n");
+    if (output.length == 1) {
+      query = "INSERT INTO \"DBS\"(\"DB_ID\", \"NAME\", \"CTLG_NAME\", \"DB_LOCATION_URI\")  VALUES (1, '" + "default" + "','" + "hive" + "','dummy')";
+        try (Statement stmt = getConnection(conf).createStatement()) {
+            stmt.executeUpdate(query);
+        }
+    }
+
+    query = "INSERT INTO \"DBS\"(\"DB_ID\", \"NAME\", \"CTLG_NAME\", \"DB_LOCATION_URI\")  VALUES (2, '" + replPolicy + "','" + "hive" + "','dummy')";
+      try (Statement stmt = getConnection(conf).createStatement()) {
+          stmt.executeUpdate(query);
+      }
+      List<Long> openTxnIds = new ArrayList<>(Arrays.asList(1L, 2L));
+    client.replOpenTxn(replPolicy + ".*", openTxnIds, "hive", TxnType.REPL_CREATED);
+    String[] replTxnMapOutput = queryToString(conf, "SELECT \"RTM_SRC_TXN_ID\" FROM \"REPL_TXN_MAP\"").split("\n");
+    assertEquals(3, replTxnMapOutput.length);
+    // delete scheduled query
+    r.setType(ScheduledQueryMaintenanceRequestType.DROP);
+    client.scheduledQueryMaintenance(r);
+    // validate repl_txn_map table
+    replTxnMapOutput = queryToString(conf, "SELECT \"RTM_SRC_TXN_ID\" FROM \"REPL_TXN_MAP\"").split("\n");
+    assertEquals(1, replTxnMapOutput.length);
+    cleanDb(conf);
+  }
+
+  @Test
   public void testExclusivePoll() throws Exception {
     try {
       ObjectStoreTestHook.instance = new ObjectStoreTestHook() {
@@ -271,6 +340,216 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
 
     }
 
+  }
+
+  @Test
+  public void testDisable1() throws Exception {
+    prepareMetastoreClientWithAutoDisable("1", null);
+
+    testDisableInternal(2, 5, "dis1");
+  }
+
+  @Test
+  public void testDisable2() throws Exception {
+    prepareMetastoreClientWithAutoDisable("2", null);
+
+    testDisableInternal(3, 5, "dis2");
+
+  }
+
+  @Test
+  public void testSkip2() throws Exception {
+    prepareMetastoreClientWithAutoDisable("4", "2");
+    testDisableInternal(5, 6, "skip2");
+
+    try (PersistenceManager pm = PersistenceManagerProvider.getPersistenceManager()) {
+
+      ScheduledQueryKey key = new ScheduledQueryKey("q1", "skip2");
+      Query query = pm.newQuery(MScheduledExecution.class);
+      query.setOrdering("scheduledExecutionId descending");
+      query.setRange(0, 20);
+      List<MScheduledExecution> list = (List<MScheduledExecution>) query.execute();
+      List<MScheduledExecution> q1list = new ArrayList<MScheduledExecution>();
+
+      List<Integer> tList = new ArrayList<Integer>();
+
+      for (MScheduledExecution schqExec : list) {
+        if (schqExec.getScheduledQuery().getScheduleKey().equals(key)) {
+          q1list.add(schqExec);
+          tList.add(schqExec.getStartTime());
+        }
+      }
+
+      tList = Lists.reverse(tList);
+      Integer startTime = tList.get(0);
+      tList = tList.stream().map(e -> e - startTime).collect(Collectors.toList());
+
+      assertArrayEquals(new Integer[] { 0, 1, 2, 4, 6, 6 }, tList.toArray());
+    }
+
+  }
+
+  /**
+   * This test stimulates DataNucleus' id pre-allocation feature and creates id gaps between executions
+   * The test checks if auto disabling still works assuming the execution id generation doesn't generate strictly
+   * monotonous growing values
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testAutoDisablePolicyUsesEndTime() throws Exception {
+    String testNamespace = "endTimeNamespace";
+    prepareMetastoreClientWithAutoDisable("2", "0");
+
+    ScheduledQueryKey key = new ScheduledQueryKey("q1", testNamespace);
+    createEverySecondSchq(key);
+
+    long exec1Id = pollAndGetExecutionId(testNamespace);
+    client.scheduledQueryProgress(
+        new ScheduledQueryProgressInfo(exec1Id, QueryState.FINISHED, "executor-query-id"));
+
+    long exec2Id = pollAndGetExecutionId(testNamespace);
+    ScheduledQueryProgressInfo exec2Info =
+        new ScheduledQueryProgressInfo(exec2Id, QueryState.FAILED, "executor-query-id");
+    exec2Info.setErrorMessage("some issue happened");
+    client.scheduledQueryProgress(exec2Info);
+
+    stimulateIdPreallocation(exec1Id, exec2Id);
+
+    long exec3Id = pollAndGetExecutionId(testNamespace);
+    ScheduledQueryProgressInfo exec3Info =
+        new ScheduledQueryProgressInfo(exec3Id, QueryState.FAILED, "executor-query-id");
+    exec2Info.setErrorMessage("some issue happened");
+    client.scheduledQueryProgress(exec3Info);
+
+    ScheduledQuery schq = client.getScheduledQuery(key);
+    assertTrue("Scheduled query should be enabled", schq.isEnabled());
+  }
+
+  private void stimulateIdPreallocation(long exec1Id, long exec2Id) {
+    int skewedRecentEndTime = getEpochSeconds();
+    try (PersistenceManager pm = PersistenceManagerProvider.getPersistenceManager()) {
+      Transaction tx = pm.currentTransaction();
+      tx.begin();
+      MScheduledExecution exec1 = pm.getObjectById(MScheduledExecution.class, exec1Id);
+      exec1.setEndTime(skewedRecentEndTime);
+      MScheduledExecution exec2 = pm.getObjectById(MScheduledExecution.class, exec2Id);
+      exec2.setEndTime(1);
+      tx.commit();
+    }
+  }
+
+  private void prepareMetastoreClientWithAutoDisable(String autoDisableCount, String skipOpportunitiesAfterFailures) throws MetaException {
+    if (autoDisableCount != null) {
+      metaStore.getConf().set(ConfVars.SCHEDULED_QUERIES_AUTODISABLE_COUNT.getVarname(), autoDisableCount);
+    }
+
+    if (skipOpportunitiesAfterFailures != null) {
+      metaStore.getConf().set(ConfVars.SCHEDULED_QUERIES_SKIP_OPPORTUNITIES_AFTER_FAILURES.getVarname(), skipOpportunitiesAfterFailures);
+    }
+
+    if (client != null) {
+      client.close();
+    }
+    client = metaStore.getClient();
+  }
+
+  private long pollAndGetExecutionId(String testNamespace) {
+    ScheduledQueryPollRequest request = new ScheduledQueryPollRequest(testNamespace);
+    AtomicReference<Long> executionId = new AtomicReference<>();
+
+    await()
+        .atMost(Duration.ofSeconds(3))
+        .pollInterval(Duration.ofMillis(100))
+        .until(() -> {
+          ScheduledQueryPollResponse response = client.scheduledQueryPoll(request);
+
+          if (response.isSetQuery()) {
+            executionId.set(response.getExecutionId());
+            return true;
+          }
+
+          return false;
+        });
+
+    return executionId.get();
+  }
+
+  /**
+   * Simulates some schq failure scenario.
+   *
+   * Q1 is executed correctly 1 time; but every further executions are end with failures
+   * Q2 should be executed without without issues even thru Q1 will be disabled at some point
+   */
+  public void testDisableInternal(int q1NumberOfExecutions, int seconds, String testNamespace)
+      throws Exception {
+    int q2NumberOfExecutions = seconds - 1;
+    ScheduledQueryKey schqKey1 = new ScheduledQueryKey("q1", testNamespace);
+    ScheduledQueryKey schqKey2 = new ScheduledQueryKey("q2", testNamespace);
+    createEverySecondSchq(schqKey1);
+    createEverySecondSchq(schqKey2);
+
+    // do some polls and report failure each time
+    ScheduledQueryPollRequest request = new ScheduledQueryPollRequest();
+    request.setClusterNamespace(testNamespace);
+    ScheduledQueryPollResponse pollResult = null;
+    int idx1 = 0;
+    int idx2 = 0;
+    for (int i = 0; i < seconds * 10 + 9; i++) {
+      pollResult = client.scheduledQueryPoll(request);
+      if (pollResult.isSetQuery()) {
+
+        if (pollResult.getScheduleKey().equals(schqKey1)) {
+          idx1++;
+          if (idx1 == 1) {
+            ScheduledQueryProgressInfo info =
+                new ScheduledQueryProgressInfo(pollResult.getExecutionId(), QueryState.FINISHED, "executor-query-id");
+            client.scheduledQueryProgress(info);
+
+          } else {
+            ScheduledQueryProgressInfo info =
+                new ScheduledQueryProgressInfo(pollResult.getExecutionId(), QueryState.FAILED, "executor-query-id");
+            info.setErrorMessage("some issue happened");
+            client.scheduledQueryProgress(info);
+
+          }
+
+          ScheduledQuery schq = client.getScheduledQuery(pollResult.getScheduleKey());
+          if (idx1 > q1NumberOfExecutions) {
+            fail("unexpected execution of q1 happened");
+          }
+          if (idx1 == q1NumberOfExecutions) {
+            assertFalse("Scheduled query q1 must be disabled at this point", schq.isEnabled());
+          } else {
+            assertTrue("Scheduled query q1 must be enabled at this point", schq.isEnabled());
+          }
+        }
+
+        if (pollResult.getScheduleKey().equals(schqKey2)) {
+          idx2++;
+          ScheduledQueryProgressInfo info =
+              new ScheduledQueryProgressInfo(pollResult.getExecutionId(), QueryState.FINISHED, "executor-query-id");
+          client.scheduledQueryProgress(info);
+          ScheduledQuery schq = client.getScheduledQuery(pollResult.getScheduleKey());
+          assertTrue("Scheduled query q2 must be enabled", schq.isEnabled());
+        }
+      }
+      Thread.sleep(100);
+    }
+    if (idx1 != q1NumberOfExecutions) {
+      fail("expected " + q1NumberOfExecutions + " execution of q1; only " + idx1 + " happened");
+    }
+    if (idx2 < q2NumberOfExecutions) {
+      fail("at least " + q2NumberOfExecutions + " expected for q2");
+    }
+  }
+
+  private void createEverySecondSchq(ScheduledQueryKey schqKey) throws MetaException, TException {
+    ScheduledQuery schq = createScheduledQuery(schqKey);
+    ScheduledQueryMaintenanceRequest r = new ScheduledQueryMaintenanceRequest();
+    r.setType(ScheduledQueryMaintenanceRequestType.CREATE);
+    r.setScheduledQuery(schq);
+    client.scheduledQueryMaintenance(r);
   }
 
   @Test
@@ -441,7 +720,7 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
       ObjectStore objStore = new ObjectStore();
       objStore.setConf(metaStore.getConf());
       thrown.expect(MetaException.class);
-      thrown.expectMessage(Matchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
+      thrown.expectMessage(ArgumentMatchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
       objStore.scheduledQueryMaintenance(new ScheduledQueryMaintenanceRequest());
     } finally {
       MetastoreConf.setBoolVar(metaStore.getConf(), ConfVars.SCHEDULED_QUERIES_ENABLED, true);
@@ -455,7 +734,7 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
       ObjectStore objStore = new ObjectStore();
       objStore.setConf(metaStore.getConf());
       thrown.expect(MetaException.class);
-      thrown.expectMessage(Matchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
+      thrown.expectMessage(ArgumentMatchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
       objStore.scheduledQueryPoll(new ScheduledQueryPollRequest());
     } finally {
       MetastoreConf.setBoolVar(metaStore.getConf(), ConfVars.SCHEDULED_QUERIES_ENABLED, true);
@@ -469,7 +748,7 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
       ObjectStore objStore = new ObjectStore();
       objStore.setConf(metaStore.getConf());
       thrown.expect(MetaException.class);
-      thrown.expectMessage(Matchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
+      thrown.expectMessage(ArgumentMatchers.contains(ConfVars.SCHEDULED_QUERIES_ENABLED.getVarname()));
       objStore.scheduledQueryProgress(new ScheduledQueryProgressInfo());
     } finally {
       MetastoreConf.setBoolVar(metaStore.getConf(), ConfVars.SCHEDULED_QUERIES_ENABLED, true);
@@ -507,4 +786,13 @@ public class TestMetastoreScheduledQueries extends MetaStoreClientTest {
     return schq;
   }
 
+  private ScheduledQuery createScheduledQuery3(ScheduledQueryKey key) {
+    ScheduledQuery schq = new ScheduledQuery();
+    schq.setScheduleKey(key);
+    schq.setEnabled(true);
+    schq.setSchedule("* * * * * ? *");
+    schq.setUser("user");
+    schq.setQuery("REPL LOAD db100 INTO db100");
+    return schq;
+  }
 }

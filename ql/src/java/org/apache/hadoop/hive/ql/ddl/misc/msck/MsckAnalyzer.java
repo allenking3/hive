@@ -9,19 +9,22 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.misc.msck;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
+import org.apache.hadoop.hive.ql.QueryProperties;
 import org.apache.hadoop.hive.ql.QueryState;
 import org.apache.hadoop.hive.ql.ddl.DDLWork;
 import org.apache.hadoop.hive.ql.ddl.DDLSemanticAnalyzerFactory.DDLType;
@@ -68,7 +71,8 @@ public class MsckAnalyzer extends AbstractFunctionAnalyzer {
     }
 
     Table table = getTable(tableName);
-    Map<Integer, List<ExprNodeGenericFuncDesc>> partitionSpecs = ParseUtils.getFullPartitionSpecs(root, table, conf, false);
+    Map<Integer, List<ExprNodeGenericFuncDesc>> partitionSpecs = ParseUtils.getFullPartitionSpecs(root, table, conf,
+        false);
     byte[] filterExp = null;
     if (partitionSpecs != null & !partitionSpecs.isEmpty()) {
       // expression proxy class needs to be PartitionExpressionForMetastore since we intend to use the
@@ -80,12 +84,13 @@ public class MsckAnalyzer extends AbstractFunctionAnalyzer {
             "to be set to org.apache.hadoop.hive.ql.optimizer.ppr.PartitionExpressionForMetastore");
       }
       // fetch the first value of partitionSpecs map since it will always have one key, value pair
-      filterExp = SerializationUtilities.serializeExpressionToKryo(
-          (ExprNodeGenericFuncDesc) ((List) partitionSpecs.values().toArray()[0]).get(0));
+      filterExp = SerializationUtilities.serializeObjectWithTypeInformation(
+          (Serializable) ((List) partitionSpecs.values().toArray()[0]).get(0));
     }
 
     if (repair && AcidUtils.isTransactionalTable(table)) {
-      outputs.add(new WriteEntity(table, WriteType.DDL_EXCLUSIVE));
+      outputs.add(new WriteEntity(table, AcidUtils.isLocklessReadsEnabled(table, conf) ? 
+          WriteType.DDL_EXCL_WRITE : WriteType.DDL_EXCLUSIVE));
     } else {
       outputs.add(new WriteEntity(table, WriteEntity.WriteType.DDL_SHARED));
     }
@@ -99,5 +104,10 @@ public class MsckAnalyzer extends AbstractFunctionAnalyzer {
 
   private boolean isMsckDropPartition(int type) {
     return type == HiveParser.KW_SYNC || type == HiveParser.KW_DROP;
+  }
+
+  @Override
+  public void setQueryType(ASTNode tree) {
+    queryProperties.setQueryType(QueryProperties.QueryType.OTHER);
   }
 }

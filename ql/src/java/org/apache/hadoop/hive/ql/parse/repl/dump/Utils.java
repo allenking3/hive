@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.dump;
 
@@ -21,6 +22,7 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidTxnList;
+import org.apache.hadoop.hive.common.repl.ReplConst;
 import org.apache.hadoop.hive.common.repl.ReplScope;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.ReplChangeManager;
@@ -64,7 +66,6 @@ import java.util.concurrent.Callable;
 
 public class Utils {
   private static Logger LOG = LoggerFactory.getLogger(Utils.class);
-  public static final String BOOTSTRAP_DUMP_STATE_KEY_PREFIX = "bootstrap.dump.state.";
   private static final int DEF_BUF_SIZE = 8 * 1024;
 
   public enum ReplDumpState {
@@ -94,16 +95,16 @@ public class Utils {
     return modifiedURI;
   }
 
-  private static String replaceHost(String originalURIStr, String newHost) throws SemanticException {
+  public static String replaceHost(String originalURIStr, String newHost) throws SemanticException {
     if (StringUtils.isEmpty(originalURIStr)) {
       return originalURIStr;
     }
-    URI origUri = URI.create(originalURIStr);
     try {
-      return new URI(origUri.getScheme(),
+      URI origUri = new Path(originalURIStr).toUri();
+      return new Path(new URI(origUri.getScheme(),
               origUri.getUserInfo(), newHost, origUri.getPort(),
               origUri.getPath(), origUri.getQuery(),
-              origUri.getFragment()).toString();
+              origUri.getFragment())).toString();
     } catch (URISyntaxException ex) {
       throw new SemanticException(ex);
     }
@@ -130,7 +131,9 @@ public class Utils {
             outStream.write(Utilities.newLineCode);
           }
         } finally {
-          IOUtils.closeStream(outStream);
+          if (outStream != null) {
+            outStream.close();
+          }
         }
         return null;
       });
@@ -198,7 +201,9 @@ public class Utils {
           outStream.writeBytes(content);
           outStream.write(Utilities.newLineCode);
         } finally {
-          IOUtils.closeStream(outStream);
+          if (outStream != null) {
+            outStream.close();
+          }
         }
         return null;
       });
@@ -231,7 +236,7 @@ public class Utils {
     return false;
   }
 
-  public static Iterable<String> matchesDb(Hive db, String dbPattern) throws HiveException {
+  public static List<String> matchesDb(Hive db, String dbPattern) throws HiveException {
     if (dbPattern == null) {
       return db.getAllDatabases();
     } else {
@@ -270,7 +275,7 @@ public class Utils {
     }
 
     Map<String, String> newParams = new HashMap<>();
-    String uniqueKey = BOOTSTRAP_DUMP_STATE_KEY_PREFIX + UUID.randomUUID().toString();
+    String uniqueKey = ReplConst.BOOTSTRAP_DUMP_STATE_KEY_PREFIX + UUID.randomUUID().toString();
     newParams.put(uniqueKey, ReplDumpState.ACTIVE.name());
     Map<String, String> params = database.getParameters();
 
@@ -315,7 +320,7 @@ public class Utils {
     }
 
     for (String key : params.keySet()) {
-      if (key.startsWith(BOOTSTRAP_DUMP_STATE_KEY_PREFIX)
+      if (key.startsWith(ReplConst.BOOTSTRAP_DUMP_STATE_KEY_PREFIX)
               && params.get(key).equals(ReplDumpState.ACTIVE.name())) {
         return true;
       }

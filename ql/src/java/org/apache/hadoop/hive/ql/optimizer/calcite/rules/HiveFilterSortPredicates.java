@@ -1,18 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to you under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.rules;
 
@@ -20,8 +22,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import org.apache.calcite.plan.RelOptRule;
-import org.apache.calcite.plan.RelOptRuleCall;
+import org.apache.calcite.rel.RelHomogeneousShuttle;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
@@ -35,6 +36,7 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.Pair;
+import org.apache.hadoop.hive.ql.optimizer.calcite.reloperators.HiveIn;
 import org.apache.hadoop.hive.ql.optimizer.calcite.stats.FilterSelectivityEstimator;
 import org.apache.hadoop.hive.ql.optimizer.calcite.stats.HiveRelMdSize;
 import org.slf4j.Logger;
@@ -42,49 +44,34 @@ import org.slf4j.LoggerFactory;
 
 
 /**
- * Rule that sorts conditions in a filter predicate to accelerate query processing
+ * Sorts conditions in a filter predicate to accelerate query processing
  * based on selectivity and compute cost. Currently it is not applied recursively,
  * i.e., it is only applied to top predicates in the condition.
  */
-public class HiveFilterSortPredicates extends RelOptRule {
+public class HiveFilterSortPredicates extends RelHomogeneousShuttle {
 
   private static final Logger LOG = LoggerFactory.getLogger(HiveFilterSortPredicates.class);
 
   private final AtomicInteger noColsMissingStats;
 
   public HiveFilterSortPredicates(AtomicInteger noColsMissingStats) {
-    super(
-        operand(Filter.class,
-            operand(RelNode.class, any())));
     this.noColsMissingStats = noColsMissingStats;
   }
 
   @Override
-  public boolean matches(RelOptRuleCall call) {
-    final Filter filter = call.rel(0);
-
-    HiveRulesRegistry registry = call.getPlanner().getContext().unwrap(HiveRulesRegistry.class);
-
-    // If this operator has been visited already by the rule,
-    // we do not need to apply the optimization
-    if (registry != null && registry.getVisited(this).contains(filter)) {
-      return false;
+  public RelNode visit(RelNode other) {
+    RelNode visitedNode = super.visit(other);
+    if (visitedNode instanceof Filter) {
+      return rewriteFilter((Filter) visitedNode);
     }
 
-    return true;
+    return visitedNode;
   }
 
-  @Override
-  public void onMatch(RelOptRuleCall call) {
+  private RelNode rewriteFilter(Filter matchNode) {
     try {
-      final Filter filter = call.rel(0);
-      final RelNode input = call.rel(1);
-
-      // Register that we have visited this operator in this rule
-      HiveRulesRegistry registry = call.getPlanner().getContext().unwrap(HiveRulesRegistry.class);
-      if (registry != null) {
-        registry.registerVisited(this, filter);
-      }
+      final Filter filter = matchNode;
+      final RelNode input = filter.getInput();
 
       final RexNode originalCond = filter.getCondition();
       final RexSortPredicatesShuttle sortPredicatesShuttle = new RexSortPredicatesShuttle(
@@ -92,16 +79,12 @@ public class HiveFilterSortPredicates extends RelOptRule {
       final RexNode newCond = originalCond.accept(sortPredicatesShuttle);
       if (!sortPredicatesShuttle.modified) {
         // We are done, bail out
-        return;
+        return matchNode;
       }
 
       // We register the new filter so we do not fire the rule on it again
       final Filter newFilter = filter.copy(filter.getTraitSet(), input, newCond);
-      if (registry != null) {
-        registry.registerVisited(this, newFilter);
-      }
-
-      call.transformTo(newFilter);
+      return newFilter;
     }
     catch (Exception e) {
       if (noColsMissingStats.get() > 0) {
@@ -111,6 +94,7 @@ public class HiveFilterSortPredicates extends RelOptRule {
         throw e;
       }
     }
+    return matchNode;
   }
 
   /**
@@ -259,9 +243,6 @@ public class HiveFilterSortPredicates extends RelOptRule {
         case BETWEEN:
           return 3d;
 
-        case IN:
-          return 2d * (call.getOperands().size() - 1);
-
         case AND:
         case OR:
           return 1d * call.getOperands().size();
@@ -272,6 +253,9 @@ public class HiveFilterSortPredicates extends RelOptRule {
           return 8d;
 
         default:
+          if (HiveIn.INSTANCE.equals(call.op)) {
+            return 2d * (call.getOperands().size() - 1);
+          }
           // By default, we give this heuristic value to unrecognized functions.
           // The idea is that those functions will be more expensive to evaluate
           // than the simple functions considered above.

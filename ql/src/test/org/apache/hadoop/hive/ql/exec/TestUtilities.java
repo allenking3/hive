@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -36,10 +37,12 @@ import static org.mockito.Mockito.when;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -47,13 +50,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.common.type.Timestamp;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
 import org.apache.hadoop.hive.ql.Context;
 import org.apache.hadoop.hive.ql.exec.mr.ExecDriver;
-import org.apache.hadoop.hive.ql.exec.spark.SparkTask;
 import org.apache.hadoop.hive.ql.exec.tez.TezTask;
 import org.apache.hadoop.hive.ql.io.*;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
@@ -73,6 +80,8 @@ import org.apache.hadoop.hive.ql.udf.generic.GenericUDFFromUtcTimestamp;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.MRJobConfig;
+
+import com.google.common.io.Files;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -127,10 +136,10 @@ public class TestUtilities {
   }
 
   @Test
-  public void testgetDbTableName() throws HiveException{
+  public void testGetDbTableName() throws HiveException{
     String tablename;
     String [] dbtab;
-    SessionState.start(new HiveConf(this.getClass()));
+    SessionState.start(new HiveConfForTest(getClass()));
     String curDefaultdb = SessionState.get().getCurrentDatabase();
 
     //test table without db portion
@@ -145,8 +154,15 @@ public class TestUtilities {
     assertEquals("db name", "dab1", dbtab[0]);
     assertEquals("table name", "tab1", dbtab[1]);
 
+    // test table name with metadata table name
+    tablename = "dab1.tab1.meta1";
+    dbtab = Utilities.getDbTableName(tablename);
+    assertEquals("db name", "dab1", dbtab[0]);
+    assertEquals("table name", "tab1", dbtab[1]);
+    assertEquals("metadata table name", "meta1", dbtab[2]);
+
     //test invalid table name
-    tablename = "dab1.tab1.x1";
+    tablename = "dab1.tab1.x1.y";
     try {
       dbtab = Utilities.getDbTableName(tablename);
       fail("exception was expected for invalid table name");
@@ -190,9 +206,54 @@ public class TestUtilities {
     assertEquals(NUM_BUCKETS, paths.size());
   }
 
+  @Test
+  public void testRenameFilesNotExists() throws Exception {
+    FileSystem fs = mock(FileSystem.class);
+    Path src = new Path("src");
+    Path dest = new Path("dir");
+    when(fs.exists(dest)).thenReturn(false);
+    when(fs.rename(src, dest)).thenReturn(true);
+    Utilities.renameOrMoveFiles(fs, src, dest);
+    verify(fs, times(1)).rename(src, dest);
+  }
+
+  @Test
+  public void testRenameFileExistsNonHive() throws Exception {
+    FileSystem fs = mock(FileSystem.class);
+    Path src = new Path("src");
+    Path dest = new Path("dir1");
+    Path finalPath = new Path(dest, "src_2");
+    FileStatus status = new FileStatus();
+    status.setPath(src);
+    when(fs.listStatus(src)).thenReturn(new FileStatus[]{status});
+    when(fs.exists(dest)).thenReturn(true);
+    when(fs.exists(new Path(dest, "src"))).thenReturn(true);
+    when(fs.exists(new Path(dest,"src_1"))).thenReturn(true);
+    when(fs.rename(src, finalPath)).thenReturn(true);
+    Utilities.renameOrMoveFiles(fs, src, dest);
+    verify(fs, times(1)).rename(src, finalPath);
+  }
+
+  @Test
+  public void testRenameFileExistsHivePath() throws Exception {
+    FileSystem fs = mock(FileSystem.class);
+    Path src = new Path("00001_02");
+    Path dest = new Path("dir1");
+    Path finalPath = new Path(dest, "00001_02_copy_2");
+    FileStatus status = new FileStatus();
+    status.setPath(src);
+    when(fs.listStatus(src)).thenReturn(new FileStatus[]{status});
+    when(fs.exists(dest)).thenReturn(true);
+    when(fs.exists(new Path(dest, "00001_02"))).thenReturn(true);
+    when(fs.exists(new Path(dest,"00001_02_copy_1"))).thenReturn(true);
+    when(fs.rename(src, finalPath)).thenReturn(true);
+    Utilities.renameOrMoveFiles(fs, src, dest);
+    verify(fs, times(1)).rename(src, finalPath);
+  }
+
   private List<Path> runRemoveTempOrDuplicateFilesTestCase(String executionEngine, boolean dPEnabled)
       throws Exception {
-    Configuration hconf = new HiveConf(this.getClass());
+    Configuration hconf = new HiveConfForTest(getClass());
     // do this to verify that Utilities.removeTempOrDuplicateFiles does not revert to default scheme information
     hconf.set("fs.defaultFS", "hdfs://should-not-be-used/");
     hconf.set(HiveConf.ConfVars.HIVE_EXECUTION_ENGINE.varname, executionEngine);
@@ -290,7 +351,7 @@ public class TestUtilities {
 
     List<Path> inputPaths = new ArrayList<>();
     try {
-      Path scratchDir = new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCALSCRATCHDIR));
+      Path scratchDir = new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCAL_SCRATCH_DIR));
 
       List<Path> inputPaths1 = Utilities.getInputPaths(jobConf, mapWork1, scratchDir,
               mock(Context.class), false);
@@ -359,7 +420,7 @@ public class TestUtilities {
     try {
       fs.mkdirs(testTablePath);
       List<Path> inputPaths = Utilities.getInputPaths(jobConf, mapWork,
-              new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCALSCRATCHDIR)), mock(Context.class), false);
+              new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCAL_SCRATCH_DIR)), mock(Context.class), false);
       assertEquals(inputPaths.size(), numPartitions);
 
       for (int i = 0; i < numPartitions; i++) {
@@ -487,7 +548,7 @@ public class TestUtilities {
 
   private void runTestGetInputPaths(JobConf jobConf, int numOfPartitions) throws Exception {
     MapWork mapWork = new MapWork();
-    Path scratchDir = new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCALSCRATCHDIR));
+    Path scratchDir = new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCAL_SCRATCH_DIR));
 
     Map<Path, List<String>> pathToAliasTable = new LinkedHashMap<>();
 
@@ -677,15 +738,12 @@ public class TestUtilities {
 
     CountingWrappingTask mrTask = new CountingWrappingTask(new ExecDriver());
     CountingWrappingTask tezTask = new CountingWrappingTask(new TezTask());
-    CountingWrappingTask sparkTask = new CountingWrappingTask(new SparkTask());
 
     // First check - we should not have repeats in results
     assertEquals("No repeated MRTasks from Utilities.getMRTasks", 1,
         Utilities.getMRTasks(getTestDiamondTaskGraph(mrTask)).size());
     assertEquals("No repeated TezTasks from Utilities.getTezTasks", 1,
         Utilities.getTezTasks(getTestDiamondTaskGraph(tezTask)).size());
-    assertEquals("No repeated TezTasks from Utilities.getSparkTasks", 1,
-        Utilities.getSparkTasks(getTestDiamondTaskGraph(sparkTask)).size());
 
     // Second check - the tasks we looked for must not have been accessed more than
     // once as a result of the traversal (note that we actually wind up accessing
@@ -694,7 +752,6 @@ public class TestUtilities {
 
     assertEquals("MRTasks should have been visited only once", 2, mrTask.getDepCallCount());
     assertEquals("TezTasks should have been visited only once", 2, tezTask.getDepCallCount());
-    assertEquals("SparkTasks should have been visited only once", 2, sparkTask.getDepCallCount());
 
   }
 
@@ -718,5 +775,131 @@ public class TestUtilities {
     assertEquals(Lists.newArrayList(rootTask, child1, child2, child11),
         Utilities.getMRTasks(getTestDiamondTaskGraph(rootTask)));
 
+  }
+
+  @Test
+  public void testSelectManifestFilesOnlyOneAttemptId() {
+    FileStatus[] manifestFiles = generateTestNotEmptyFileStatuses("000000_0.manifest", "000001_0.manifest",
+        "000002_0.manifest", "000003_0.manifest");
+    Set<String> expectedPathes =
+        getExpectedPathes("000000_0.manifest", "000001_0.manifest", "000002_0.manifest", "000003_0.manifest");
+    List<Path> foundManifestFiles = Utilities.selectManifestFiles(manifestFiles);
+    Set<String> resultPathes = getResultPathes(foundManifestFiles);
+    assertEquals(expectedPathes, resultPathes);
+  }
+
+  @Test
+  public void testSelectManifestFilesMultipleAttemptIds() {
+    FileStatus[] manifestFiles = generateTestNotEmptyFileStatuses("000000_1.manifest", "000000_0.manifest",
+        "000000_3.manifest", "000000_2.manifest", "000003_0.manifest", "000003_1.manifest", "000003_2.manifest");
+    Set<String> expectedPathes = getExpectedPathes("000000_3.manifest", "000003_2.manifest");
+    List<Path> foundManifestFiles = Utilities.selectManifestFiles(manifestFiles);
+    Set<String> resultPathes = getResultPathes(foundManifestFiles);
+    assertEquals(expectedPathes, resultPathes);
+  }
+
+  @Test
+  public void testSelectManifestFilesWithEmptyManifests() {
+    Set<String> emptyFiles = new HashSet<>();
+    emptyFiles.add("000001_0.manifest");
+    emptyFiles.add("000001_2.manifest");
+    emptyFiles.add("000002_2.manifest");
+    FileStatus[] manifestFiles = generateTestNotEmptyFileStatuses(emptyFiles, "000001_1.manifest", "000001_0.manifest",
+        "000001_3.manifest", "000001_2.manifest", "000002_0.manifest", "000002_1.manifest", "000002_2.manifest");
+    Set<String> expectedPathes = getExpectedPathes("000001_3.manifest", "000002_1.manifest");
+    List<Path> foundManifestFiles = Utilities.selectManifestFiles(manifestFiles);
+    Set<String> resultPathes = getResultPathes(foundManifestFiles);
+    assertEquals(expectedPathes, resultPathes);
+  }
+
+  @Test
+  public void testSelectManifestFilesWithWrongManifestNames() {
+    FileStatus[] manifestFiles = generateTestNotEmptyFileStatuses("000004_0.manifest", "000005.manifest",
+        "000004_1.manifest", "000006.manifest", "000007_0.wrong", "000008_1", "000004_2.manifest");
+    Set<String> expectedPathes = getExpectedPathes("000005.manifest", "000006.manifest", "000004_2.manifest");
+    List<Path> foundManifestFiles = Utilities.selectManifestFiles(manifestFiles);
+    Set<String> resultPathes = getResultPathes(foundManifestFiles);
+    assertEquals(expectedPathes, resultPathes);
+  }
+
+  @Test
+  public void testSetPermissionsOnExistingDir() throws IOException {
+    File tmpDir = Files.createTempDir();
+    Path path = new Path(tmpDir.getPath());
+    HiveConf conf = new HiveConf(this.getClass());
+    FileSystem fs = path.getFileSystem(conf);
+    fs.setPermission(path, new FsPermission((short) 00700));
+    Utilities.ensurePathIsWritable(path, conf);
+    Assert.assertEquals((short) 0733, fs.getFileStatus(path).getPermission().toShort());
+
+    // Test with more open permissions than required, but still not writable,
+    // it should just make the directory writable without restricting the existing permissions
+    fs.setPermission(path, new FsPermission((short) 00755));
+    Utilities.ensurePathIsWritable(path, conf);
+    Assert.assertEquals((short) 0777, fs.getFileStatus(path).getPermission().toShort());
+  }
+
+  @Test
+  public void testWritingManifestFile() throws HiveException, IOException {
+    String testTableName = "testWritingManifest";
+    JobConf jobConf = new JobConf();
+    FileSystem fs = FileSystem.getLocal(jobConf);
+    Path testTablePath = new Path(HiveConf.getVar(jobConf, HiveConf.ConfVars.LOCAL_SCRATCH_DIR) + "/" + testTableName);
+    try {
+      fs.mkdirs(testTablePath);
+      List<Path> commitPaths = new ArrayList<>();
+      commitPaths.add(new Path(testTableName + "/delta00001_00001/00000_0"));
+      Utilities.writeCommitManifest(commitPaths, testTablePath, fs,
+          "00001", 2L, 0, null, false,
+          false, null, null, false);
+
+      RemoteIterator<LocatedFileStatus> it = fs.listFiles(testTablePath, true);
+      List<Path> resultPaths = new ArrayList<>();
+      while(it.hasNext()) {
+        resultPaths.add(it.next().getPath());
+      }
+      assertEquals(1, resultPaths.size());
+      Path resultPath = resultPaths.get(0);
+      assertEquals("00001.manifest", resultPath.getName());
+      assertEquals("_tmp.delta_0000002_0000002_0000", resultPath.getParent().getName());
+      FileStatus[] files = fs.listStatus(testTablePath, AcidUtils.acidHiddenFileFilter);
+      assertEquals(0, files.length);
+    } finally {
+      if (fs.exists(testTablePath)) {
+        fs.delete(testTablePath, true);
+      }
+    }
+  }
+
+  private FileStatus[] generateTestNotEmptyFileStatuses(String... fileNames) {
+    return generateTestNotEmptyFileStatuses(null, fileNames);
+  }
+
+  private FileStatus[] generateTestNotEmptyFileStatuses(Set<String> emptyFiles, String... fileNames) {
+    FileStatus[] manifestFiles = new FileStatus[fileNames.length];
+    for (int i = 0; i < fileNames.length; i++) {
+      long len = 10000L;
+      if (emptyFiles != null && emptyFiles.contains(fileNames[i])) {
+        len = 0L;
+      }
+      manifestFiles[i] = new FileStatus(len, false, 0, 250L, 123456L, new Path("/sometestpath/" + fileNames[i]));
+    }
+    return manifestFiles;
+  }
+
+  private Set<String> getExpectedPathes(String... fileNames) {
+    Set<String> expectedPathes = new HashSet<>();
+    for (String fileName : fileNames) {
+      expectedPathes.add("/sometestpath/" + fileName);
+    }
+    return expectedPathes;
+  }
+
+  private Set<String> getResultPathes(List<Path> foundManifestFiles) {
+    Set<String> resultPathes = new HashSet<>();
+    for (Path path : foundManifestFiles) {
+      resultPathes.add(path.toString());
+    }
+    return resultPathes;
   }
 }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.expressions;
@@ -25,6 +26,7 @@ import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorExpressionDescriptor;
 import org.apache.hadoop.hive.ql.exec.vector.VectorExpressionDescriptor.ArgumentType;
+import org.apache.hive.common.util.DateParser;
 
 /**
  * Vectorized implementation of trunc(date, fmt) function for string input
@@ -54,7 +56,7 @@ public class TruncDateFromString extends TruncDateFromTimestamp {
 
     String dateString =
         new String(inV.vector[i], inV.start[i], inV.length[i], StandardCharsets.UTF_8);
-    if (dateParser.parseDate(dateString, date)) {
+    if (DateParser.parseDate(dateString, date)) {
       processDate(outV, i, date);
     } else {
       outV.isNull[i] = true;

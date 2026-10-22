@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse;
@@ -33,6 +34,7 @@ import org.antlr.runtime.tree.Tree;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.common.StringInternUtils;
 import org.apache.hadoop.hive.ql.lib.Node;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 
 /**
  *
@@ -46,6 +48,10 @@ public class ASTNode extends CommonTree implements Node,Serializable {
   private transient ASTNode rootNode;
   private transient boolean isValidASTStr;
   private transient boolean visited = false;
+  // At parsing type, the typeInfo isn't known. However, Hive has logic that converts
+  // the CBO plan back into ASTNode objects, and at this point, the typeInfo has
+  // been calculated by the optimizer.
+  private transient TypeInfo typeInfo;
 
   private static final Interner<ImmutableCommonToken> TOKEN_CACHE = Interners.newWeakInterner();
 
@@ -153,6 +159,14 @@ public class ASTNode extends CommonTree implements Node,Serializable {
    */
   public void setOrigin(ASTNodeOrigin origin) {
     this.origin = origin;
+  }
+
+  public void setTypeInfo(TypeInfo typeInfo) {
+    this.typeInfo = typeInfo;
+  }
+
+  public TypeInfo getTypeInfo() {
+    return typeInfo;
   }
 
   public String dump() {

@@ -1,4 +1,3 @@
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -10,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.load.message;
 
@@ -40,6 +40,7 @@ import org.apache.hadoop.hive.ql.parse.repl.PathBuilder;
 import org.apache.hadoop.hive.ql.parse.repl.load.MetaData;
 import org.apache.hadoop.hive.ql.plan.CopyWork;
 import org.apache.hadoop.hive.ql.plan.DependencyCollectionWork;
+import org.apache.hadoop.util.Time;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -187,7 +188,7 @@ public class CreateFunctionHandler extends AbstractMessageHandler {
           pathBuilder
               .addDescendant(destinationDbName.toLowerCase())
               .addDescendant(metadata.function.getFunctionName().toLowerCase())
-              .addDescendant(String.valueOf(System.nanoTime()))
+              .addDescendant(String.valueOf(Time.monotonicNowNanos()))
               .addDescendant(split[split.length - 1])
               .build(),
           new Path(functionsRootDir).getFileSystem(context.hiveConf)
@@ -206,7 +207,8 @@ public class CreateFunctionHandler extends AbstractMessageHandler {
         return ReplCopyTask.getLoadCopyTask(metadata.getReplicationSpec(), new Path(sourceUri), dest, context.hiveConf,
                 context.getDumpDirectory(), context.getMetricCollector());
       } else {
-        return TaskFactory.get(new CopyWork(new Path(sourceUri), dest, true, false,
+        //CopyTask expects the destination directory, hence we pass the parent of the actual destination path
+        return TaskFactory.get(new CopyWork(new Path(sourceUri), dest.getParent(), true, false,
                 context.getDumpDirectory(), context.getMetricCollector(), true), context.hiveConf);
       }
     }

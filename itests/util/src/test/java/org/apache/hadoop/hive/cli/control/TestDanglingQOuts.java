@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.cli.control;
 
@@ -64,15 +65,7 @@ public class TestDanglingQOuts {
   public TestDanglingQOuts() throws Exception {
 
     for (Class<?> clz : CliConfigs.class.getDeclaredClasses()) {
-      if (clz == CliConfigs.DummyConfig.class) {
-        continue;
-      }
-      if (clz == CliConfigs.TezPerfCliConfig.class) {
-        handleCliConfig(new CliConfigs.TezPerfCliConfig(true));
-        handleCliConfig(new CliConfigs.TezPerfCliConfig(false));
-      } else {
-        handleCliConfig((AbstractCliConfig) clz.newInstance());
-      }
+      handleCliConfig((AbstractCliConfig) clz.newInstance());
     }
   }
 

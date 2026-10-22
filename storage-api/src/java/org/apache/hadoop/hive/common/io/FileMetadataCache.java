@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.common.io;
@@ -71,7 +72,8 @@ public interface FileMetadataCache {
    * Iterates through the file entries of this cache and for those that match the given predicate (aka have a matching
    * CacheTag) will have their buffers marked for (a later) proactive eviction.
    * @param predicate - matching the predicate indicates eligibility for proactive eviction
+   * @param isInstantDeallocation - whether to ask allocator to deallocate eligible buffers immediately after marking
    * @return number of bytes marked in the buffers eligible for eviction
    */
-  long markBuffersForProactiveEviction(Predicate<CacheTag> predicate);
+  long markBuffersForProactiveEviction(Predicate<CacheTag> predicate, boolean isInstantDeallocation);
 }

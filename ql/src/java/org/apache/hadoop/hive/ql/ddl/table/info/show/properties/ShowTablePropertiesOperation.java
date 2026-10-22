@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.info.show.properties;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
 
 import java.io.IOException;
 import java.util.Map;
@@ -47,7 +48,7 @@ public class ShowTablePropertiesOperation extends DDLOperation<ShowTableProperti
     try {
       if (tbl == null) {
         String errMsg = "Table " + tableName + " does not exist";
-        DDLUtils.writeToFile(errMsg, desc.getResFile(), context);
+        ShowUtils.writeToFile(errMsg, desc.getResFile(), context);
         return 0;
       }
 
@@ -61,19 +62,19 @@ public class ShowTablePropertiesOperation extends DDLOperation<ShowTableProperti
           String errMsg = "Table " + tableName + " does not have property: " + propertyName;
           builder.append(errMsg);
         } else {
-          DDLUtils.appendNonNull(builder, propertyName, true);
-          DDLUtils.appendNonNull(builder, propertyValue);
+          ShowUtils.appendNonNull(builder, propertyName, true);
+          ShowUtils.appendNonNull(builder, propertyValue);
         }
       } else {
         Map<String, String> properties = new TreeMap<String, String>(tbl.getParameters());
         for (Entry<String, String> entry : properties.entrySet()) {
-          DDLUtils.appendNonNull(builder, entry.getKey(), true);
-          DDLUtils.appendNonNull(builder, entry.getValue());
+          ShowUtils.appendNonNull(builder, entry.getKey(), true);
+          ShowUtils.appendNonNull(builder, entry.getValue());
         }
       }
 
       LOG.info("DDLTask: written data for showing properties of {}", tableName);
-      DDLUtils.writeToFile(builder.toString(), desc.getResFile(), context);
+      ShowUtils.writeToFile(builder.toString(), desc.getResFile(), context);
     } catch (IOException e) {
       LOG.info("show table properties: ", e);
       return 1;

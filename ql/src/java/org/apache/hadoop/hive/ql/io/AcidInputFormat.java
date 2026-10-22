@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io;
@@ -26,6 +27,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.ql.io.orc.OrcRawRecordMerger;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.shims.HadoopShims;
 import org.apache.hadoop.io.Writable;
@@ -136,7 +138,7 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
     /**
      * @param minWriteId min writeId of the delta directory
      * @param maxWriteId max writeId of the delta directory
-     * @param stmtIds delta dir suffixes when a single txn writes > 1 delta in the same partition
+     * @param stmtIds delta dir suffixes when a single txn writes &gt; 1 delta in the same partition
      * @param visibilityTxnId maybe 0, if the dir name didn't have it.  txnid:0 is always visible
      * @param deltaFiles bucketFiles in the directory
      */
@@ -266,8 +268,7 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
     public DeltaFileMetaData(HadoopShims.HdfsFileStatusWithId fileStatus, Integer stmtId, int bucketId) {
       modTime = fileStatus.getFileStatus().getModificationTime();
       length = fileStatus.getFileStatus().getLen();
-      String attempt = AcidUtils.parseAttemptId(fileStatus.getFileStatus().getPath());
-      attemptId = StringUtils.isEmpty(attempt) ? null : Integer.parseInt(attempt);
+      attemptId = AcidUtils.parseAttemptId(fileStatus.getFileStatus().getPath());
       fileId = fileStatus.getFileId();
       this.stmtId = stmtId;
       this.bucketId = bucketId;
@@ -315,6 +316,7 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
       out.writeByte(flags);
       out.writeLong(modTime);
       out.writeLong(length);
+      out.writeInt(bucketId);
       if (attemptId != null) {
         out.writeInt(attemptId);
       }
@@ -334,6 +336,7 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
           hasStmtId = (HAS_STMTID_FLAG & flags) != 0;
       modTime = in.readLong();
       length = in.readLong();
+      bucketId = in.readInt();
       if (hasAttemptId) {
         attemptId = in.readInt();
       }
@@ -345,18 +348,17 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
       }
     }
 
-    public Object getFileId(Path deltaDirectory, int bucketId, Configuration conf) {
+    public Object getFileId(Path deltaFile, int bucketId, Configuration conf) {
       boolean forceSynthetic = !HiveConf.getBoolVar(conf, HiveConf.ConfVars.LLAP_IO_USE_FILEID_PATH);
       if (fileId != null && !forceSynthetic) {
         return fileId;
       }
       // Calculate the synthetic fileid
-      Path realPath = getPath(deltaDirectory, bucketId);
-      return new SyntheticFileId(realPath, length, modTime);
+      return new SyntheticFileId(deltaFile, length, modTime);
     }
 
     public Path getPath(Path deltaDirectory, int bucketId) {
-      return AcidUtils.createBucketFile(deltaDirectory, bucketId, attemptId == null ? null : String.valueOf(attemptId));
+      return AcidUtils.createBucketFile(deltaDirectory, bucketId, attemptId);
     }
   }
 
@@ -395,7 +397,7 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
   }
 
   public static interface RowReader<V>
-      extends RecordReader<RecordIdentifier, V> {
+      extends RecordReader<OrcRawRecordMerger.ReaderKey, V> {
     public ObjectInspector getObjectInspector();
   }
 
@@ -438,13 +440,13 @@ public interface AcidInputFormat<KEY extends WritableComparable, VALUE>
                              ValidWriteIdList validWriteIdList,
                              Path baseDirectory,
                              Path[] deltaDirectory,
-                             Map<String, String> deltasToAttemptId
+                             Map<String, Integer> deltasToAttemptId
                              ) throws IOException;
 
   /**
    * RecordReader returned by AcidInputFormat working in row-at-a-time mode should AcidRecordReader.
    */
   public interface AcidRecordReader<K,V> extends RecordReader<K,V> {
-    RecordIdentifier getRecordIdentifier();
+    OrcRawRecordMerger.ReaderKey getRecordIdentifier();
   }
 }

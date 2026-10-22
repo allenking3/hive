@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.cache;
@@ -518,7 +519,7 @@ public class SerDeLowLevelCacheImpl implements BufferUsageManager, LlapIoDebugDu
     return rc > 0;
   }
 
-  public long markBuffersForProactiveEviction(Predicate<CacheTag> predicate) {
+  public long markBuffersForProactiveEviction(Predicate<CacheTag> predicate, boolean isInstantDeallocation) {
     long markedBytes = 0;
     // Proactive eviction does not need to be perfectly accurate - the iterator returned here might be missing some
     // concurrent inserts / removals but it's fine for us here.
@@ -537,6 +538,9 @@ public class SerDeLowLevelCacheImpl implements BufferUsageManager, LlapIoDebugDu
                 if (streamData == null) continue;
                 for (int k = 0; k < streamData.length; ++k) {
                   markedBytes += streamData[k].markForEviction();
+                  if (isInstantDeallocation) {
+                    allocator.deallocate(streamData[k]);
+                  }
                 }
               }
             }

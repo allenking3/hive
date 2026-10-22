@@ -9,17 +9,19 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.info.show.status;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
+import org.apache.hadoop.hive.ql.ddl.table.info.show.status.formatter.ShowTableStatusFormatter;
 
 import java.io.DataOutputStream;
 import java.util.ArrayList;
@@ -75,10 +77,10 @@ public class ShowTableStatusOperation extends DDLOperation<ShowTableStatusDesc> 
       LOG.info("Found {} table(s) matching the SHOW TABLE EXTENDED statement.", tableNames.size());
     }
 
-    DataOutputStream outStream = DDLUtils.getOutputStream(new Path(desc.getResFile()), context);
+    DataOutputStream outStream = ShowUtils.getOutputStream(new Path(desc.getResFile()), context);
     try {
-      context.getFormatter().showTableStatus(outStream, context.getDb(), context.getConf(), tables, partitionSpec,
-          partition);
+      ShowTableStatusFormatter formatter = ShowTableStatusFormatter.getFormatter(context.getConf());
+      formatter.showTableStatus(outStream, context.getDb(), context.getConf(), tables, partition);
     } catch (Exception e) {
       throw new HiveException(e, ErrorMsg.GENERIC_ERROR, "show table status");
     } finally {

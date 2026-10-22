@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
@@ -76,7 +77,8 @@ public class TestSQL11ReservedKeyWordsNegative {
           { "RLIKE" }, { "ROLLUP" }, { "ROW" }, { "ROWS" }, { "SET" }, { "SMALLINT" }, { "TABLE" },
           { "TIME" }, { "TIMESTAMP" }, { "TO" }, { "TRIGGER" }, { "TRUE" }, { "TRUNCATE" },
           { "UNION" }, { "UNIQUE" }, { "UPDATE" }, { "USER" }, { "USING" },
-          { "VALUES" }, { "WITH" }, { "SOME" }, { "ANY" }, { "ALL" }, {"PREPARE"} });
+          { "VALUES" }, { "WITH" }, { "SOME" }, { "ANY" }, { "ALL" }, {"PREPARE"},
+          {"LEADING"}, {"TRAILING"} });
     }
 
     private String keyword;

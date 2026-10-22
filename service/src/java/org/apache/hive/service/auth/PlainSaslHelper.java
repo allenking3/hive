@@ -9,16 +9,16 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hive.service.auth;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.security.Security;
 import java.util.HashMap;
 
@@ -42,6 +42,7 @@ import org.apache.thrift.transport.TSaslClientTransport;
 import org.apache.thrift.transport.TSaslServerTransport;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
+import org.apache.thrift.transport.TTransportException;
 import org.apache.thrift.transport.TTransportFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,7 +80,7 @@ public final class PlainSaslHelper {
   }
 
   public static TTransport getPlainTransport(String username, String password,
-    TTransport underlyingTransport) throws SaslException {
+    TTransport underlyingTransport) throws SaslException, TTransportException {
     return new TSaslClientTransport("PLAIN", null, null, null, new HashMap<String, String>(),
       new PlainCallbackHandler(username, password), underlyingTransport);
   }
@@ -107,7 +108,7 @@ public final class PlainSaslHelper {
     }
 
     @Override
-    public TTransport getTransport(final TTransport trans) {
+    public TTransport getTransport(final TTransport trans) throws TTransportException {
       TSocket tSocket = null;
       // Attempt to avoid authentication if only we can fetch the client IP address and it
       // happens to be from the same domain as the server.
@@ -159,7 +160,7 @@ public final class PlainSaslHelper {
       PasswdAuthenticationProvider provider =
         AuthenticationProviderFactory.getAuthenticationProvider(authMethod);
       try {
-        provider.Authenticate(username, password);
+        provider.authenticate(username, password);
       } catch (Exception e) {
         LOG.error("Login attempt is failed for user : " + username + ". Error Messsage : " + e.getMessage());
         throw e;

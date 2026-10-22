@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.udf;
@@ -34,6 +35,7 @@ import org.apache.hadoop.hive.serde2.io.DateWritableV2;
 import org.apache.hadoop.hive.serde2.io.TimestampWritableV2;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
+import org.apache.hive.common.util.DateParser;
 
 /**
  * UDFWeekOfYear.
@@ -70,17 +72,15 @@ public class UDFWeekOfYear extends UDF {
    *         string.
    */
   public IntWritable evaluate(Text dateString) {
-    if (dateString == null) {
-      return null;
+    if (dateString != null) {
+      Date date = DateParser.parseDate(dateString.toString());
+      if (date != null) {
+        calendar.setTimeInMillis(date.toEpochMilli());
+        result.set(calendar.get(Calendar.WEEK_OF_YEAR));
+        return result;
+      }
     }
-    try {
-      Date date = Date.valueOf(dateString.toString());
-      calendar.setTimeInMillis(date.toEpochMilli());
-      result.set(calendar.get(Calendar.WEEK_OF_YEAR));
-      return result;
-    } catch (IllegalArgumentException e) {
-      return null;
-    }
+    return null;
   }
 
   public IntWritable evaluate(DateWritableV2 d) {

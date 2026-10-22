@@ -6,17 +6,29 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.utils;
 
+import com.google.common.base.Preconditions;
+import java.io.FileInputStream;
+import java.lang.reflect.Method;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import javax.net.ssl.SSLContext;
+
+import com.google.common.base.Splitter;
+import com.google.common.collect.Iterables;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.security.DelegationTokenIdentifier;
 import org.apache.hadoop.hive.metastore.security.DelegationTokenSelector;
@@ -27,12 +39,21 @@ import org.apache.hadoop.security.authentication.util.KerberosUtil;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.security.token.TokenSelector;
+import org.apache.thrift.transport.THttpClient;
 import org.apache.thrift.transport.TSSLTransportFactory;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
 import org.apache.thrift.transport.TTransportException;
 import org.apache.zookeeper.client.ZooKeeperSaslClient;
+import org.apache.http.config.Registry;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.conn.ssl.DefaultHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.conn.BasicHttpClientConnectionManager;
+import org.apache.http.ssl.SSLContexts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,10 +64,8 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManagerFactory;
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.AppConfigurationEntry.LoginModuleControlFlag;
-import javax.security.auth.login.LoginException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
 import java.security.KeyStore;
 
 import java.util.ArrayList;
@@ -54,11 +73,28 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class SecurityUtils {
   private static final Logger LOG = LoggerFactory.getLogger(SecurityUtils.class);
 
-  public static UserGroupInformation getUGI() throws LoginException, IOException {
+  private static Method getKeytab = null;
+
+  static {
+    Class<?> clz = UserGroupInformation.class;
+
+    try {
+      getKeytab = clz.getDeclaredMethod("getKeytab");
+      getKeytab.setAccessible(true);
+    } catch (NoSuchMethodException nme) {
+      LOG.warn("Cannot find private method \"getKeytab\" in class:" +
+          UserGroupInformation.class.getCanonicalName(), nme);
+      getKeytab = null;
+    }
+  }
+
+  public static UserGroupInformation getUGI() throws IOException {
     String doAs = System.getenv("HADOOP_USER_NAME");
     if (doAs != null && doAs.length() > 0) {
      /*
@@ -71,15 +107,42 @@ public class SecurityUtils {
     }
     return UserGroupInformation.getCurrentUser();
   }
+
   /**
    * Dynamically sets up the JAAS configuration that uses kerberos
    * @param principal
    * @param keyTabFile
    * @throws IOException
    */
-  public static void setZookeeperClientKerberosJaasConfig(String principal, String keyTabFile) throws IOException {
+  public static void setZookeeperClientKerberosJaasConfig(String principal, String keyTabFile,
+      String... loginContext) throws IOException {
     // ZooKeeper property name to pick the correct JAAS conf section
-    final String SASL_LOGIN_CONTEXT_NAME = "HiveZooKeeperClient";
+    String loginContextName = "HiveZooKeeperClient";
+    if (loginContext != null && loginContext.length > 0) {
+      loginContextName = loginContext[0];
+    }
+    final String SASL_LOGIN_CONTEXT_NAME = loginContextName;
+    if (System.getProperties().containsKey(SASL_LOGIN_CONTEXT_NAME)) {
+      LOG.info("ZooKeeper JAAS context: {} has been set, ignore...", SASL_LOGIN_CONTEXT_NAME);
+      return;
+    }
+    // For client to authenticate with zk, where we don't know the exact principal.
+    if (StringUtils.isEmpty(principal) || StringUtils.isEmpty(keyTabFile)) {
+      UserGroupInformation loginUser = UserGroupInformation.getLoginUser();
+      try {
+        if (getKeytab != null && UserGroupInformation.isSecurityEnabled() &&
+            UserGroupInformation.isLoginKeytabBased()) {
+          principal = loginUser.getUserName();
+          keyTabFile = (String) getKeytab.invoke(loginUser);
+        } else if (System.getProperty("java.security.auth.login.config") != null) {
+          // The client provides the jaas configuration, use it
+          return;
+        }
+      } catch (Exception e) {
+        throw new IOException("Failed to get the principal or keyTab from UGI", e);
+      }
+    }
+
     System.setProperty(ZooKeeperSaslClient.LOGIN_CONTEXT_NAME_KEY, SASL_LOGIN_CONTEXT_NAME);
 
     principal = SecurityUtil.getServerPrincipal(principal, "0.0.0.0");
@@ -115,14 +178,23 @@ public class SecurityUtils {
         Map<String, String> krbOptions = new HashMap<String, String>();
         if (IBM_JAVA) {
           krbOptions.put("credsType", "both");
-          krbOptions.put("useKeytab", keyTabFile);
+          if (keyTabFile != null) {
+            krbOptions.put("useKeytab", keyTabFile);
+          } else {
+            krbOptions.put("useDefaultCcache", "true");
+          }
         } else {
           krbOptions.put("doNotPrompt", "true");
-          krbOptions.put("storeKey", "true");
-          krbOptions.put("useKeyTab", "true");
-          krbOptions.put("keyTab", keyTabFile);
+          if (keyTabFile != null) {
+            krbOptions.put("useKeyTab", "true");
+            krbOptions.put("keyTab", keyTabFile);
+          } else {
+            krbOptions.put("useTicketCache", "true");
+          }
         }
-  krbOptions.put("principal", principal);
+        if (principal != null) {
+          krbOptions.put("principal", principal);
+        }
         krbOptions.put("refreshKrb5Config", "true");
         AppConfigurationEntry hiveZooKeeperClientEntry = new AppConfigurationEntry(
             KerberosUtil.getKrb5LoginModuleName(), LoginModuleControlFlag.REQUIRED, krbOptions);
@@ -196,12 +268,8 @@ public class SecurityUtils {
    * @throws IOException if underlying Hadoop call throws LoginException
    */
   public static String getUser() throws IOException {
-    try {
-      UserGroupInformation ugi = getUGI();
-      return ugi.getUserName();
-    } catch (LoginException le) {
-      throw new IOException(le);
-    }
+    UserGroupInformation ugi = getUGI();
+    return ugi.getUserName();
   }
 
   public static TServerSocket getServerSocket(String hiveHost, int portNum) throws TTransportException {
@@ -215,17 +283,61 @@ public class SecurityUtils {
     return new TServerSocket(serverAddress);
   }
 
+  public static String[] parseIncludeProtocols(String protocols) {
+    return Iterables.toArray(Splitter.on(",").trimResults().omitEmptyStrings()
+        .split(protocols), String.class);
+  }
+
+  public static String[] parseIncludeCipherSuites(String cipherSuites) {
+    return Iterables.toArray(Splitter.on(":").trimResults().omitEmptyStrings()
+        .split(cipherSuites), String.class);
+  }
+
+  private static String[] filterEnabledProtocols(String[] enabledProtocols,
+      String includeProtocols) throws TTransportException {
+    String[] filteredProtocols = enabledProtocols;
+    String[] parsedIncludeProtocols = parseIncludeProtocols(includeProtocols);
+    if (parsedIncludeProtocols.length > 0) {
+      Set<String> protocolsLowerCase = Arrays.stream(parsedIncludeProtocols).map(String::toLowerCase)
+          .collect(Collectors.toSet());
+      filteredProtocols = Arrays.stream(enabledProtocols).filter(protocol ->
+          protocolsLowerCase.contains(protocol.toLowerCase())).toArray(String[]::new);
+    }
+    if (filteredProtocols.length == 0) {
+      throw new TTransportException("No TLS protocols to enable. "
+          + "Protocols configured to include: " + Arrays.toString(parsedIncludeProtocols)
+          + ", Protocols allowed to enable: " + Arrays.toString(enabledProtocols));
+    }
+    return filteredProtocols;
+  }
+
+  private static TSSLTransportFactory.TSSLTransportParameters getSSLTransportParameters(boolean isKeyStore,
+      String storePath, String storePassword, String storeAlgorithm, String storeType, String includeCipherSuites) {
+    TSSLTransportFactory.TSSLTransportParameters params;
+    String[] parsedCipherSuites = parseIncludeCipherSuites(includeCipherSuites);
+    if (parsedCipherSuites.length > 0) {
+      params = new TSSLTransportFactory.TSSLTransportParameters("TLS", parsedCipherSuites);
+    } else {
+      params = new TSSLTransportFactory.TSSLTransportParameters();
+    }
+    if (isKeyStore) {
+      params.setKeyStore(storePath, storePassword, storeAlgorithm, storeType);
+    } else {
+      params.setTrustStore(storePath, storePassword, storeAlgorithm, storeType);
+      params.requireClientAuth(true);
+    }
+    return params;
+  }
+
   public static TServerSocket getServerSSLSocket(String hiveHost, int portNum, String keyStorePath,
-      String keyStorePassWord, String keyStoreType, String keyStoreAlgorithm, List<String> sslVersionBlacklist)
-      throws TTransportException, UnknownHostException {
-    TSSLTransportFactory.TSSLTransportParameters params =
-        new TSSLTransportFactory.TSSLTransportParameters();
-    String kStoreType = keyStoreType.isEmpty()? KeyStore.getDefaultType() : keyStoreType;
-    String kStoreAlgorithm = keyStoreAlgorithm.isEmpty()?
-            KeyManagerFactory.getDefaultAlgorithm() : keyStoreAlgorithm;
-    params.setKeyStore(keyStorePath, keyStorePassWord, kStoreAlgorithm, kStoreType);
+      String keyStorePassWord, String keyStoreType, String keyStoreAlgorithm, List<String> sslVersionBlacklist,
+      String includeProtocols, String includeCipherSuites) throws TTransportException {
+    TSSLTransportFactory.TSSLTransportParameters params = getSSLTransportParameters(true,
+        keyStorePath, keyStorePassWord,
+        keyStoreAlgorithm.isEmpty() ? KeyManagerFactory.getDefaultAlgorithm() : keyStoreAlgorithm,
+        keyStoreType.isEmpty() ? KeyStore.getDefaultType() : keyStoreType, includeCipherSuites);
     InetSocketAddress serverAddress;
-    if (hiveHost == null || hiveHost.isEmpty()) {
+    if (StringUtils.isEmpty(hiveHost)) {
       // Wildcard bind
       serverAddress = new InetSocketAddress(portNum);
     } else {
@@ -247,28 +359,76 @@ public class SecurityUtils {
           enabledProtocols.add(protocol);
         }
       }
-      sslServerSocket.setEnabledProtocols(enabledProtocols.toArray(new String[0]));
+      if (enabledProtocols.isEmpty()) {
+        throw new TTransportException("No TLS protocols to enable after discarding configured blacklist protocols. "
+            + "Protocols allowed to enable: " + Arrays.toString(sslServerSocket.getEnabledProtocols()));
+      }
+      sslServerSocket.setEnabledProtocols(filterEnabledProtocols(enabledProtocols.toArray(String[]::new),
+          includeProtocols));
       LOG.info("SSL Server Socket Enabled Protocols: "
           + Arrays.toString(sslServerSocket.getEnabledProtocols()));
     }
     return thriftServerSocket;
   }
 
-  public static TTransport getSSLSocket(String host, int port, int loginTimeout,
+  public static TTransport getSSLSocket(String host, int port, int socketTimeout, int connectionTimeout,
       String trustStorePath, String trustStorePassWord, String trustStoreType,
-      String trustStoreAlgorithm) throws TTransportException {
-    TSSLTransportFactory.TSSLTransportParameters params =
-        new TSSLTransportFactory.TSSLTransportParameters();
-    String tStoreType = trustStoreType.isEmpty()? KeyStore.getDefaultType() : trustStoreType;
-    String tStoreAlgorithm = trustStoreAlgorithm.isEmpty()?
-        TrustManagerFactory.getDefaultAlgorithm() : trustStoreAlgorithm;
-    params.setTrustStore(trustStorePath, trustStorePassWord,
-        tStoreAlgorithm, tStoreType);
-    params.requireClientAuth(true);
+      String trustStoreAlgorithm, String includeProtocols, String includeCipherSuites) throws TTransportException {
+    TSSLTransportFactory.TSSLTransportParameters params = getSSLTransportParameters(false,
+        trustStorePath, trustStorePassWord,
+        trustStoreAlgorithm.isEmpty() ? TrustManagerFactory.getDefaultAlgorithm() : trustStoreAlgorithm,
+        trustStoreType.isEmpty() ? KeyStore.getDefaultType() : trustStoreType, includeCipherSuites);
     // The underlying SSLSocket object is bound to host:port with the given SO_TIMEOUT and
-    // SSLContext created with the given params
-    TSocket tSSLSocket = TSSLTransportFactory.getClientSocket(host, port, loginTimeout, params);
+    // connection timeout and SSLContext created with the given params
+    TSocket tSSLSocket = TSSLTransportFactory.getClientSocket(host, port, socketTimeout, params);
+    SSLSocket sslSocket = (SSLSocket) (tSSLSocket.getSocket());
+    sslSocket.setEnabledProtocols(filterEnabledProtocols(sslSocket.getEnabledProtocols(), includeProtocols));
+    tSSLSocket.setConnectTimeout(connectionTimeout);
     return getSSLSocketWithHttps(tSSLSocket);
+  }
+
+  /*
+  Sets the ssl related configs in the underlying http client builder and wrap it up
+  in a THttpClient
+   */
+  public static THttpClient getThriftHttpsClient(String httpsUrl, String trustStorePath,
+      String trustStorePasswd, String trustStoreAlgorithm, String trustStoreType,
+      String includeProtocols, String includeCipherSuites,
+      HttpClientBuilder underlyingHttpClientBuilder) throws TTransportException, IOException,
+      KeyStoreException, NoSuchAlgorithmException, CertificateException,
+      KeyManagementException {
+    Preconditions.checkNotNull(underlyingHttpClientBuilder, "httpClientBuilder should not be null");
+    if (trustStoreType == null || trustStoreType.isEmpty()) {
+      trustStoreType = KeyStore.getDefaultType();
+    }
+    if (trustStoreAlgorithm.isEmpty()) {
+      trustStoreAlgorithm = TrustManagerFactory.getDefaultAlgorithm();
+    }
+    KeyStore sslTrustStore = KeyStore.getInstance(trustStoreType);
+    try (FileInputStream fis = new FileInputStream(trustStorePath)) {
+      sslTrustStore.load(fis, trustStorePasswd.toCharArray());
+    }
+
+    SSLContext sslContext =
+        SSLContexts.custom().setTrustManagerFactoryAlgorithm(trustStoreAlgorithm).
+            loadTrustMaterial(sslTrustStore, null).build();
+    String[] protocols = null;
+    String[] parsedProtocols = parseIncludeProtocols(includeProtocols);
+    if (parsedProtocols.length > 0) {
+      protocols = parsedProtocols;
+    }
+    String[] ciphers = null;
+    String[] parsedCipherSuites = parseIncludeCipherSuites(includeCipherSuites);
+    if (parsedCipherSuites.length > 0) {
+      ciphers = parsedCipherSuites;
+    }
+    SSLConnectionSocketFactory socketFactory =
+        new SSLConnectionSocketFactory(sslContext, protocols, ciphers, new DefaultHostnameVerifier(null));
+    final Registry<ConnectionSocketFactory> registry =
+        RegistryBuilder.<ConnectionSocketFactory> create().register("https", socketFactory)
+            .build();
+    underlyingHttpClientBuilder.setConnectionManager(new BasicHttpClientConnectionManager(registry));
+    return new THttpClient(httpsUrl, underlyingHttpClientBuilder.build());
   }
 
   // Using endpoint identification algorithm as HTTPS enables us to do

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -23,6 +24,9 @@ import com.google.common.collect.Multimap;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
+
+import org.apache.hadoop.hive.ql.udf.generic.GenericUDFMurmurHash;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPAnd;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +64,8 @@ import org.apache.hadoop.util.ReflectionUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Predicate;
 
 
 public class ExprNodeDescUtils {
@@ -67,7 +73,11 @@ public class ExprNodeDescUtils {
   protected static final Logger LOG = LoggerFactory.getLogger(ExprNodeDescUtils.class);
 
   public static int indexOf(ExprNodeDesc origin, List<ExprNodeDesc> sources) {
-    for (int i = 0; i < sources.size(); i++) {
+    return indexOf(origin, sources, 0);
+  }
+
+  public static int indexOf(ExprNodeDesc origin, List<ExprNodeDesc> sources, int startIndex) {
+    for (int i = startIndex; i < sources.size(); i++) {
       if (origin.isSame(sources.get(i))) {
         return i;
       }
@@ -236,6 +246,38 @@ public class ExprNodeDescUtils {
   }
 
   /**
+   * Creates a disjunction (OR) of the given expressions flattening nested disjunctions if possible.
+   * <pre>
+   * Input: AND(A, B), C, OR(D, OR(E, F))
+   * Output: OR(AND(A, B), C, D, E, F)
+   * </pre>
+   */
+  public static ExprNodeGenericFuncDesc or(List<ExprNodeDesc> exps) {
+    List<ExprNodeDesc> flatExps = new ArrayList<>();
+    for (ExprNodeDesc e : exps) {
+      split(e, flatExps, FunctionRegistry::isOpOr);
+    }
+    return new ExprNodeGenericFuncDesc(TypeInfoFactory.booleanTypeInfo, new GenericUDFOPOr(), "or", flatExps);
+  }
+
+  /**
+   * Create an expression for computing a murmur hash by recursively hashing given expressions by two:
+   * <pre>
+   * Input: HASH(A, B, C, D)
+   * Output: HASH(HASH(HASH(A,B),C),D)
+   * </pre>
+   */
+  public static ExprNodeGenericFuncDesc murmurHash(List<ExprNodeDesc> exps) {
+    assert exps.size() >= 2;
+    ExprNodeDesc hashExp = exps.get(0);
+    for (int i = 1; i < exps.size(); i++) {
+      List<ExprNodeDesc> hArgs = Arrays.asList(hashExp, exps.get(i));
+      hashExp = new ExprNodeGenericFuncDesc(TypeInfoFactory.intTypeInfo, new GenericUDFMurmurHash(), "hash", hArgs);
+    }
+    return (ExprNodeGenericFuncDesc) hashExp;
+  }
+
+  /**
    * bind two predicates by AND op
    */
   public static ExprNodeGenericFuncDesc mergePredicates(ExprNodeDesc prev, ExprNodeDesc next) {
@@ -280,9 +322,17 @@ public class ExprNodeDescUtils {
    * split predicates by AND op
    */
   public static List<ExprNodeDesc> split(ExprNodeDesc current, List<ExprNodeDesc> splitted) {
-    if (FunctionRegistry.isOpAnd(current)) {
+    return split(current, splitted, FunctionRegistry::isOpAnd);
+  }
+
+  /**
+   * split predicates by a certain condition
+   */
+  private static List<ExprNodeDesc> split(ExprNodeDesc current, List<ExprNodeDesc> splitted,
+      Predicate<ExprNodeDesc> condition) {
+    if (condition.test(current)) {
       for (ExprNodeDesc child : current.getChildren()) {
-        split(child, splitted);
+        split(child, splitted, condition);
       }
       return splitted;
     }
@@ -346,9 +396,14 @@ public class ExprNodeDescUtils {
 
   public static ArrayList<ExprNodeDesc> backtrack(List<ExprNodeDesc> sources,
       Operator<?> current, Operator<?> terminal, boolean foldExpr) throws SemanticException {
-    ArrayList<ExprNodeDesc> result = new ArrayList<ExprNodeDesc>();
+    return backtrack(sources, current, terminal, foldExpr, false);
+  }
+
+  public static ArrayList<ExprNodeDesc> backtrack(List<ExprNodeDesc> sources,
+      Operator<?> current, Operator<?> terminal, boolean foldExpr, boolean stayInSameVertex) throws SemanticException {
+    ArrayList<ExprNodeDesc> result = new ArrayList<>();
     for (ExprNodeDesc expr : sources) {
-      result.add(backtrack(expr, current, terminal, foldExpr));
+      result.add(backtrack(expr, current, terminal, foldExpr, stayInSameVertex));
     }
     return result;
   }
@@ -360,7 +415,12 @@ public class ExprNodeDescUtils {
 
   public static ExprNodeDesc backtrack(ExprNodeDesc source, Operator<?> current,
       Operator<?> terminal, boolean foldExpr) throws SemanticException {
-    Operator<?> parent = getSingleParent(current, terminal);
+    return backtrack(source, current, terminal, foldExpr, false);
+  }
+
+  public static ExprNodeDesc backtrack(ExprNodeDesc source, Operator<?> current,
+      Operator<?> terminal, boolean foldExpr, boolean stayInSameVertex) throws SemanticException {
+    Operator<?> parent = stayInSameVertex ? getSameVertexParent(current, terminal) : getSingleParent(current, terminal);
     if (parent == null) {
       return source;
     }
@@ -371,7 +431,7 @@ public class ExprNodeDescUtils {
     if (source instanceof ExprNodeGenericFuncDesc) {
       // all children expression should be resolved
       ExprNodeGenericFuncDesc function = (ExprNodeGenericFuncDesc) source.clone();
-      List<ExprNodeDesc> children = backtrack(function.getChildren(), current, terminal, foldExpr);
+      List<ExprNodeDesc> children = backtrack(function.getChildren(), current, terminal, foldExpr, stayInSameVertex);
       for (ExprNodeDesc child : children) {
         if (child == null) {
           // Could not resolve all of the function children, fail
@@ -390,12 +450,12 @@ public class ExprNodeDescUtils {
     }
     if (source instanceof ExprNodeColumnDesc) {
       ExprNodeColumnDesc column = (ExprNodeColumnDesc) source;
-      return backtrack(column, parent, terminal);
+      return backtrack(column, parent, terminal, stayInSameVertex);
     }
     if (source instanceof ExprNodeFieldDesc) {
       // field expression should be resolved
       ExprNodeFieldDesc field = (ExprNodeFieldDesc) source.clone();
-      ExprNodeDesc fieldDesc = backtrack(field.getDesc(), current, terminal, foldExpr);
+      ExprNodeDesc fieldDesc = backtrack(field.getDesc(), current, terminal, foldExpr, stayInSameVertex);
       if (fieldDesc == null) {
         return null;
       }
@@ -408,13 +468,13 @@ public class ExprNodeDescUtils {
 
   // Resolve column expression to input expression by using expression mapping in current operator
   private static ExprNodeDesc backtrack(ExprNodeColumnDesc column, Operator<?> current,
-      Operator<?> terminal) throws SemanticException {
+      Operator<?> terminal, boolean stayInSameVertex) throws SemanticException {
     Map<String, ExprNodeDesc> mapping = current.getColumnExprMap();
     if (mapping == null) {
-      return backtrack((ExprNodeDesc)column, current, terminal);
+      return backtrack(column, current, terminal, false, stayInSameVertex);
     }
     ExprNodeDesc mapped = mapping.get(column.getColumn());
-    return mapped == null ? null : backtrack(mapped, current, terminal);
+    return mapped == null ? null : backtrack(mapped, current, terminal, false, stayInSameVertex);
   }
 
   public static Operator<?> getSingleParent(Operator<?> current, Operator<?> terminal)
@@ -436,6 +496,30 @@ public class ExprNodeDescUtils {
       return terminal;
     }
     throw new SemanticException("Met multiple parent operators");
+  }
+
+  /**
+   * When Multi-Parent backtrack to the same Vertex (non-RS) branch and return the found parent.
+   * @param current Parent OP
+   * @param terminal End Op
+   * @return parent Op or Null when not found
+   */
+  public static Operator<?> getSameVertexParent(Operator<?> current, Operator<?> terminal) {
+    if (current == terminal) {
+      return null;
+    }
+    List<Operator<?>> parents = current.getParentOperators();
+    if (parents == null || parents.isEmpty()) {
+      return null;
+    }
+    if (parents.size() == 1) {
+      return parents.get(0);
+    }
+    if (terminal != null && parents.contains(terminal)) {
+      return terminal;
+    }
+    // When multi-parent, backtrack to non-RS parent branches looking for the src Expr
+    return parents.stream().filter(op -> !(op instanceof ReduceSinkOperator)).findFirst().get();
   }
 
   public static List<ExprNodeDesc> resolveJoinKeysAsRSColumns(List<ExprNodeDesc> sourceList,
@@ -478,9 +562,9 @@ public class ExprNodeDescUtils {
         if(columnInternalName.startsWith(Utilities.ReduceField.VALUE.toString())) {
           continue;
         }
-        if (source instanceof ExprNodeColumnDesc) {
+        ColumnInfo columnInfo = reduceSinkOp.getSchema().getColumnInfo(columnInternalName);
+        if (source instanceof ExprNodeColumnDesc && columnInfo != null) {
           // The join key is a table column. Create the ExprNodeDesc based on this column.
-          ColumnInfo columnInfo = reduceSinkOp.getSchema().getColumnInfo(columnInternalName);
           return new ExprNodeColumnDesc(columnInfo);
         } else {
           // Join key expression is likely some expression involving functions/operators, so there
@@ -837,6 +921,28 @@ public class ExprNodeDescUtils {
       expr = expr.getChildren().get(0);
     }
     return (expr instanceof ExprNodeColumnDesc) ? (ExprNodeColumnDesc)expr : null;
+  }
+
+  /*
+   * Extracts all referenced columns from the subtree.
+   */
+  public static Set<ExprNodeColumnDesc> findAllColumnDescs(ExprNodeDesc expr) {
+    Set<ExprNodeColumnDesc> ret = new HashSet<>();
+    findAllColumnDescs(ret, expr);
+    return ret;
+  }
+
+  private static void findAllColumnDescs(Set<ExprNodeColumnDesc> ret, ExprNodeDesc expr) {
+    if (expr instanceof ExprNodeGenericFuncDesc) {
+      ExprNodeGenericFuncDesc func = (ExprNodeGenericFuncDesc) expr;
+      for (ExprNodeDesc c : func.getChildren()) {
+        findAllColumnDescs(ret, c);
+      }
+    }
+
+    if (expr instanceof ExprNodeColumnDesc) {
+      ret.add((ExprNodeColumnDesc) expr);
+    }
   }
 
   // Find the constant origin of a certain column if it is originated from a constant

@@ -1,15 +1,21 @@
 PREHOOK: query: DROP TABLE cross_numbers
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE cross_numbers
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: DROP TABLE orc_llap
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE orc_llap
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: DROP TABLE orc_llap_small
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE orc_llap_small
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: CREATE TABLE orc_llap(
     ctinyint TINYINT,
     csmallint SMALLINT,
@@ -151,11 +157,11 @@ STAGE PLANS:
                   alias: y
                   Statistics: Num rows: 15 Data size: 180 Basic stats: COMPLETE Column stats: COMPLETE
                   Select Operator
-                    Statistics: Num rows: 15 Data size: 60 Basic stats: COMPLETE Column stats: COMPLETE
+                    Statistics: Num rows: 15 Data size: 120 Basic stats: COMPLETE Column stats: COMPLETE
                     Reduce Output Operator
                       null sort order: 
                       sort order: 
-                      Statistics: Num rows: 15 Data size: 60 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 15 Data size: 120 Basic stats: COMPLETE Column stats: COMPLETE
             Execution mode: vectorized, llap
             LLAP IO: all inputs
         Map 4 
@@ -164,11 +170,11 @@ STAGE PLANS:
                   alias: x
                   Statistics: Num rows: 15 Data size: 180 Basic stats: COMPLETE Column stats: COMPLETE
                   Select Operator
-                    Statistics: Num rows: 15 Data size: 60 Basic stats: COMPLETE Column stats: COMPLETE
+                    Statistics: Num rows: 15 Data size: 120 Basic stats: COMPLETE Column stats: COMPLETE
                     Reduce Output Operator
                       null sort order: 
                       sort order: 
-                      Statistics: Num rows: 15 Data size: 60 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 15 Data size: 120 Basic stats: COMPLETE Column stats: COMPLETE
             Execution mode: vectorized, llap
             LLAP IO: all inputs
         Reducer 2 
@@ -514,7 +520,7 @@ STAGE PLANS:
                     Group By Operator
                       aggregations: count()
                       keys: cstring1 (type: string), cstring2 (type: string)
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0, _col1, _col2
                       Statistics: Num rows: 122880 Data size: 18412870 Basic stats: COMPLETE Column stats: COMPLETE
@@ -1006,7 +1012,7 @@ STAGE PLANS:
                     Group By Operator
                       aggregations: count()
                       keys: cstring1 (type: string), cstring2 (type: string)
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0, _col1, _col2
                       Statistics: Num rows: 245760 Data size: 36825550 Basic stats: COMPLETE Column stats: COMPLETE
@@ -1194,24 +1200,30 @@ POSTHOOK: Input: default@orc_llap
 PREHOOK: query: DROP TABLE cross_numbers
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@cross_numbers
+PREHOOK: Output: database:default
 PREHOOK: Output: default@cross_numbers
 POSTHOOK: query: DROP TABLE cross_numbers
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@cross_numbers
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@cross_numbers
 PREHOOK: query: DROP TABLE orc_llap
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@orc_llap
+PREHOOK: Output: database:default
 PREHOOK: Output: default@orc_llap
 POSTHOOK: query: DROP TABLE orc_llap
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@orc_llap
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@orc_llap
 PREHOOK: query: DROP TABLE orc_llap_small
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@orc_llap_small
+PREHOOK: Output: database:default
 PREHOOK: Output: default@orc_llap_small
 POSTHOOK: query: DROP TABLE orc_llap_small
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@orc_llap_small
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@orc_llap_small

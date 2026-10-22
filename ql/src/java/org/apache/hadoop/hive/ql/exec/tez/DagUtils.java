@@ -9,31 +9,31 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.tez;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
+import com.google.common.base.Strings;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
-
-import javax.security.auth.login.LoginException;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,25 +42,20 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 import java.util.Stack;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.hive.common.JavaVersionUtils;
 import org.apache.hive.common.util.HiveStringUtils;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.CreateDelegationTokenOptions;
-import org.apache.kafka.clients.admin.CreateDelegationTokenResult;
-import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.kafka.common.security.token.delegation.DelegationToken;
+import org.apache.tez.dag.api.OutputCommitterDescriptor;
 import org.apache.tez.mapreduce.common.MRInputSplitDistributor;
 import org.apache.tez.mapreduce.hadoop.InputSplitInfo;
 import org.apache.tez.mapreduce.output.MROutput;
@@ -112,7 +107,6 @@ import org.apache.hadoop.hive.ql.plan.FileSinkDesc;
 import org.apache.hadoop.hive.ql.plan.MapWork;
 import org.apache.hadoop.hive.ql.plan.MergeJoinWork;
 import org.apache.hadoop.hive.ql.plan.OperatorDesc;
-import org.apache.hadoop.hive.ql.plan.PartitionDesc;
 import org.apache.hadoop.hive.ql.plan.ReduceWork;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.ql.plan.TezEdgeProperty;
@@ -132,7 +126,6 @@ import org.apache.hadoop.mapred.FileOutputFormat;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
-import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.yarn.api.records.LocalResource;
@@ -188,13 +181,13 @@ public class DagUtils {
   public static final String TEZ_TMP_DIR_KEY = "_hive_tez_tmp_dir";
   private static final Logger LOG = LoggerFactory.getLogger(DagUtils.class.getName());
   private static final String TEZ_DIR = "_tez_scratch_dir";
-  private static final DagUtils instance = new DagUtils();
+  private static final DagUtils instance = new DagUtils(DagUtils::defaultCredentialSuppliers);
   // The merge file being currently processed.
   public static final String TEZ_MERGE_CURRENT_MERGE_FILE_PREFIX =
       "hive.tez.current.merge.file.prefix";
-  // "A comma separated list of work names used as prefix.
+  // A comma separated list of work names used as prefix.
   public static final String TEZ_MERGE_WORK_FILE_PREFIXES = "hive.tez.merge.file.prefixes";
-  private static final Text KAFKA_DELEGATION_TOKEN_KEY = new Text("KAFKA_DELEGATION_TOKEN");
+  private final Supplier<List<DagCredentialSupplier>> credentialSuppliers;
   /**
    * Notifiers to synchronize resource localization across threads. If one thread is localizing
    * a file, other threads can wait on the corresponding notifier object instead of just sleeping
@@ -206,9 +199,11 @@ public class DagUtils {
   class CollectFileSinkUrisNodeProcessor implements SemanticNodeProcessor {
 
     private final Set<URI> uris;
+    private final Set<TableDesc> tableDescs;
 
-    public CollectFileSinkUrisNodeProcessor(Set<URI> uris) {
+    public CollectFileSinkUrisNodeProcessor(Set<URI> uris, Set<TableDesc> tableDescs) {
       this.uris = uris;
+      this.tableDescs = tableDescs;
     }
 
     @Override
@@ -219,6 +214,8 @@ public class DagUtils {
         OperatorDesc desc = op.getConf();
         if (desc instanceof FileSinkDesc) {
           FileSinkDesc fileSinkDesc = (FileSinkDesc) desc;
+          tableDescs.add(fileSinkDesc.getTableInfo());
+
           Path dirName = fileSinkDesc.getDirName();
           if (dirName != null) {
             uris.add(dirName.toUri());
@@ -237,9 +234,9 @@ public class DagUtils {
     opRules.put(new RuleRegExp("R1", FileSinkOperator.getOperatorName() + ".*"), np);
   }
 
-  private void collectFileSinkUris(List<Node> topNodes, Set<URI> uris) {
+  private void collectFileSinkUris(List<Node> topNodes, Set<URI> uris, Set<TableDesc> tableDescs) {
 
-    CollectFileSinkUrisNodeProcessor np = new CollectFileSinkUrisNodeProcessor(uris);
+    CollectFileSinkUrisNodeProcessor np = new CollectFileSinkUrisNodeProcessor(uris, tableDescs);
 
     Map<SemanticRule, SemanticNodeProcessor> opRules = new LinkedHashMap<SemanticRule, SemanticNodeProcessor>();
     addCollectFileSinkUrisRules(opRules, np);
@@ -254,11 +251,14 @@ public class DagUtils {
     }
   }
 
-
   /**
    * Set up credentials for the base work on secure clusters
    */
   public void addCredentials(BaseWork work, DAG dag, JobConf conf) {
+    Set<URI> fileSinkUris = new HashSet<URI>();
+    Set<TableDesc> fileSinkTableDescs = new HashSet<TableDesc>();
+    collectNeededFileSinkData(work, fileSinkUris, fileSinkTableDescs);
+
     if (work instanceof MapWork){
       Set<Path> paths = ((MapWork)work).getPathToAliases().keySet();
       if (!paths.isEmpty()) {
@@ -279,85 +279,53 @@ public class DagUtils {
         }
         dag.addURIsForCredentials(uris);
       }
-      getKafkaCredentials((MapWork)work, dag, conf);
+      getCredentialsFromSuppliers(work, fileSinkTableDescs, dag, conf);
     }
-    getCredentialsForFileSinks(work, dag);
+    getCredentialsForFileSinks(work, fileSinkUris, dag);
   }
 
-  private void getKafkaCredentials(MapWork work, DAG dag, JobConf conf) {
+  private void getCredentialsFromSuppliers(BaseWork work, Set<TableDesc> tables, DAG dag, JobConf conf) {
     if (!UserGroupInformation.isSecurityEnabled()){
       return;
     }
-    Token<?> tokenCheck = dag.getCredentials().getToken(KAFKA_DELEGATION_TOKEN_KEY);
-    if (tokenCheck != null) {
-      LOG.debug("Kafka credentials already added, skipping...");
-      return;
-    }
-    LOG.info("Getting kafka credentials for mapwork: " + work.getName());
-
-    String kafkaBrokers = null;
-    Map<String, PartitionDesc> partitions = work.getAliasToPartnInfo();
-    for (PartitionDesc partition : partitions.values()) {
-      TableDesc tableDesc = partition.getTableDesc();
-      kafkaBrokers = (String) tableDesc.getProperties().get("kafka.bootstrap.servers"); //FIXME: KafkaTableProperties
-      if (kafkaBrokers != null && !kafkaBrokers.isEmpty()) {
-        getKafkaDelegationTokenForBrokers(dag, conf, kafkaBrokers);
-        return;
-      } else {
-        // we don't need to iterate on all partitions, and checking the same TableDesc
-        // if partitions[0].getTableDesc() doesn't show kafka table, let's return quickly
-        break;
+    for (DagCredentialSupplier supplier : credentialSuppliers.get()) {
+      Text alias = supplier.getTokenAlias();
+      Token<?> t = dag.getCredentials().getToken(alias);
+      if (t != null) {
+        continue;
+      }
+      LOG.debug("Attempt to get token {} for work {}", alias, work.getName());
+      t = supplier.obtainToken(work, tables, conf);
+      if (t != null) {
+        dag.getCredentials().addToken(alias, t);
       }
     }
   }
 
-  private void getKafkaDelegationTokenForBrokers(DAG dag, JobConf conf, String kafkaBrokers) {
-    LOG.debug("Getting kafka credentials for brokers: {}", kafkaBrokers);
-
-    String keytab = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_SERVER2_KERBEROS_KEYTAB);
-    String principal = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_SERVER2_KERBEROS_PRINCIPAL);
-    try {
-      principal = SecurityUtil.getServerPrincipal(principal, "0.0.0.0");
-    } catch (IOException e) {
-      throw new RuntimeException(e);
+  private static List<DagCredentialSupplier> defaultCredentialSuppliers() {
+    // Class names of credential providers that should be used when adding credentials to the dag.
+    // Use plain strings instead of {@link Class#getName()} to avoid compile scope dependencies to other modules.
+    List<String> supplierClassNames =
+        Collections.singletonList("org.apache.hadoop.hive.kafka.KafkaDagCredentialSupplier");
+    List<DagCredentialSupplier> dagSuppliers = new ArrayList<>();
+    for (String s : supplierClassNames) {
+      try {
+        Class<? extends DagCredentialSupplier> c = Class.forName(s).asSubclass(DagCredentialSupplier.class);
+        dagSuppliers.add(c.getConstructor().newInstance());
+      } catch (ReflectiveOperationException e) {
+        LOG.error("Failed to add credential supplier", e);
+      }
     }
-
-    Properties config = new Properties();
-    config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBrokers);
-    config.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_PLAINTEXT");
-
-    String jaasConfig =
-        String.format("%s %s %s %s serviceName=\"%s\" keyTab=\"%s\" principal=\"%s\";",
-            "com.sun.security.auth.module.Krb5LoginModule required", "debug=true", "useKeyTab=true",
-            "storeKey=true", "kafka", keytab, principal);
-    config.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
-
-    LOG.debug("Jaas config for requesting kafka credentials: {}", jaasConfig);
-    AdminClient admin = AdminClient.create(config);
-
-    CreateDelegationTokenOptions createDelegationTokenOptions = new CreateDelegationTokenOptions();
-    CreateDelegationTokenResult createResult =
-        admin.createDelegationToken(createDelegationTokenOptions);
-    DelegationToken token;
-    try {
-      token = createResult.delegationToken().get();
-    } catch (InterruptedException | ExecutionException e) {
-      throw new RuntimeException("Exception while getting kafka delegation tokens", e);
-    }
-    LOG.info("Got kafka delegation token: {}", token);
-
-    dag.getCredentials().addToken(KAFKA_DELEGATION_TOKEN_KEY,
-        new Token<>(token.tokenInfo().tokenId().getBytes(), token.hmac(), null, new Text("kafka")));
+    return dagSuppliers;
   }
 
-  private void getCredentialsForFileSinks(BaseWork baseWork, DAG dag) {
-    Set<URI> fileSinkUris = new HashSet<URI>();
+  private void collectNeededFileSinkData(BaseWork work, Set<URI> fileSinkUris, Set<TableDesc> fileSinkTableDescs) {
+    List<Node> topNodes = getTopNodes(work);
+    LOG.debug("Collecting file sink uris for {} topnodes: {}", work.getClass(), topNodes);
+    collectFileSinkUris(topNodes, fileSinkUris, fileSinkTableDescs);
+  }
 
-    List<Node> topNodes = getTopNodes(baseWork);
-
-    LOG.debug("Collecting file sink uris for {} topnodes: {}", baseWork.getClass(), topNodes);
-    collectFileSinkUris(topNodes, fileSinkUris);
-
+  private void getCredentialsForFileSinks(BaseWork baseWork, Set<URI> fileSinkUris, DAG dag) {
     if (LOG.isDebugEnabled()) {
       for (URI fileSinkUri : fileSinkUris) {
         LOG.debug("Marking {} output URI as needing credentials (filesink): {}",
@@ -406,28 +374,28 @@ public class DagUtils {
     }
 
     if (mapWork.getMaxSplitSize() != null) {
-      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPREDMAXSPLITSIZE,
+      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPRED_MAX_SPLIT_SIZE,
           mapWork.getMaxSplitSize().longValue());
     }
 
     if (mapWork.getMinSplitSize() != null) {
-      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPREDMINSPLITSIZE,
+      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPRED_MIN_SPLIT_SIZE,
           mapWork.getMinSplitSize().longValue());
     }
 
     if (mapWork.getMinSplitSizePerNode() != null) {
-      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPREDMINSPLITSIZEPERNODE,
+      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPRED_MIN_SPLIT_SIZE_PER_NODE,
           mapWork.getMinSplitSizePerNode().longValue());
     }
 
     if (mapWork.getMinSplitSizePerRack() != null) {
-      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPREDMINSPLITSIZEPERRACK,
+      HiveConf.setLongVar(conf, HiveConf.ConfVars.MAPRED_MIN_SPLIT_SIZE_PER_RACK,
           mapWork.getMinSplitSizePerRack().longValue());
     }
 
     Utilities.setInputAttributes(conf, mapWork);
 
-    String inpFormat = HiveConf.getVar(conf, HiveConf.ConfVars.HIVETEZINPUTFORMAT);
+    String inpFormat = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_TEZ_INPUT_FORMAT);
 
     if (mapWork.isUseBucketizedHiveInputFormat()) {
       inpFormat = BucketizedHiveInputFormat.class.getName();
@@ -445,7 +413,7 @@ public class DagUtils {
 
     if (mapWork instanceof MergeFileWork) {
       MergeFileWork mfWork = (MergeFileWork) mapWork;
-      // This mapper class is used for serializaiton/deserializaiton of merge
+      // This mapper class is used for serialization/deserialization of merge
       // file work.
       conf.set("mapred.mapper.class", MergeFileMapper.class.getName());
       conf.set("mapred.input.format.class", mfWork.getInputformat());
@@ -699,19 +667,37 @@ public class DagUtils {
    * container size isn't set.
    */
   public static Resource getContainerResource(Configuration conf) {
-    int memory = HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVETEZCONTAINERSIZE) > 0 ?
-      HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVETEZCONTAINERSIZE) :
-      conf.getInt(MRJobConfig.MAP_MEMORY_MB, MRJobConfig.DEFAULT_MAP_MEMORY_MB);
-    int cpus = HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVETEZCPUVCORES) > 0 ?
-      HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVETEZCPUVCORES) :
-      conf.getInt(MRJobConfig.MAP_CPU_VCORES, MRJobConfig.DEFAULT_MAP_CPU_VCORES);
-    return Resource.newInstance(memory, cpus);
+    int memorySizeMb = HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVE_TEZ_CONTAINER_SIZE);
+    if (memorySizeMb <= 0) {
+      LOG.warn("No Tez container size specified by {}. Falling back to MapReduce container MB {}",
+          HiveConf.ConfVars.HIVE_TEZ_CONTAINER_SIZE,  MRJobConfig.MAP_MEMORY_MB);
+      memorySizeMb = conf.getInt(MRJobConfig.MAP_MEMORY_MB, MRJobConfig.DEFAULT_MAP_MEMORY_MB);
+      // When config is explicitly set to "-1" defaultValue does not work!
+      if (memorySizeMb <= 0) {
+        LOG.warn("Falling back to default container MB {}", MRJobConfig.DEFAULT_MAP_MEMORY_MB);
+        memorySizeMb = MRJobConfig.DEFAULT_MAP_MEMORY_MB;
+      }
+    }
+    int cpuCores = HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVE_TEZ_CPU_VCORES);
+    if (cpuCores <= 0) {
+      LOG.warn("No Tez VCore size specified by {}. Falling back to MapReduce container VCores {}",
+          HiveConf.ConfVars.HIVE_TEZ_CPU_VCORES,  MRJobConfig.MAP_CPU_VCORES);
+      cpuCores = conf.getInt(MRJobConfig.MAP_CPU_VCORES, MRJobConfig.DEFAULT_MAP_CPU_VCORES);
+      if (cpuCores <= 0) {
+        LOG.warn("Falling back to default container VCores {}", MRJobConfig.DEFAULT_MAP_CPU_VCORES);
+        cpuCores = MRJobConfig.DEFAULT_MAP_CPU_VCORES;
+      }
+    }
+    Resource resource = Resource.newInstance(memorySizeMb, cpuCores);
+    LOG.debug("Tez container resource: {}", resource);
+    return resource;
   }
 
   /*
    * Helper to setup default environment for a task in YARN.
    */
-  private Map<String, String> getContainerEnvironment(Configuration conf, boolean isMap) {
+  @VisibleForTesting
+  Map<String, String> getContainerEnvironment(Configuration conf, boolean isMap) {
     Map<String, String> environment = new HashMap<String, String>();
     MRHelpers.updateEnvBasedOnMRTaskEnv(conf, environment, isMap);
     return environment;
@@ -723,9 +709,8 @@ public class DagUtils {
    * are set
    */
   private static String getContainerJavaOpts(Configuration conf) {
-    String javaOpts = HiveConf.getVar(conf, HiveConf.ConfVars.HIVETEZJAVAOPTS);
-
-    String logLevel = HiveConf.getVar(conf, HiveConf.ConfVars.HIVETEZLOGLEVEL);
+    String javaOpts = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_TEZ_JAVA_OPTS);
+    String logLevel = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_TEZ_LOG_LEVEL);
     List<String> logProps = Lists.newArrayList();
     TezUtils.addLog4jSystemProperties(logLevel, logProps);
     StringBuilder sb = new StringBuilder();
@@ -734,19 +719,19 @@ public class DagUtils {
     }
     logLevel = sb.toString();
 
-    if (HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVETEZCONTAINERSIZE) > 0) {
-      if (javaOpts != null) {
-        return javaOpts + " " + logLevel;
-      } else  {
-        return logLevel;
-      }
+    String finalOpts = null;
+    if (HiveConf.getIntVar(conf, HiveConf.ConfVars.HIVE_TEZ_CONTAINER_SIZE) > 0) {
+      finalOpts = Strings.nullToEmpty(javaOpts) + " " + logLevel;
     } else {
       if (javaOpts != null && !javaOpts.isEmpty()) {
-        LOG.warn(HiveConf.ConfVars.HIVETEZJAVAOPTS + " will be ignored because "
-                 + HiveConf.ConfVars.HIVETEZCONTAINERSIZE + " is not set!");
+        LOG.warn(HiveConf.ConfVars.HIVE_TEZ_JAVA_OPTS + " will be ignored because "
+                 + HiveConf.ConfVars.HIVE_TEZ_CONTAINER_SIZE + " is not set!");
       }
-      return logLevel + " " + MRHelpers.getJavaOptsForMRMapper(conf);
+      finalOpts = logLevel + " " + MRHelpers.getJavaOptsForMRMapper(conf);
     }
+    finalOpts += JavaVersionUtils.getAddOpensFlags();
+    LOG.debug("Tez container final opts: {}", finalOpts);
+    return finalOpts;
   }
 
   private Vertex createVertexFromMergeWork(JobConf conf, MergeJoinWork mergeJoinWork,
@@ -823,7 +808,7 @@ public class DagUtils {
     // create the directories FileSinkOperators need
     Utilities.createTmpDirs(conf, mapWork);
 
-    // finally create the vertex
+    // finally, create the vertex
     Vertex map = null;
 
     // use tez to combine splits
@@ -909,7 +894,7 @@ public class DagUtils {
       // we need to set this, because with HS2 and client side split
       // generation we end up not finding the map work. This is
       // because of thread local madness (tez split generation is
-      // multi-threaded - HS2 plan cache uses thread locals). Setting
+      // multithreaded - HS2 plan cache uses thread locals). Setting
       // VECTOR_MODE/USE_VECTORIZED_INPUT_FILE_FORMAT causes the split gen code to use the conf instead
       // of the map work.
       conf.setBoolean(Utilities.VECTOR_MODE, mapWork.getVectorMode());
@@ -1007,7 +992,7 @@ public class DagUtils {
   public static Map<String, LocalResource> createTezLrMap(
       LocalResource appJarLr, Collection<LocalResource> additionalLr) {
     // Note: interestingly this would exclude LLAP app jars that the session adds for LLAP case.
-    //       Of course it doesn't matter because vertices run ON LLAP and have those jars, and
+    //       Of course, it doesn't matter because vertices run ON LLAP and have those jars, and
     //       moreover we anyway don't localize jars for the vertices on LLAP; but in theory
     //       this is still crappy code that assumes there's one and only app jar.
     Map<String, LocalResource> localResources = new HashMap<>();
@@ -1074,11 +1059,10 @@ public class DagUtils {
   /**
    * @param conf
    * @return path to destination directory on hdfs
-   * @throws LoginException if we are unable to figure user information
    * @throws IOException when any dfs operation fails.
    */
   @SuppressWarnings("deprecation")
-  public Path getDefaultDestDir(Configuration conf) throws LoginException, IOException {
+  public Path getDefaultDestDir(Configuration conf) throws IOException {
     UserGroupInformation ugi = Utils.getUGI();
     String userName = ugi.getShortUserName();
     String userPathStr = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_USER_INSTALL_DIR);
@@ -1112,13 +1096,12 @@ public class DagUtils {
    * @param conf
    * @return List&lt;LocalResource&gt; local resources to add to execution
    * @throws IOException when hdfs operation fails
-   * @throws LoginException when getDefaultDestDir fails with the same exception
    */
   public List<LocalResource> localizeTempFilesFromConf(
-      String hdfsDirPathStr, Configuration conf) throws IOException, LoginException {
+      String hdfsDirPathStr, Configuration conf) throws IOException {
     List<LocalResource> tmpResources = new ArrayList<LocalResource>();
 
-    if (HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVEADDFILESUSEHDFSLOCATION)) {
+    if (HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_ADD_FILES_USE_HDFS_LOCATION)) {
       // reference HDFS based resource directly, to use distribute cache efficiently.
       addHdfsResource(conf, tmpResources, LocalResourceType.FILE, getHdfsTempFilesFromConf(conf));
       // local resources are session based.
@@ -1164,7 +1147,7 @@ public class DagUtils {
   private static String[] getLocalTempFilesFromConf(Configuration conf) {
     String addedFiles = Utilities.getLocalResourceFiles(conf, SessionState.ResourceType.FILE);
     String addedJars = Utilities.getLocalResourceFiles(conf, SessionState.ResourceType.JAR);
-    String auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEAUXJARS);
+    String auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_AUX_JARS);
     String reloadableAuxJars = SessionState.get() == null ? null : SessionState.get().getReloadableAuxJars();
     String allFiles =
         HiveStringUtils.joinIgnoringEmpty(new String[]{auxJars, reloadableAuxJars, addedJars, addedFiles}, ',');
@@ -1177,13 +1160,13 @@ public class DagUtils {
     }
     String addedFiles = Utilities.getResourceFiles(conf, SessionState.ResourceType.FILE);
     if (StringUtils.isNotBlank(addedFiles)) {
-      HiveConf.setVar(conf, ConfVars.HIVEADDEDFILES, addedFiles);
+      HiveConf.setVar(conf, ConfVars.HIVE_ADDED_FILES, addedFiles);
     }
     String addedJars = Utilities.getResourceFiles(conf, SessionState.ResourceType.JAR);
     if (StringUtils.isNotBlank(addedJars)) {
-      HiveConf.setVar(conf, ConfVars.HIVEADDEDJARS, addedJars);
+      HiveConf.setVar(conf, ConfVars.HIVE_ADDED_JARS, addedJars);
     }
-    String auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEAUXJARS);
+    String auxJars = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_AUX_JARS);
     String reloadableAuxJars = SessionState.get() == null ? null : SessionState.get().getReloadableAuxJars();
 
     // need to localize the additional jars and files
@@ -1196,7 +1179,7 @@ public class DagUtils {
   private static String[] getTempArchivesFromConf(Configuration conf) {
     String addedArchives = Utilities.getResourceFiles(conf, SessionState.ResourceType.ARCHIVE);
     if (StringUtils.isNotBlank(addedArchives)) {
-      HiveConf.setVar(conf, ConfVars.HIVEADDEDARCHIVES, addedArchives);
+      HiveConf.setVar(conf, ConfVars.HIVE_ADDED_ARCHIVES, addedArchives);
       return addedArchives.split(",");
     }
     return new String[0];
@@ -1209,7 +1192,6 @@ public class DagUtils {
    * @param inputOutputJars The file names to localize.
    * @return Map&lt;String, LocalResource&gt; (srcPath, local resources) to add to execution
    * @throws IOException when hdfs operation fails.
-   * @throws LoginException when getDefaultDestDir fails with the same exception
    */
   public Map<String, LocalResource> localizeTempFiles(String hdfsDirPathStr, Configuration conf,
       String[] inputOutputJars, String[] skipJars) throws IOException {
@@ -1236,19 +1218,20 @@ public class DagUtils {
       if (!StringUtils.isNotBlank(file)) {
         continue;
       }
-      if (skipFileSet != null && skipFileSet.contains(new Path(file))) {
+      Path path = new Path(file);
+      if (skipFileSet != null && skipFileSet.contains(path)) {
         LOG.info("Skipping vertex resource " + file + " that already exists in the session");
         continue;
       }
-      Path hdfsFilePath = new Path(hdfsDirPathStr, getResourceBaseName(new Path(file)));
-      LocalResource localResource = localizeResource(new Path(file),
-          hdfsFilePath, type, conf);
+      path = FileUtils.resolveSymlinks(path, conf);
+      Path hdfsFilePath = new Path(hdfsDirPathStr, getResourceBaseName(path));
+      LocalResource localResource = localizeResource(path, hdfsFilePath, type, conf);
       tmpResourcesMap.put(file, localResource);
     }
     return tmpResourcesMap;
   }
 
-  public FileStatus getHiveJarDirectory(Configuration conf) throws IOException, LoginException {
+  public FileStatus getHiveJarDirectory(Configuration conf) throws IOException {
     FileStatus fstatus = null;
     String hdfsDirPathStr = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_JAR_DIRECTORY, (String)null);
     if (hdfsDirPathStr != null) {
@@ -1281,18 +1264,20 @@ public class DagUtils {
   }
 
   // the api that finds the jar being used by this class on disk
-  public String getExecJarPathLocal(Configuration configuration) throws URISyntaxException {
-    // returns the location on disc of the jar of this class.
-
-    URI uri = DagUtils.class.getProtectionDomain().getCodeSource().getLocation().toURI();
-    if (configuration.getBoolean(ConfVars.HIVE_IN_TEST_IDE.varname, false)) {
-      if (new File(uri.getPath()).isDirectory()) {
-        // IDE support for running tez jobs
-        uri = createEmptyArchive();
+  public String getExecJarPathLocal(Configuration configuration) {
+    try {
+      // returns the location on disc of the jar of this class.
+      String uri = DagUtils.class.getProtectionDomain().getCodeSource().getLocation().toURI().toString();
+      if (uri.endsWith(".jar")) {
+        return uri;
       }
+    } catch (Exception ignored) {}
+    //Fall back to hive config, if the uri could not get, or it does not point to a .jar file
+    String jar = configuration.get(ConfVars.HIVE_JAR.varname);
+    if (!StringUtils.isBlank(jar)) {
+      return jar;
     }
-    return uri.toString();
-
+    throw new RuntimeException("Could not get hive-exec local path");
   }
 
   /**
@@ -1353,9 +1338,14 @@ public class DagUtils {
   public LocalResource localizeResource(
       Path src, Path dest, LocalResourceType type, Configuration conf) throws IOException {
     FileSystem destFS = dest.getFileSystem(conf);
-    // We call copyFromLocal below, so we basically assume src is a local file.
-    FileSystem srcFs = FileSystem.getLocal(conf);
-    if (src != null && !checkPreExisting(srcFs, src, dest, conf)) {
+    FileSystem srcFs;
+    if (src.toUri().getScheme() != null) {
+      srcFs = src.getFileSystem(conf);
+    } else {
+      srcFs = FileSystem.getLocal(conf);
+    }
+
+    if (!checkPreExisting(srcFs, src, dest, conf)) {
       // copy the src to the destination and create local resource.
       // do not overwrite.
       String srcStr = src.toString();
@@ -1371,12 +1361,8 @@ public class DagUtils {
         return createLocalResource(destFS, dest, type, LocalResourceVisibility.PRIVATE);
       }
       try {
-        if (src.toUri().getScheme()!=null) {
-          FileUtil.copy(src.getFileSystem(conf), src, destFS, dest, false, false, conf);
-        }
-        else {
-          destFS.copyFromLocalFile(false, false, src, dest);
-        }
+        // FileUtil.copy takes care of copy from local filesystem internally.
+        FileUtil.copy(srcFs, src, destFS, dest, false, false, conf);
         synchronized (notifier) {
           notifier.notifyAll(); // Notify if we have successfully copied the file.
         }
@@ -1395,9 +1381,10 @@ public class DagUtils {
         // Only log on the first wait, and check after wait on the last iteration.
         if (!checkOrWaitForTheFile(
             srcFs, src, dest, conf, notifierOld, waitAttempts, sleepInterval, true)) {
-          LOG.error("Could not find the jar that was being uploaded");
-          throw new IOException("Previous writer likely failed to write " + dest +
-              ". Failing because I am unlikely to write too.");
+          LOG.error("Could not find the jar that was being uploaded: src = {}, dest = {}, type = {}", src, dest, type);
+          throw new IOException("Could not find jar while attempting to localize resource. Previous writer may have " +
+              "failed to write " + dest + ". Failing because I am unlikely to write too. Refer to exception for more " +
+              "troubleshooting details.", e);
         }
       } finally {
         if (notifier == notifierNew) {
@@ -1405,8 +1392,7 @@ public class DagUtils {
         }
       }
     }
-    return createLocalResource(destFS, dest, type,
-        LocalResourceVisibility.PRIVATE);
+    return createLocalResource(destFS, dest, type, LocalResourceVisibility.PRIVATE);
   }
 
   public boolean checkOrWaitForTheFile(FileSystem srcFs, Path src, Path dest, Configuration conf,
@@ -1454,7 +1440,7 @@ public class DagUtils {
    * Creates and initializes a JobConf object that can be used to execute
    * the DAG. This can skip the configs which are already included in AM configs.
    * @param hiveConf Current conf for the execution
-   * @param skipAMConf Skip the configs where are already set across all DAGs 
+   * @param skipAMConf Skip the configs where are already set across all DAGs
    * @return JobConf base configuration for job execution
    * @throws IOException
    */
@@ -1469,7 +1455,9 @@ public class DagUtils {
         TezConfigurationFactory
             .wrapWithJobConf(hiveConf, skipAMConf ? findDefaults.negate() : null);
 
-    conf.set("mapred.output.committer.class", NullOutputCommitter.class.getName());
+    if (conf.get("mapred.output.committer.class") == null) {
+      conf.set("mapred.output.committer.class", NullOutputCommitter.class.getName());
+    }
 
     conf.setBoolean("mapred.committer.job.setup.cleanup.needed", false);
     conf.setBoolean("mapred.committer.job.task.cleanup.needed", false);
@@ -1479,7 +1467,7 @@ public class DagUtils {
     conf.set(MRJobConfig.OUTPUT_KEY_CLASS, HiveKey.class.getName());
     conf.set(MRJobConfig.OUTPUT_VALUE_CLASS, BytesWritable.class.getName());
 
-    conf.set("mapred.partitioner.class", HiveConf.getVar(conf, HiveConf.ConfVars.HIVEPARTITIONER));
+    conf.set("mapred.partitioner.class", HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_PARTITIONER));
     conf.set("tez.runtime.partitioner.class", MRPartitioner.class.getName());
 
     // Removing job credential entry/ cannot be set on the tasks
@@ -1489,7 +1477,7 @@ public class DagUtils {
     hiveConf.stripHiddenConfigurations(conf);
 
     // Remove hive configs which are used only in HS2 and not needed for execution
-    conf.unset(ConfVars.HIVE_AUTHORIZATION_SQL_STD_AUTH_CONFIG_WHITELIST.varname); 
+    conf.unset(ConfVars.HIVE_AUTHORIZATION_SQL_STD_AUTH_CONFIG_WHITELIST.varname);
     return conf;
   }
 
@@ -1597,12 +1585,20 @@ public class DagUtils {
     } else {
       outputKlass = MROutput.class;
     }
+
+    // If there is a fileSink add a DataSink to the vertex
+    boolean hasFileSink = workUnit.getAllOperators().stream().anyMatch(o -> o instanceof FileSinkOperator);
     // final vertices need to have at least one output
     boolean endVertex = tezWork.getLeaves().contains(workUnit);
-    if (endVertex) {
+    if (endVertex || hasFileSink) {
+      OutputCommitterDescriptor ocd = null;
+      String committer = HiveConf.getVar(conf, ConfVars.TEZ_MAPREDUCE_OUTPUT_COMMITTER);
+      if (committer != null && !committer.isEmpty()) {
+        ocd = OutputCommitterDescriptor.create(committer);
+      }
       vertex.addDataSink("out_"+workUnit.getName(), new DataSinkDescriptor(
           OutputDescriptor.create(outputKlass.getName())
-          .setUserPayload(vertex.getProcessorDescriptor().getUserPayload()), null, null));
+          .setUserPayload(vertex.getProcessorDescriptor().getUserPayload()), ocd, null));
     }
 
     return vertex;
@@ -1614,14 +1610,8 @@ public class DagUtils {
    */
   public Path createTezDir(Path scratchDir, Configuration conf)
       throws IOException {
-    UserGroupInformation ugi;
-    String userName = System.getProperty("user.name");
-    try {
-      ugi = Utils.getUGI();
-      userName = ugi.getShortUserName();
-    } catch (LoginException e) {
-      throw new IOException(e);
-    }
+    UserGroupInformation ugi = Utils.getUGI();
+    String userName = ugi.getShortUserName();
 
     scratchDir = new Path(scratchDir, userName);
 
@@ -1667,6 +1657,12 @@ public class DagUtils {
       pluginConf.setLong(
           ShuffleVertexManager.TEZ_SHUFFLE_VERTEX_MANAGER_DESIRED_TASK_INPUT_SIZE,
           edgeProp.getInputSizePerReducer());
+      pluginConf.setFloat(
+          ShuffleVertexManager.TEZ_SHUFFLE_VERTEX_MANAGER_MIN_SRC_FRACTION,
+          edgeProp.getMinSrcFraction());
+      pluginConf.setFloat(
+          ShuffleVertexManager.TEZ_SHUFFLE_VERTEX_MANAGER_MAX_SRC_FRACTION,
+          edgeProp.getMaxSrcFraction());
       UserPayload payload = TezUtils.createUserPayloadFromConf(pluginConf);
       desc.setUserPayload(payload);
       v.setVertexManagerPlugin(desc);
@@ -1698,19 +1694,20 @@ public class DagUtils {
   }
 
   public static String getUserSpecifiedDagName(Configuration conf) {
-    String name = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEQUERYNAME);
+    String name = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_QUERY_NAME);
     return (name != null) ? name : conf.get("mapred.job.name");
   }
 
-  private DagUtils() {
-    // don't instantiate
+  @VisibleForTesting
+  DagUtils(Supplier<List<DagCredentialSupplier>> suppliers) {
+    this.credentialSuppliers = suppliers;
   }
 
   /**
    * TODO This method is temporary. Ideally Hive should only need to pass to Tez the amount of memory
    *      it requires to do the map join, and Tez should take care of figuring out how much to allocate
    * Adjust the percentage of memory to be reserved for the processor from Tez
-   * based on the actual requested memory by the Map Join, i.e. HIVECONVERTJOINNOCONDITIONALTASKTHRESHOLD
+   * based on the actual requested memory by the Map Join, i.e. HIVE_CONVERT_JOIN_NOCONDITIONAL_TASK_THRESHOLD
    * @return the adjusted percentage
    */
   static double adjustMemoryReserveFraction(long memoryRequested, HiveConf conf) {
@@ -1787,7 +1784,7 @@ public class DagUtils {
           return size * 1024 * 1024;
         case 'g':
         case 'G':
-          // -Xmx speficied in GB
+          // -Xmx specified in GB
           return size * 1024 * 1024 * 1024;
       }
     }

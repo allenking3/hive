@@ -9,18 +9,21 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.common.util;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -34,8 +37,12 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Objects;
 
 import org.apache.hadoop.hive.common.type.Timestamp;
+import org.apache.hadoop.hive.common.type.TimestampTZ;
+import org.apache.hadoop.hive.common.type.TimestampTZUtil;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,6 +56,7 @@ import org.slf4j.LoggerFactory;
  * three pre-defined formats:
  *
  * <table border="1">
+ *     <caption></caption>
  * <thead>
  * <tr>
  * <th>Formatter</th>
@@ -169,8 +177,7 @@ public class TimestampParser {
    * @throws IllegalArgumentException if input text cannot be parsed into
    *           timestamp
    */
-  public Timestamp parseTimestamp(final String text)
-      throws IllegalArgumentException {
+  public Timestamp parseTimestamp(final String text) {
     if (supportMillisEpoch) {
       try {
         // support for milliseconds that include nanoseconds as well
@@ -191,8 +198,27 @@ public class TimestampParser {
         LOG.debug("Could not parse timestamp text: {}", text);
       }
     }
-    return Timestamp.valueOf(text);
+
+    try {
+      return Timestamp.valueOf(text);
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+
   }
+
+  public TimestampTZ parseTimestamp(String text, ZoneId defaultTimeZone) {
+    Objects.requireNonNull(text);
+    for (DateTimeFormatter f : dtFormatters) {
+      try {
+        return TimestampTZUtil.parse(text, defaultTimeZone, f);
+      } catch (DateTimeException e) {
+        // Ignore and try next formatter
+      }
+    }
+    return TimestampTZUtil.parse(text, defaultTimeZone);
+  }
+
 
   /**
    * The goal of this class is to return a timestamp. A timestamp represents a

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql;
 
@@ -146,7 +147,7 @@ public enum ErrorMsg {
   UDTF_NO_GROUP_BY(10077, "GROUP BY is not supported with a UDTF in the SELECT clause"),
   UDTF_NO_SORT_BY(10078, "SORT BY is not supported with a UDTF in the SELECT clause"),
   UDTF_NO_CLUSTER_BY(10079, "CLUSTER BY is not supported with a UDTF in the SELECT clause"),
-  UDTF_NO_DISTRIBUTE_BY(10080, "DISTRUBTE BY is not supported with a UDTF in the SELECT clause"),
+  UDTF_NO_DISTRIBUTE_BY(10080, "DISTRIBUTE BY is not supported with a UDTF in the SELECT clause"),
   UDTF_INVALID_LOCATION(10081, "UDTF's are not supported outside the SELECT clause, nor nested "
       + "in expressions"),
   UDTF_LATERAL_VIEW(10082, "UDTF's cannot be in a select expression when there is a lateral view"),
@@ -218,7 +219,7 @@ public enum ErrorMsg {
   BUCKET_MAPJOIN_NOT_POSSIBLE(10136,
     "Bucketed mapjoin cannot be performed. " +
     "This can be due to multiple reasons: " +
-    " . Join columns dont match bucketed columns. " +
+    " . Join columns don't match bucketed columns. " +
     " . Number of buckets are not a multiple of each other. " +
     "If you really want to perform the operation, either remove the " +
     "mapjoin hint from your query or set hive.enforce.bucketmapjoin to false."),
@@ -313,6 +314,7 @@ public enum ErrorMsg {
     "Not all clauses are supported with mapjoin hint. Please remove mapjoin hint."),
 
   ANALYZE_TABLE_NOSCAN_NON_NATIVE(10228, "ANALYZE TABLE NOSCAN cannot be used for " + "a non-native table"),
+  ANALYZE_PARTITION_NON_NATIVE(10449, "ANALYZE TABLE with a PARTITION clause cannot be used for a non-native table"),
 
   PARTITION_VALUE_NOT_CONTINUOUS(10234, "Partition values specified are not continuous." +
             " A subpartition value is specified without specifying the parent partition's value"),
@@ -351,6 +353,7 @@ public enum ErrorMsg {
       "Resource type GLOBAL is not supported in this authorization setting", "28000"),
   UNSUPPORTED_AUTHORIZATION_RESOURCE_TYPE_COLUMN(10258,
       "Resource type COLUMN is not supported in this authorization setting", "28000"),
+  CANNOT_DROP_COLUMN(10259, "Drop column is not supported for table {0}. SerDe may be incompatible.", true),
 
   TXNMGR_NOT_SPECIFIED(10260, "Transaction manager not specified correctly, " +
       "set hive.txn.manager"),
@@ -362,6 +365,8 @@ public enum ErrorMsg {
   DBTXNMGR_REQUIRES_CONCURRENCY(10264,
       "To use DbTxnManager you must set hive.support.concurrency=true"),
   TXNMGR_NOT_ACID(10265, "This command is not allowed on an ACID table {0}.{1} with a non-ACID transaction manager", true),
+  DROP_COLUMN_UNCASCADED(10266, "Drop column is not supported without cascade for partitioned table. SerDe may be incompatible.", true),
+
   LOCK_NO_SUCH_LOCK(10270, "No record of lock {0} could be found, " +
       "may have timed out", true),
   LOCK_REQUEST_UNSUPPORTED(10271, "Current transaction manager does not " +
@@ -373,21 +378,21 @@ public enum ErrorMsg {
       "metastore."),
   INVALID_COMPACTION_TYPE(10282, "Invalid compaction type, supported values are 'major' and " +
       "'minor'"),
-  NO_COMPACTION_PARTITION(10283, "You must specify a partition to compact for partitioned tables"),
+  COMPACTION_NO_PARTITION(10283, "You must specify a partition to compact for partitioned tables"),
   TOO_MANY_COMPACTION_PARTITIONS(10284, "Compaction can only be requested on one partition at a " +
       "time."),
   DISTINCT_NOT_SUPPORTED(10285, "Distinct keyword is not support in current context"),
   NONACID_COMPACTION_NOT_SUPPORTED(10286, "Compaction is not allowed on non-ACID table {0}.{1}", true),
   MASKING_FILTERING_ON_ACID_NOT_SUPPORTED(10287,
-      "Detected {0}.{1} has row masking/column filtering enabled, " +
+      "Detected {0}.{1}.{2} has row masking/column filtering enabled, " +
       "which is not supported for query involving ACID operations", true),
   MASKING_FILTERING_ON_MATERIALIZED_VIEWS_SOURCES(10288,
-      "Querying directly materialized view contents is not supported since we detected {0}.{1} " +
+      "Querying directly materialized view contents is not supported since we detected {0}.{1}.{2} " +
           "used by materialized view has row masking/column filtering enabled", true),
+  MASKING_COMPLEX_TYPE_NOT_SUPPORTED(10289,
+      "Masking complex types is not supported, found a masking expression {0} over column {1}:{2}", true),
 
   UPDATEDELETE_PARSE_ERROR(10290, "Encountered parse error while parsing rewritten merge/update or " +
-      "delete query"),
-  UPDATEDELETE_IO_ERROR(10291, "Encountered I/O error while parsing rewritten update or " +
       "delete query"),
   UPDATE_CANNOT_UPDATE_PART_VALUE(10292, "Updating values of partition columns is not supported"),
   INSERT_CANNOT_CREATE_TEMP_FILE(10293, "Unable to create temp file for insert values "),
@@ -421,7 +426,7 @@ public enum ErrorMsg {
   REPLACE_UNSUPPORTED_TYPE_CONVERSION(10314, "Replacing columns with unsupported type conversion (from {0} to {1}) for column {2}. SerDe may be incompatible", true),
   HIVE_GROUPING_SETS_AGGR_NOMAPAGGR_MULTIGBY(10315,
       "Grouping sets aggregations (with rollups or cubes) are not allowed when " +
-      "HIVEMULTIGROUPBYSINGLEREDUCER is turned on. Set hive.multigroupby.singlereducer=false if you want to use grouping sets"),
+      "HIVE_MULTI_GROUPBY_SINGLE_REDUCER is turned on. Set hive.multigroupby.singlereducer=false if you want to use grouping sets"),
   CANNOT_RETRIEVE_TABLE_METADATA(10316, "Error while retrieving table metadata"),
   INVALID_AST_TREE(10318, "Internal error : Invalid AST"),
   ERROR_SERIALIZE_METASTORE(10319, "Error while serializing the metastore objects"),
@@ -442,12 +447,13 @@ public enum ErrorMsg {
   @Deprecated // kept for backwards reference
   REPLACE_VIEW_WITH_MATERIALIZED(10400, "Attempt to replace view {0} with materialized view", true),
   REPLACE_MATERIALIZED_WITH_VIEW(10401, "Attempt to replace materialized view {0} with view", true),
+  VIEW_STORAGE_HANDLER_UNSUPPORTED(10448, "Storage handler {0} doesn't support external logical views", true),
   UPDATE_DELETE_VIEW(10402, "You cannot update or delete records in a view"),
   MATERIALIZED_VIEW_DEF_EMPTY(10403, "Query for the materialized view rebuild could not be retrieved"),
   MERGE_PREDIACTE_REQUIRED(10404, "MERGE statement with both UPDATE and DELETE clauses " +
     "requires \"AND <boolean>\" on the 1st WHEN MATCHED clause of <{0}>", true),
-  MERGE_TOO_MANY_DELETE(10405, "MERGE statment can have at most 1 WHEN MATCHED ... DELETE clause: <{0}>", true),
-  MERGE_TOO_MANY_UPDATE(10406, "MERGE statment can have at most 1 WHEN MATCHED ... UPDATE clause: <{0}>", true),
+  MERGE_TOO_MANY_DELETE(10405, "MERGE statement can have at most 1 WHEN MATCHED ... DELETE clause: <{0}>", true),
+  MERGE_TOO_MANY_UPDATE(10406, "MERGE statement can have at most 1 WHEN MATCHED ... UPDATE clause: <{0}>", true),
   INVALID_JOIN_CONDITION(10407, "Error parsing condition in join"),
   INVALID_TARGET_COLUMN_IN_SET_CLAUSE(10408, "Target column \"{0}\" of set clause is not found in table \"{1}\".", true),
   HIVE_GROUPING_FUNCTION_EXPR_NOT_IN_GROUPBY(10409, "Expression in GROUPING function not present in GROUP BY"),
@@ -461,18 +467,42 @@ public enum ErrorMsg {
       true),
   ACID_OP_ON_INSERTONLYTRAN_TABLE(10414, "Attempt to do update or delete on table {0} that is " +
     "insert-only transactional", true),
-  LOAD_DATA_LAUNCH_JOB_IO_ERROR(10415, "Encountered I/O error while parsing rewritten load data into insert query"),
   LOAD_DATA_LAUNCH_JOB_PARSE_ERROR(10416, "Encountered parse error while parsing rewritten load data into insert query"),
   RESOURCE_PLAN_ALREADY_EXISTS(10417, "Resource plan {0} already exists", true),
   RESOURCE_PLAN_NOT_EXISTS(10418, "Resource plan {0} does not exist", true),
   INCOMPATIBLE_STRUCT(10419, "Incompatible structs.", true),
-  OBJECTNAME_CONTAINS_DOT(10420, "Table or database name may not contain dot(.) character", true),
+  OBJECTNAME_CONTAINS_DOT(10420, "Catalog, database or table names may not contain dot(.) character", true),
   WITHIN_GROUP_NOT_ALLOWED(10421,
           "Not an ordered-set aggregate function: {0}. WITHIN GROUP clause is not allowed.", true),
   WITHIN_GROUP_PARAMETER_MISMATCH(10422,
           "The number of hypothetical direct arguments ({0}) must match the number of ordering columns ({1})", true),
   AMBIGUOUS_STRUCT_ATTRIBUTE(10423, "Attribute \"{0}\" specified more than once in structured type.", true),
   OFFSET_NOT_SUPPORTED_IN_SUBQUERY(10424, "OFFSET is not supported in subquery of exists", true),
+  WITH_COL_LIST_NUM_OVERFLOW(10425, "WITH-clause query {0} returns {1} columns, but {2} labels were specified. The number of column labels must be smaller or equal to the number of expressions returned by the query.", true),
+  NULL_TREATMENT_NOT_SUPPORTED(10426, "Function {0} does not support null treatment.", true),
+  DATACONNECTOR_ALREADY_EXISTS(10427, "Dataconnector {0} already exists", true),
+  DATACONNECTOR_NOT_EXISTS(10428, "Dataconnector does not exist:"),
+  TIME_TRAVEL_NOT_ALLOWED(10429, "Time travel is not allowed for {0}. Please choose a storage format which supports the feature.", true),
+  INVALID_METADATA_TABLE_NAME(10430, "Invalid metadata table name {0}.", true),
+  TABLE_META_REF_NOT_SUPPORTED(10431, "Table Meta Ref extension is not supported for table {0}.", true),
+  COMPACTION_REFUSED(10432, "Compaction request for {0}.{1}{2} is refused, details: {3}.", true),
+  COMPACTION_PARTITION_EVOLUTION(10438, "Compaction for {0}.{1} on partition level is not allowed on a table that has undergone partition evolution", true),
+  COMPACTION_NON_IDENTITY_PARTITION_SPEC(10439, "Compaction for {0}.{1} is not supported on the table with non-identity partition spec", true),
+  CBO_IS_REQUIRED(10433,
+          "The following functionality requires CBO (" + HiveConf.ConfVars.HIVE_CBO_ENABLED.varname + "): {0}", true),
+  CTLF_UNSUPPORTED_FORMAT(10434, "CREATE TABLE LIKE FILE is not supported by the ''{0}'' file format", true),
+  NON_NATIVE_ACID_UPDATE(10435, "Update and Merge to a non-native ACID table in \"merge-on-read\" mode is only supported when \"" +
+          HiveConf.ConfVars.SPLIT_UPDATE.varname + "\"=\"true\""),
+  READ_ONLY_DATABASE(10436, "Database {0} is read-only", true),
+  UNEXPECTED_PARTITION_TRANSFORM_SPEC(10437, "Partition transforms are only supported by Iceberg storage handler", true),
+  NONICEBERG_COMPACTION_WITH_FILTER_NOT_SUPPORTED(10440, "Compaction with filter is not allowed on non-Iceberg table {0}.{1}", true),
+  ICEBERG_COMPACTION_WITH_PART_SPEC_AND_FILTER_NOT_SUPPORTED(10441, "Compaction command with both partition spec and filter is not supported on Iceberg table {0}.{1}", true),
+  COMPACTION_THREAD_INITIALIZATION(10442, "Compaction thread failed during initialization", false),
+  ALTER_TABLE_COMPACTION_NON_PARTITIONED_COLUMN_NOT_ALLOWED(10443, "Filter expression can contain only partition columns."),
+  CATALOG_ALREADY_EXISTS(10444, "Catalog {0} already exists", true),
+  CATALOG_NOT_EXISTS(10445, "Catalog {0} does not exists:", true),
+  INVALID_SCHEDULED_QUERY(10446, "Scheduled query {0} does not exist", true),
+  UNSUPPORTED_TIMESTAMP_PRECISION(10447, "Unsupported value for precision: {0}", true),
 
   //========================== 20000 range starts here ========================//
 
@@ -503,13 +533,16 @@ public enum ErrorMsg {
   FILE_NOT_FOUND(20012, "File not found: {0}", "64000", true),
   WRONG_FILE_FORMAT(20013, "Wrong file format. Please check the file's format.", "64000", true),
 
-  SPARK_CREATE_CLIENT_INVALID_QUEUE(20014, "Spark app for session {0} was submitted to an invalid" +
-          " queue: {1}. Please fix and try again.", true),
-  SPARK_RUNTIME_OOM(20015, "Spark job failed because of out of memory."),
-
   REPL_FILE_MISSING_FROM_SRC_AND_CM_PATH(20016, "File is missing from both source and cm path."),
   REPL_EXTERNAL_SERVICE_CONNECTION_ERROR(20017, "Failed to connect to {0} service. Error code {1}.",true),
   CLIENT_POLLING_OPSTATUS_INTERRUPTED(20018, "Interrupted while polling on the operation status", "70100"),
+
+  CTLF_FAILED_INFERENCE(20019, "Failed to infer schema:"),
+  CTLF_CLASS_NOT_FOUND(20020, "Failed to find SerDe class ({0}) for ''{1}''", true),
+  CTLF_MISSING_STORAGE_FORMAT_DESCRIPTOR(20021, "Failed to find StorageFormatDescriptor for file format ''{0}''", true),
+  PARQUET_FOOTER_ERROR(20022, "Failed to read parquet footer:"),
+  PARQUET_UNHANDLED_TYPE(20023, "Unhandled type {0}", true),
+  ORC_FOOTER_ERROR(20024, "Failed to read orc footer:"),
 
   // An exception from runtime that will show the full stack to client
   UNRESOLVED_RT_EXCEPTION(29999, "Runtime Error: {0}", "58004", true),
@@ -518,23 +551,23 @@ public enum ErrorMsg {
 
   STATSPUBLISHER_NOT_OBTAINED(30000, "StatsPublisher cannot be obtained. " +
     "There was a error to retrieve the StatsPublisher, and retrying " +
-    "might help. If you dont want the query to fail because accurate statistics " +
+    "might help. If you don't want the query to fail because accurate statistics " +
     "could not be collected, set hive.stats.reliable=false"),
   STATSPUBLISHER_INITIALIZATION_ERROR(30001, "StatsPublisher cannot be initialized. " +
     "There was a error in the initialization of StatsPublisher, and retrying " +
-    "might help. If you dont want the query to fail because accurate statistics " +
+    "might help. If you don't want the query to fail because accurate statistics " +
     "could not be collected, set hive.stats.reliable=false"),
   STATSPUBLISHER_CONNECTION_ERROR(30002, "StatsPublisher cannot be connected to." +
     "There was a error while connecting to the StatsPublisher, and retrying " +
-    "might help. If you dont want the query to fail because accurate statistics " +
+    "might help. If you don't want the query to fail because accurate statistics " +
     "could not be collected, set hive.stats.reliable=false"),
   STATSPUBLISHER_PUBLISHING_ERROR(30003, "Error in publishing stats. There was an " +
     "error in publishing stats via StatsPublisher, and retrying " +
-    "might help. If you dont want the query to fail because accurate statistics " +
+    "might help. If you don't want the query to fail because accurate statistics " +
     "could not be collected, set hive.stats.reliable=false"),
   STATSPUBLISHER_CLOSING_ERROR(30004, "StatsPublisher cannot be closed." +
     "There was a error while closing the StatsPublisher, and retrying " +
-    "might help. If you dont want the query to fail because accurate statistics " +
+    "might help. If you don't want the query to fail because accurate statistics " +
     "could not be collected, set hive.stats.reliable=false"),
 
   COLUMNSTATSCOLLECTOR_INVALID_PART_KEY(30005, "Invalid partitioning key specified in ANALYZE " +
@@ -542,7 +575,6 @@ public enum ErrorMsg {
   COLUMNSTATSCOLLECTOR_INVALID_PARTITION(30007, "Invalid partitioning key/value specified in " +
     "ANALYZE statement"),
   COLUMNSTATSCOLLECTOR_PARSE_ERROR(30009, "Encountered parse error while parsing rewritten query"),
-  COLUMNSTATSCOLLECTOR_IO_ERROR(30010, "Encountered I/O exception while parsing rewritten query"),
   DROP_COMMAND_NOT_ALLOWED_FOR_PARTITION(30011, "Partition protected from being dropped"),
   COLUMNSTATSCOLLECTOR_INVALID_COLUMN(30012, "Column statistics are not supported "
       + "for partition columns"),
@@ -574,45 +606,14 @@ public enum ErrorMsg {
   CONCATENATE_UNSUPPORTED_TABLE_TRANSACTIONAL(30035,
       "Concatenate/Merge can not be performed on transactional tables"),
 
-  SPARK_GET_JOB_INFO_TIMEOUT(30036,
-      "Spark job timed out after {0} seconds while getting job info", true),
-  SPARK_JOB_MONITOR_TIMEOUT(30037, "Job hasn''t been submitted after {0}s." +
-      " Aborting it.\nPossible reasons include network issues, " +
-      "errors in remote driver or the cluster has no available resources, etc.\n" +
-      "Please check YARN or Spark driver''s logs for further information.\n" +
-      "The timeout is controlled by " + HiveConf.ConfVars.SPARK_JOB_MONITOR_TIMEOUT + ".", true),
-
-  // Various errors when creating Spark client
-  SPARK_CREATE_CLIENT_TIMEOUT(30038,
-      "Timed out while creating Spark client for session {0}.", true),
-  SPARK_CREATE_CLIENT_QUEUE_FULL(30039,
-      "Failed to create Spark client for session {0} because job queue is full: {1}.", true),
-  SPARK_CREATE_CLIENT_INTERRUPTED(30040,
-      "Interrupted while creating Spark client for session {0}", true),
-  SPARK_CREATE_CLIENT_ERROR(30041,
-      "Failed to create Spark client for Spark session {0}: {1}", true),
-  SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST(30042,
-      "Failed to create Spark client for session {0} due to invalid resource request: {1}", true),
-  SPARK_CREATE_CLIENT_CLOSED_SESSION(30043,
-      "Cannot create Spark client on a closed session {0}", true),
-
-  SPARK_JOB_INTERRUPTED(30044, "Spark job was interrupted while executing"),
-  SPARK_GET_JOB_INFO_INTERRUPTED(30045, "Spark job was interrupted while getting job info"),
-  SPARK_GET_JOB_INFO_EXECUTIONERROR(30046, "Spark job failed in execution while getting job info due to exception {0}", true),
-
   REPL_FILE_SYSTEM_OPERATION_RETRY(30047, "Replication file system operation retry expired. Error {0}",
     true),
-  SPARK_GET_STAGES_INFO_TIMEOUT(30048, "Spark job GetSparkStagesInfoJob timed out after {0} seconds.", true),
-  SPARK_GET_STAGES_INFO_INTERRUPTED(30049, "Spark job GetSparkStagesInfoJob was interrupted."),
-  SPARK_GET_STAGES_INFO_EXECUTIONERROR(30050, "Spark job GetSparkStagesInfoJob failed in execution while getting job info due to exception {0}", true),
+  REPL_SOURCE_DATABASE_NOT_FOUND(30048, "Cannot dump database {0} as it does not exist",
+          true),
 
   //========================== 40000 range starts here ========================//
 
-  SPARK_JOB_RUNTIME_ERROR(40001, "Spark job failed due to: {0}", true),
-  SPARK_TASK_RUNTIME_ERROR(40002, "Spark job failed due to task failures: {0}", true),
   REPL_DATABASE_IS_TARGET_OF_REPLICATION(40003, "Cannot dump database as it is a Target of replication."),
-  REPL_DATABASE_IS_NOT_SOURCE_OF_REPLICATION(40004,
-                                               "Source of replication (repl.source.for) is not set in the database properties."),
   REPL_INVALID_DB_OR_TABLE_PATTERN(40005,
                                      "Invalid pattern for the DB or table name in the replication policy. "
                                      + "It should be a valid regex enclosed within single or double quotes."),
@@ -627,7 +628,12 @@ public enum ErrorMsg {
   REPL_FAILED_WITH_NON_RECOVERABLE_ERROR(40011, "Replication failed with non recoverable error. Needs manual intervention"),
   REPL_INVALID_ARGUMENTS(40012, "Invalid arguments error : {0}.", true),
   REPL_INVALID_ALTER_TABLE(40013, "{0}Unable to alter table{1}", true),
-  REPL_PERMISSION_DENIED(40014, "{0}org.apache.hadoop.security.AccessControlException{1}", true)
+  REPL_PERMISSION_DENIED(40014, "{0}org.apache.hadoop.security.AccessControlException{1}", true),
+  REPL_DISTCP_SNAPSHOT_EXCEPTION(40015, "SNAPSHOT_ERROR", true),
+  RANGER_AUTHORIZATION_FAILED(40016, "Authorization Failure while communicating to Ranger admin", true),
+  RANGER_AUTHENTICATION_FAILED(40017, "Authentication Failure while communicating to Ranger admin", true),
+  REPL_INCOMPATIBLE_EXCEPTION(40018, "Cannot load into database {0} as it is replication incompatible.", true),
+  REPL_FAILOVER_TARGET_MODIFIED(40019,"Database event id changed post table diff generation.")
   ;
 
   private int errorCode;

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse.type;
@@ -28,10 +29,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Stack;
 
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -39,7 +38,6 @@ import org.apache.hadoop.hive.conf.HiveConf.StrictChecks;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.ColumnInfo;
 import org.apache.hadoop.hive.ql.exec.FunctionInfo;
-import org.apache.hadoop.hive.ql.exec.FunctionRegistry;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentException;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentLengthException;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentTypeException;
@@ -64,14 +62,11 @@ import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.plan.SubqueryType;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.ql.session.SessionState.LogHelper;
-import org.apache.hadoop.hive.ql.udf.SettableUDF;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector.Category;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorUtils;
-import org.apache.hadoop.hive.serde2.typeinfo.CharTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
@@ -80,7 +75,6 @@ import org.apache.hadoop.hive.serde2.typeinfo.TimestampLocalTZTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
-import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,6 +99,7 @@ public class TypeCheckProcFactory<T> {
   static final HashMap<Integer, String> SPECIAL_UNARY_OPERATOR_TEXT_MAP;
   static final HashMap<Integer, String> CONVERSION_FUNCTION_TEXT_MAP;
   static final HashSet<Integer> WINDOWING_TOKENS;
+  private static final Object ALIAS_PLACEHOLDER = new Object();
 
   static {
     SPECIAL_UNARY_OPERATOR_TEXT_MAP = new HashMap<>();
@@ -145,6 +140,11 @@ public class TypeCheckProcFactory<T> {
         serdeConstants.INTERVAL_DAY_TIME_TYPE_NAME);
     CONVERSION_FUNCTION_TEXT_MAP.put(HiveParser.TOK_DECIMAL,
         serdeConstants.DECIMAL_TYPE_NAME);
+    CONVERSION_FUNCTION_TEXT_MAP.put(HiveParser.TOK_VARIANT,
+        serdeConstants.VARIANT_TYPE_NAME);
+    CONVERSION_FUNCTION_TEXT_MAP.put(HiveParser.TOK_MAP, "toMap");
+    CONVERSION_FUNCTION_TEXT_MAP.put(HiveParser.TOK_LIST, "toArray");
+    CONVERSION_FUNCTION_TEXT_MAP.put(HiveParser.TOK_STRUCT, "toStruct");
 
     WINDOWING_TOKENS = new HashSet<Integer>();
     WINDOWING_TOKENS.add(HiveParser.KW_OVER);
@@ -220,6 +220,7 @@ public class TypeCheckProcFactory<T> {
     astNodeToProcessor.put(HiveParser.TOK_TABLE_OR_COL, getColumnExprProcessor());
 
     astNodeToProcessor.put(HiveParser.TOK_SUBQUERY_EXPR, getSubQueryExprProcessor());
+    astNodeToProcessor.put(HiveParser.TOK_ALIAS, getValueAliasProcessor());
 
     // The dispatcher fires the processor corresponding to the closest matching
     // rule and passes the context along
@@ -286,7 +287,7 @@ public class TypeCheckProcFactory<T> {
       }
 
       ASTNode node = (ASTNode)nd;
-      String indexStr = ((ASTNode)(node)).getText();
+      String indexStr = (node).getText();
       int index = Integer.parseInt(indexStr);
       return exprFactory.createDynamicParamExpr(index);
     }
@@ -597,6 +598,19 @@ public class TypeCheckProcFactory<T> {
   }
 
   /**
+   * Rejects a by-name reference to a column marked ambiguous at a subquery/CTE boundary
+   * (HIVE-29580). Call after each by-name resolution of a user-written column reference;
+   * expression-map resolutions (processGByExpr) stay unchecked so Hive's own rewrites can
+   * reference marked columns.
+   */
+  static void checkAmbiguousName(ColumnInfo colInfo) throws SemanticException {
+    if (colInfo != null && colInfo.hasAmbiguousName()) {
+      throw new SemanticException(ErrorMsg.AMBIGUOUS_COLUMN.getMsg(
+          colInfo.getAlias() + " in " + colInfo.getTabAlias()));
+    }
+  }
+
+  /**
    * Processor for table columns.
    */
   public class ColumnExprProcessor implements SemanticNodeProcessor {
@@ -661,6 +675,7 @@ public class TypeCheckProcFactory<T> {
             return null;
           }
           // It's a column.
+          checkAmbiguousName(colInfo);
           return exprFactory.toExpr(colInfo, usedRR, offset);
         } else {
           // It's a table alias.
@@ -695,6 +710,7 @@ public class TypeCheckProcFactory<T> {
           }
         } else {
           // It's a column.
+          checkAmbiguousName(colInfo);
           return exprFactory.toExpr(colInfo, usedRR, offset);
         }
       }
@@ -788,20 +804,6 @@ public class TypeCheckProcFactory<T> {
       return getDefaultExprProcessor().getFuncExprNodeDescWithUdfData(baseType, tableFieldTypeInfo, column);
     }
 
-    private boolean unSafeCompareWithBigInt(TypeInfo otherTypeInfo, TypeInfo bigintCandidate) {
-      Set<PrimitiveObjectInspector.PrimitiveCategory> unsafeConventionTyps = Sets.newHashSet(
-          PrimitiveObjectInspector.PrimitiveCategory.STRING,
-          PrimitiveObjectInspector.PrimitiveCategory.VARCHAR,
-          PrimitiveObjectInspector.PrimitiveCategory.CHAR);
-
-      if (bigintCandidate.equals(TypeInfoFactory.longTypeInfo) && otherTypeInfo instanceof PrimitiveTypeInfo) {
-        PrimitiveObjectInspector.PrimitiveCategory pCategory =
-            ((PrimitiveTypeInfo)otherTypeInfo).getPrimitiveCategory();
-        return unsafeConventionTyps.contains(pCategory);
-      }
-      return false;
-    }
-
     protected void validateUDF(ASTNode expr, boolean isFunction, TypeCheckCtx ctx, FunctionInfo fi,
         List<T> children) throws SemanticException {
       // Check if a bigint is implicitely cast to a double as part of a comparison
@@ -815,21 +817,14 @@ public class TypeCheckProcFactory<T> {
 
         LogHelper console = new LogHelper(LOG);
 
-        // For now, if a bigint is going to be cast to a double throw an error or warning
-        if (unSafeCompareWithBigInt(oiTypeInfo0, oiTypeInfo1) || unSafeCompareWithBigInt(oiTypeInfo1, oiTypeInfo0)) {
+        if (TypeInfoUtils.isConversionLossy(oiTypeInfo0, oiTypeInfo1)) {
           String error = StrictChecks.checkTypeSafety(conf);
           if (error != null) {
             throw new UDFArgumentException(error);
           }
-          // To  make the error output be consistency, get the other side type name that comparing with biginit.
-          String type = oiTypeInfo0.getTypeName();
-          if (!oiTypeInfo1.equals(TypeInfoFactory.longTypeInfo)) {
-            type = oiTypeInfo1.getTypeName();
-          }
-          console.printError("WARNING: Comparing a bigint and a " + type + " may result in a loss of precision.");
-        } else if ((oiTypeInfo0.equals(TypeInfoFactory.doubleTypeInfo) && oiTypeInfo1.equals(TypeInfoFactory.longTypeInfo)) ||
-            (oiTypeInfo0.equals(TypeInfoFactory.longTypeInfo) && oiTypeInfo1.equals(TypeInfoFactory.doubleTypeInfo))) {
-          console.printError("WARNING: Comparing a bigint and a double may result in a loss of precision.");
+          String tName0 = oiTypeInfo0.getTypeName();
+          String tName1 = oiTypeInfo1.getTypeName();
+          console.printError("WARNING: Comparing " + tName0 + " and " + tName1 + " may result in loss of information.");
         }
       }
 
@@ -862,6 +857,29 @@ public class TypeCheckProcFactory<T> {
         if (children.size() > 0 && !isStringType(exprFactory.getTypeInfo(children.get(0)))) {
           T newColumn = createConversionCast(children.get(0), TypeInfoFactory.stringTypeInfo);
           children.set(0, newColumn);
+        }
+      }
+
+      if (funcText.equalsIgnoreCase("and") || funcText.equalsIgnoreCase("or")
+          || funcText.equalsIgnoreCase("not") || funcText.equalsIgnoreCase("!")) {
+        // If the current function is a conjunction, the returning types of the children should be booleans.
+        // Iterate on the children, if the result of a child expression is not a boolean, try to implicitly
+        // convert the result of such a child to a boolean value.
+        for (int i = 0; i < children.size(); i++) {
+          T child = children.get(i);
+          TypeInfo typeInfo = exprFactory.getTypeInfo(child);
+          if (!TypeInfoFactory.booleanTypeInfo.accept(typeInfo)) {
+            if (typeInfo.getCategory() == ObjectInspector.Category.PRIMITIVE) {
+              // For primitive types like string/double/timestamp, try to cast the result of
+              // the child expression to a boolean.
+              children.set(i, createConversionCast(child, TypeInfoFactory.booleanTypeInfo));
+            } else {
+              // For complex types like map/list/struct, create a isnotnull function on the child expression.
+              child = exprFactory.createFuncCallExpr(TypeInfoFactory.booleanTypeInfo,
+                  exprFactory.getFunctionInfo("isnotnull"),"isnotnull", Arrays.asList(child));
+              children.set(i, child);
+            }
+          }
         }
       }
     }
@@ -926,7 +944,7 @@ public class TypeCheckProcFactory<T> {
           }
 
           // Calculate TypeInfo
-          TypeInfo t = ((ListTypeInfo) myt).getListElementTypeInfo();
+          TypeInfo t = node.getTypeInfo() != null ? node.getTypeInfo() : ((ListTypeInfo) myt).getListElementTypeInfo();
           expr = exprFactory.createFuncCallExpr(t, fi, funcText, children);
         } else if (myt.getCategory() == Category.MAP) {
           if (!TypeInfoUtils.implicitConvertible(exprFactory.getTypeInfo(children.get(1)),
@@ -935,7 +953,7 @@ public class TypeCheckProcFactory<T> {
                 ErrorMsg.INVALID_MAPINDEX_TYPE.getMsg(), node));
           }
           // Calculate TypeInfo
-          TypeInfo t = ((MapTypeInfo) myt).getMapValueTypeInfo();
+          TypeInfo t = node.getTypeInfo() != null ? node.getTypeInfo() : ((MapTypeInfo) myt).getMapValueTypeInfo();
           expr = exprFactory.createFuncCallExpr(t, fi, funcText, children);
         } else {
           throw new SemanticException(ASTErrorUtils.getMsg(
@@ -984,13 +1002,7 @@ public class TypeCheckProcFactory<T> {
           final PrimitiveTypeInfo colTypeInfo = TypeInfoFactory.getPrimitiveTypeInfo(
               exprFactory.getTypeInfo(columnChild).getTypeName().toLowerCase());
           T newChild = interpretNodeAsConstant(colTypeInfo, constChild);
-          if (newChild == null) {
-            // non-interpretable as target type...
-            // TODO: all comparisons with null should result in null
-            if (exprFactory.isEqualFunction(fi)) {
-              return exprFactory.createBooleanConstantExpr(null);
-            }
-          } else {
+          if (newChild != null) {
             children.set(constIdx, newChild);
           }
         }
@@ -1004,30 +1016,26 @@ public class TypeCheckProcFactory<T> {
           // different value type. The reason is that Hive and Calcite treat
           // types in IN clauses differently and it is practically impossible
           // to find some correct implementation unless this is done.
-          boolean hasNullValue = false;
           ListMultimap<TypeInfo, T> expressions = ArrayListMultimap.create();
           for (int i = 1; i < children.size(); i++) {
             T columnDesc = children.get(0);
             T valueDesc = interpretNode(columnDesc, children.get(i));
-            if (valueDesc == null) {
-              if (hasNullValue) {
-                // Skip if null value has already been added
-                continue;
-              }
-              TypeInfo targetType = exprFactory.getTypeInfo(columnDesc);
-              if (!expressions.containsKey(targetType)) {
-                expressions.put(targetType, columnDesc);
-              }
-              T nullConst = exprFactory.createConstantExpr(targetType, null);
-              expressions.put(targetType, nullConst);
-              hasNullValue = true;
-            } else {
+            if (valueDesc != null) {
+              // Only add to the expression map if types can be coerced
               TypeInfo targetType = exprFactory.getTypeInfo(valueDesc);
               if (!expressions.containsKey(targetType)) {
                 expressions.put(targetType, columnDesc);
               }
               expressions.put(targetType, valueDesc);
             }
+          }
+          if(expressions.isEmpty()) {
+            // We will only hit this when none of the operands inside the "in" clause can be type-coerced
+            // That would imply that the result of "in" is a boolean "false"
+            // This should not impact those cases where the "in" clause is used on a boolean column and
+            // there is no operand in the "in" clause that cannot be type-coerced into boolean because
+            // in case of boolean, Hive does not allow such use cases and throws an error
+            return exprFactory.createBooleanConstantExpr("false");
           }
 
           children.clear();
@@ -1040,7 +1048,7 @@ public class TypeCheckProcFactory<T> {
           } else {
             FunctionInfo inFunctionInfo  = exprFactory.getFunctionInfo("in");
             for (Collection<T> c : expressions.asMap().values()) {
-              newExprs.add(exprFactory.createFuncCallExpr(null, inFunctionInfo,
+              newExprs.add(exprFactory.createFuncCallExpr(node.getTypeInfo(), inFunctionInfo,
                   "in", (List<T>) c));
             }
             children.addAll(newExprs);
@@ -1053,8 +1061,8 @@ public class TypeCheckProcFactory<T> {
           // flatten OR
           List<T> childrenList = new ArrayList<>(children.size());
           for (T child : children) {
-            if (TypeInfoFactory.getPrimitiveTypeInfo("void").equals(exprFactory.getTypeInfo(child))) {
-              child = exprFactory.setTypeInfo(child, TypeInfoFactory.getPrimitiveTypeInfo("boolean"));
+            if (TypeInfoFactory.getPrimitiveTypeInfo(serdeConstants.VOID_TYPE_NAME).equals(exprFactory.getTypeInfo(child))) {
+              child = exprFactory.setTypeInfo(child, TypeInfoFactory.getPrimitiveTypeInfo(serdeConstants.BOOLEAN_TYPE_NAME));
             }
             if (exprFactory.isORFuncCallExpr(child)) {
               childrenList.addAll(exprFactory.getExprChildren(child));
@@ -1062,13 +1070,13 @@ public class TypeCheckProcFactory<T> {
               childrenList.add(child);
             }
           }
-          expr = exprFactory.createFuncCallExpr(null, fi, funcText, childrenList);
+          expr = exprFactory.createFuncCallExpr(node.getTypeInfo(), fi, funcText, childrenList);
         } else if (exprFactory.isAndFunction(fi)) {
           // flatten AND
           List<T> childrenList = new ArrayList<>(children.size());
           for (T child : children) {
-            if (TypeInfoFactory.getPrimitiveTypeInfo("void").equals(exprFactory.getTypeInfo(child))) {
-              child = exprFactory.setTypeInfo(child, TypeInfoFactory.getPrimitiveTypeInfo("boolean"));
+            if (TypeInfoFactory.getPrimitiveTypeInfo(serdeConstants.VOID_TYPE_NAME).equals(exprFactory.getTypeInfo(child))) {
+              child = exprFactory.setTypeInfo(child, TypeInfoFactory.getPrimitiveTypeInfo(serdeConstants.BOOLEAN_TYPE_NAME));
             }
             if (exprFactory.isANDFuncCallExpr(child)) {
               childrenList.addAll(exprFactory.getExprChildren(child));
@@ -1076,18 +1084,27 @@ public class TypeCheckProcFactory<T> {
               childrenList.add(child);
             }
           }
-          expr = exprFactory.createFuncCallExpr(null, fi, funcText, childrenList);
+          expr = exprFactory.createFuncCallExpr(node.getTypeInfo(), fi, funcText, childrenList);
         } else if (ctx.isFoldExpr() && exprFactory.convertCASEIntoCOALESCEFuncCallExpr(fi, children)) {
           // Rewrite CASE into COALESCE
           fi = exprFactory.getFunctionInfo("coalesce");
-          expr = exprFactory.createFuncCallExpr(null, fi, "coalesce",
+          expr = exprFactory.createFuncCallExpr(node.getTypeInfo(), fi, "coalesce",
               Lists.newArrayList(children.get(0), exprFactory.createBooleanConstantExpr(Boolean.FALSE.toString())));
           if (Boolean.FALSE.equals(exprFactory.getConstantValue(children.get(1)))) {
             fi = exprFactory.getFunctionInfo("not");
-            expr = exprFactory.createFuncCallExpr(null, fi, "not", Lists.newArrayList(expr));
+            expr = exprFactory.createFuncCallExpr(node.getTypeInfo(), fi, "not", Lists.newArrayList(expr));
           }
+        } else if (ctx.isFoldExpr() && exprFactory.convertCASEIntoIFFuncCallExpr(fi, children)) {
+          // Rewrite CASE(C,A,B) into IF(C,A,B)
+          fi = exprFactory.getFunctionInfo("if");
+          expr = exprFactory.createFuncCallExpr(node.getTypeInfo(), fi, "if", children);
         } else {
-          expr = exprFactory.createFuncCallExpr(typeInfo, fi, funcText, children);
+          TypeInfo t = (node.getTypeInfo() != null) ? node.getTypeInfo() : typeInfo;
+          expr = exprFactory.createFuncCallExpr(t, fi, funcText, children);
+        }
+
+        if (exprFactory.isSTRUCTFuncCallExpr(expr)) {
+          expr = exprFactory.replaceFieldNamesInStruct(expr, ctx.getColumnAliases());
         }
 
         // If the function is deterministic and the children are constants,
@@ -1139,6 +1156,10 @@ public class TypeCheckProcFactory<T> {
           return timestampLocalTZTypeInfo;
         case HiveParser.TOK_DECIMAL:
           return ParseUtils.getDecimalTypeTypeInfo(funcNameNode);
+        case HiveParser.TOK_MAP:
+        case HiveParser.TOK_LIST:
+        case HiveParser.TOK_STRUCT:
+          return ParseUtils.getComplexTypeTypeInfo(funcNameNode);
         default:
           return null;
       }
@@ -1150,9 +1171,17 @@ public class TypeCheckProcFactory<T> {
     private T interpretNode(T columnDesc, T valueDesc)
         throws SemanticException {
       if (exprFactory.isColumnRefExpr(columnDesc)) {
-        final PrimitiveTypeInfo typeInfo = TypeInfoFactory.getPrimitiveTypeInfo(
-            exprFactory.getTypeInfo(columnDesc).getTypeName().toLowerCase());
-        return interpretNodeAsConstant(typeInfo, valueDesc);
+        final TypeInfo info = exprFactory.getTypeInfo(columnDesc);
+        switch (info.getCategory()) {
+        case MAP:
+        case LIST:
+        case UNION:
+        case STRUCT:
+          return valueDesc;
+        case PRIMITIVE:
+          PrimitiveTypeInfo primitiveInfo = TypeInfoFactory.getPrimitiveTypeInfo(info.getTypeName().toLowerCase());
+          return interpretNodeAsConstant(primitiveInfo, valueDesc);
+        }
       }
       boolean columnStruct = exprFactory.isSTRUCTFuncCallExpr(columnDesc);
       if (columnStruct) {
@@ -1207,6 +1236,12 @@ public class TypeCheckProcFactory<T> {
 
     @VisibleForTesting
     protected T interpretNodeAsConstant(PrimitiveTypeInfo targetType, T constChild) throws SemanticException {
+      // k in (v1, v2) can be treated as k = v1 or k = v2, so isEqual set to true.
+      return interpretNodeAsConstant(targetType, constChild, true);
+    }
+
+    private T interpretNodeAsConstant(PrimitiveTypeInfo targetType, T constChild,
+        boolean isEqual) throws SemanticException {
       if (exprFactory.isConstantExpr(constChild)) {
         // Try to narrow type of constant
         Object constVal = exprFactory.getConstantValue(constChild);
@@ -1217,7 +1252,7 @@ public class TypeCheckProcFactory<T> {
         PrimitiveTypeInfo sourceType =
             (PrimitiveTypeInfo) exprFactory.getTypeInfo(constChild);
         Object newConst = exprFactory.interpretConstantAsPrimitive(
-            targetType, constVal, sourceType);
+            targetType, constVal, sourceType, isEqual);
         if (newConst == null) {
           return null;
         }
@@ -1282,6 +1317,7 @@ public class TypeCheckProcFactory<T> {
             ErrorMsg.INVALID_COLUMN.getMsg(), expr.getChild(1)), expr);
         return null;
       }
+      checkAmbiguousName(colInfo);
       return exprFactory.toExpr(colInfo, usedRR, offset);
     }
 
@@ -1400,7 +1436,9 @@ public class TypeCheckProcFactory<T> {
       // Return nulls for conversion operators
       if (CONVERSION_FUNCTION_TEXT_MAP.keySet().contains(expr.getType())
           || expr.getToken().getType() == HiveParser.CharSetName
-          || expr.getToken().getType() == HiveParser.CharSetLiteral) {
+          || expr.getToken().getType() == HiveParser.CharSetLiteral
+          || expr.getType() == HiveParser.TOK_TABCOL
+          || expr.getType() == HiveParser.TOK_TABCOLLIST) {
         return null;
       }
 
@@ -1418,6 +1456,10 @@ public class TypeCheckProcFactory<T> {
       List<T> children = new ArrayList<T>(
           expr.getChildCount() - childrenBegin);
       for (int ci = childrenBegin; ci < expr.getChildCount(); ci++) {
+        if (nodeOutputs[ci] == ALIAS_PLACEHOLDER) {
+          continue;
+        }
+
         T nodeOutput = (T) nodeOutputs[ci];
         if (exprFactory.isExprsListExpr(nodeOutput)) {
           children.addAll(exprFactory.getExprChildren(nodeOutput));
@@ -1652,6 +1694,20 @@ public class TypeCheckProcFactory<T> {
       }
     }
     return BaseSemanticAnalyzer.unescapeIdentifier(funcText);
+  }
+
+  private SemanticNodeProcessor getValueAliasProcessor() {
+    return new ValueAliasProcessor();
+  }
+
+  public static class ValueAliasProcessor implements SemanticNodeProcessor {
+
+    @Override
+    public Object process(Node nd, Stack<Node> stack, NodeProcessorCtx procCtx, Object... nodeOutputs) throws SemanticException {
+      ASTNode astNode = (ASTNode) nd;
+      ((TypeCheckCtx) procCtx).addColumnAlias(astNode.getChild(0).getText());
+      return ALIAS_PLACEHOLDER;
+    }
   }
 
 }

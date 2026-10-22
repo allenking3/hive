@@ -1,7 +1,9 @@
 PREHOOK: query: DROP TABLE IF EXISTS cond_vector
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE IF EXISTS cond_vector
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: CREATE TABLE cond_vector(a STRING) STORED AS ORC
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -58,22 +60,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, map('a':'b'), null) (type: map<string,string>)
+                    expressions: map('a':'b') (type: map<string,string>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [4]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 3:map<string,string>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(map('a':'b')) -> 3:map<string,string>) -> 4:map<string,string>
-                    Statistics: Num rows: 3 Data size: 326 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [3]
+                        selectExpressions: VectorUDFAdaptor(map('a':'b')) -> 3:map<string,string>
+                    Statistics: Num rows: 3 Data size: 978 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 326 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 978 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -93,7 +95,7 @@ STAGE PLANS:
                     includeColumns: []
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, map<string,string>, map<string,string>]
+                    scratchColumnTypeNames: [map<string,string>]
 
   Stage: Stage-0
     Fetch Operator
@@ -140,22 +142,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, map('a':map('b':'c')), null) (type: map<string,map<string,string>>)
+                    expressions: map('a':map('b':'c')) (type: map<string,map<string,string>>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [5]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 4:map<string,map<string,string>>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(map('a':map('b':'c')))(children: VectorUDFAdaptor(map('b':'c')) -> 3:map<string,string>) -> 4:map<string,map<string,string>>) -> 5:map<string,map<string,string>>
-                    Statistics: Num rows: 3 Data size: 241 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [4]
+                        selectExpressions: VectorUDFAdaptor(map('a':map('b':'c')))(children: VectorUDFAdaptor(map('b':'c')) -> 3:map<string,string>) -> 4:map<string,map<string,string>>
+                    Statistics: Num rows: 3 Data size: 723 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 241 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 723 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -175,7 +177,7 @@ STAGE PLANS:
                     includeColumns: []
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, map<string,string>, map<string,map<string,string>>, map<string,map<string,string>>]
+                    scratchColumnTypeNames: [map<string,string>, map<string,map<string,string>>]
 
   Stage: Stage-0
     Fetch Operator
@@ -222,22 +224,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, map('a':a), null) (type: map<string,string>)
+                    expressions: map('a':a) (type: map<string,string>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [4]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 3:map<string,string>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(map('a':a)) -> 3:map<string,string>) -> 4:map<string,string>
-                    Statistics: Num rows: 3 Data size: 920 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [3]
+                        selectExpressions: VectorUDFAdaptor(map('a':a)) -> 3:map<string,string>
+                    Statistics: Num rows: 3 Data size: 2760 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 920 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 2760 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -257,7 +259,7 @@ STAGE PLANS:
                     includeColumns: [0]
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, map<string,string>, map<string,string>]
+                    scratchColumnTypeNames: [map<string,string>]
 
   Stage: Stage-0
     Fetch Operator
@@ -304,22 +306,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, map('a':map('b':a)), null) (type: map<string,map<string,string>>)
+                    expressions: map('a':map('b':a)) (type: map<string,map<string,string>>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [5]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 4:map<string,map<string,string>>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(map('a':map('b':a)))(children: VectorUDFAdaptor(map('b':a)) -> 3:map<string,string>) -> 4:map<string,map<string,string>>) -> 5:map<string,map<string,string>>
-                    Statistics: Num rows: 3 Data size: 1656 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [4]
+                        selectExpressions: VectorUDFAdaptor(map('a':map('b':a)))(children: VectorUDFAdaptor(map('b':a)) -> 3:map<string,string>) -> 4:map<string,map<string,string>>
+                    Statistics: Num rows: 3 Data size: 4968 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 1656 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 4968 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -339,7 +341,7 @@ STAGE PLANS:
                     includeColumns: [0]
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, map<string,string>, map<string,map<string,string>>, map<string,map<string,string>>]
+                    scratchColumnTypeNames: [map<string,string>, map<string,map<string,string>>]
 
   Stage: Stage-0
     Fetch Operator
@@ -386,22 +388,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, array('a','b'), null) (type: array<string>)
+                    expressions: array('a','b') (type: array<string>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [4]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 3:array<string>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(array('a','b')) -> 3:array<string>) -> 4:array<string>
-                    Statistics: Num rows: 3 Data size: 408 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [3]
+                        selectExpressions: VectorUDFAdaptor(array('a','b')) -> 3:array<string>
+                    Statistics: Num rows: 3 Data size: 1224 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 408 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 1224 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -421,7 +423,7 @@ STAGE PLANS:
                     includeColumns: []
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, array<string>, array<string>]
+                    scratchColumnTypeNames: [array<string>]
 
   Stage: Stage-0
     Fetch Operator
@@ -468,22 +470,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, array(array('a','b'),array('c','d')), null) (type: array<array<string>>)
+                    expressions: array(array('a','b'),array('c','d')) (type: array<array<string>>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [6]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 5:array<array<string>>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(array(array('a','b'),array('c','d')))(children: VectorUDFAdaptor(array('a','b')) -> 3:array<string>, VectorUDFAdaptor(array('c','d')) -> 4:array<string>) -> 5:array<array<string>>) -> 6:array<array<string>>
-                    Statistics: Num rows: 3 Data size: 56 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [5]
+                        selectExpressions: VectorUDFAdaptor(array(array('a','b'),array('c','d')))(children: VectorUDFAdaptor(array('a','b')) -> 3:array<string>, VectorUDFAdaptor(array('c','d')) -> 4:array<string>) -> 5:array<array<string>>
+                    Statistics: Num rows: 3 Data size: 168 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 56 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 168 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -503,7 +505,7 @@ STAGE PLANS:
                     includeColumns: []
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, array<string>, array<string>, array<array<string>>, array<array<string>>]
+                    scratchColumnTypeNames: [array<string>, array<string>, array<array<string>>]
 
   Stage: Stage-0
     Fetch Operator
@@ -550,22 +552,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, array('a',a), null) (type: array<string>)
+                    expressions: array('a',a) (type: array<string>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [4]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 3:array<string>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(array('a',a)) -> 3:array<string>) -> 4:array<string>
-                    Statistics: Num rows: 3 Data size: 1920 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [3]
+                        selectExpressions: VectorUDFAdaptor(array('a',a)) -> 3:array<string>
+                    Statistics: Num rows: 3 Data size: 5760 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 1920 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 5760 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -585,7 +587,7 @@ STAGE PLANS:
                     includeColumns: [0]
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, array<string>, array<string>]
+                    scratchColumnTypeNames: [array<string>]
 
   Stage: Stage-0
     Fetch Operator
@@ -632,22 +634,22 @@ STAGE PLANS:
                   Statistics: Num rows: 3 Data size: 261 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:a:string, 1:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 2:ROW__IS__DELETED:boolean]
                   Select Operator
-                    expressions: if(true, array(array('a',a),array('b','c')), null) (type: array<array<string>>)
+                    expressions: array(array('a',a),array('b','c')) (type: array<array<string>>)
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [6]
-                        selectExpressions: IfExprCondExprNull(col 2:boolean, col 5:array<array<string>>, null)(children: ConstantVectorExpression(val 1) -> 2:boolean, VectorUDFAdaptor(array(array('a',a),array('b','c')))(children: VectorUDFAdaptor(array('a',a)) -> 3:array<string>, VectorUDFAdaptor(array('b','c')) -> 4:array<string>) -> 5:array<array<string>>) -> 6:array<array<string>>
-                    Statistics: Num rows: 3 Data size: 19280 Basic stats: COMPLETE Column stats: COMPLETE
+                        projectedOutputColumnNums: [5]
+                        selectExpressions: VectorUDFAdaptor(array(array('a',a),array('b','c')))(children: VectorUDFAdaptor(array('a',a)) -> 3:array<string>, VectorUDFAdaptor(array('b','c')) -> 4:array<string>) -> 5:array<array<string>>
+                    Statistics: Num rows: 3 Data size: 57840 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
                       File Sink Vectorization:
                           className: VectorFileSinkOperator
                           native: false
-                      Statistics: Num rows: 3 Data size: 19280 Basic stats: COMPLETE Column stats: COMPLETE
+                      Statistics: Num rows: 3 Data size: 57840 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -667,7 +669,7 @@ STAGE PLANS:
                     includeColumns: [0]
                     dataColumns: a:string
                     partitionColumnCount: 0
-                    scratchColumnTypeNames: [bigint, array<string>, array<string>, array<array<string>>, array<array<string>>]
+                    scratchColumnTypeNames: [array<string>, array<string>, array<array<string>>]
 
   Stage: Stage-0
     Fetch Operator

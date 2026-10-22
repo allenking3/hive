@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.mapjoin.fast;
@@ -28,7 +29,6 @@ import org.apache.hadoop.hive.ql.exec.vector.mapjoin.hashtable.VectorMapJoinHash
 import org.apache.hadoop.hive.ql.exec.vector.mapjoin.hashtable.VectorMapJoinLongHashMultiSet;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.plan.VectorMapJoinDesc.HashTableKeyType;
-import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.io.BytesWritable;
 import org.apache.hive.common.util.HashCodeUtil;
 
@@ -51,10 +51,10 @@ public class VectorMapJoinFastLongHashMultiSet
   }
 
   @Override
-  public void putRow(BytesWritable currentKey, BytesWritable currentValue)
+  public void putRow(long hashCode, BytesWritable currentKey, BytesWritable currentValue)
       throws HiveException, IOException {
 
-    if (!adaptPutRow(currentKey, currentValue)) {
+    if (!adaptPutRow(hashCode, currentKey, currentValue)) {
 
       // Ignore NULL keys, except for FULL OUTER.
       if (isFullOuter) {
@@ -75,7 +75,8 @@ public class VectorMapJoinFastLongHashMultiSet
    */
   @VisibleForTesting
   public void testPutRow(long currentKey) throws HiveException, IOException {
-    add(currentKey, null);
+    long hashCode = HashCodeUtil.calculateLongHashCode(currentKey);
+    add(hashCode, currentKey, null);
   }
 
   @Override

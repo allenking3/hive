@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.io.orc;
 
@@ -26,6 +27,7 @@ import java.util.TreeMap;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.ql.exec.AbstractFileMergeOperator;
 import org.apache.hadoop.hive.ql.exec.Utilities;
+import org.apache.hadoop.hive.ql.io.AcidDirectory;
 import org.apache.hadoop.hive.ql.io.AcidOutputFormat;
 import org.apache.hadoop.hive.ql.io.BucketCodec;
 import org.apache.hadoop.hive.shims.HadoopShims;
@@ -63,7 +65,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
   private final long length;
   private final ValidWriteIdList validWriteIdList;
   private final int columns;
-  private final ReaderKey prevKey = new ReaderKey();
+  protected final ReaderKey prevKey = new ReaderKey();
   // this is the key less than the lowest key we need to process
   private final RecordIdentifier minKey;
   // this is the last key we need to process
@@ -106,6 +108,10 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
       setValues(originalWriteId, bucket, rowId);
       this.currentWriteId = currentWriteId;
       this.isDeleteEvent = isDelete;
+    }
+
+    public void setDeleteEvent(boolean deleteEvent) {
+      isDeleteEvent = deleteEvent;
     }
 
     @Override
@@ -169,6 +175,10 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
       return "{originalWriteId: " + getWriteId() + ", " +
           bucketToString(getBucketProperty()) + ", row: " + getRowId() +
           ", currentWriteId " + currentWriteId + "}";
+    }
+
+    public boolean isDeleteEvent() {
+      return isDeleteEvent;
     }
   }
   interface ReaderPair {
@@ -459,10 +469,10 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
         /**
          * Note that for reading base_x/ or delta_x_x/ with non-acid schema,
          * {@link Options#getRootPath()} is set to base_x/ or delta_x_x/ which causes all it's
-         * contents to be in {@link org.apache.hadoop.hive.ql.io.AcidUtils.Directory#getOriginalFiles()}
+         * contents to be in {@link AcidDirectory#getOriginalFiles()}
          */
         //the split is from something other than the 1st file of the logical bucket - compute offset
-        AcidUtils.Directory directoryState = AcidUtils.getAcidState(null, mergerOptions.getRootPath(), conf,
+        AcidDirectory directoryState = AcidUtils.getAcidState(null, mergerOptions.getRootPath(), conf,
             validWriteIdList, Ref.from(false), true);
         for (HadoopShims.HdfsFileStatusWithId f : directoryState.getOriginalFiles()) {
           int bucketIdFromPath = AcidUtils.parseBucketId(f.getFileStatus().getPath());
@@ -484,9 +494,9 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
             isLastFileForThisBucket = true;
             continue;
           }
-          Reader copyReader = OrcFile.createReader(f.getFileStatus().getPath(),
-            OrcFile.readerOptions(conf));
-          rowIdOffsetTmp += copyReader.getNumberOfRows();
+          try (Reader copyReader = OrcFile.createReader(f.getFileStatus().getPath(), OrcFile.readerOptions(conf))) {
+            rowIdOffsetTmp += copyReader.getNumberOfRows();
+          }
         }
         this.rowIdOffset = rowIdOffsetTmp;
         if (rowIdOffset > 0) {
@@ -550,7 +560,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
   @VisibleForTesting
   final static class OriginalReaderPairToCompact extends OriginalReaderPair {
     /**
-     * See {@link AcidUtils.Directory#getOriginalFiles()}.  This list has a fixed sort order.
+     * See {@link AcidDirectory#getOriginalFiles()}.  This list has a fixed sort order.
      * It includes all original files (for all buckets).  
      */
     private final List<HadoopShims.HdfsFileStatusWithId> originalFiles;
@@ -576,12 +586,12 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
       //when compacting each split needs to process the whole logical bucket
       assert options.getOffset() == 0;
       assert options.getMaxOffset() == Long.MAX_VALUE;
-      AcidUtils.Directory directoryState = AcidUtils.getAcidState(null, mergerOptions.getRootPath(), conf,
+      AcidDirectory directoryState = AcidUtils.getAcidState(null, mergerOptions.getRootPath(), conf,
           validWriteIdList, Ref.from(false), true);
       /**
        * Note that for reading base_x/ or delta_x_x/ with non-acid schema,
        * {@link Options#getRootPath()} is set to base_x/ or delta_x_x/ which causes all it's
-       * contents to be in {@link org.apache.hadoop.hive.ql.io.AcidUtils.Directory#getOriginalFiles()}
+       * contents to be in {@link AcidDirectory#getOriginalFiles()}
        */
       originalFiles = directoryState.getOriginalFiles();
       assert originalFiles.size() > 0;
@@ -754,15 +764,20 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
   }
 
   /**
-   * Find the key range for the split (of the base).  These are used to filter delta files since
-   * both are sorted by key.
+   * Find the key range for the split (of the base) based on the 'hive.acid.key.index' metadata.
+   * These keys are used to filter delta files since both are sorted by key.
+   * If 'hive.acid.key.index' is missing from the ORC file, return null keys (which forces a full read).
    * @param reader the reader
    * @param options the options for reading with
-   * @throws IOException
    */
-  private KeyInterval discoverKeyBounds(Reader reader,
-                                 Reader.Options options) throws IOException {
-    RecordIdentifier[] keyIndex = OrcRecordUpdater.parseKeyIndex(reader);
+  private KeyInterval discoverKeyBounds(Reader reader, Reader.Options options) {
+    final RecordIdentifier[] keyIndex = OrcRecordUpdater.parseKeyIndex(reader);
+    if (keyIndex == null) {
+      LOG.warn("Missing '{}' metadata in ORC file, can't compute min/max keys",
+          OrcRecordUpdater.ACID_KEY_INDEX_NAME);
+      return new KeyInterval(null, null);
+    }
+
     long offset = options.getOffset();
     long maxOffset = options.getMaxOffset();
     int firstStripe = 0;
@@ -971,7 +986,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
                      Reader.Options options,
                      Path[] deltaDirectory,
                      Options mergerOptions,
-                     Map<String, String> deltasToAttemptId) throws IOException {
+                     Map<String, Integer> deltasToAttemptId) throws IOException {
     this.collapse = collapseEvents;
     this.offset = options.getOffset();
     this.length = options.getLength();
@@ -1055,7 +1070,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
           Options readerPairOptions = mergerOptions;
           if(mergerOptions.getBaseDir().getName().startsWith(AcidUtils.BASE_PREFIX)) {
             readerPairOptions = modifyForNonAcidSchemaRead(mergerOptions,
-                AcidUtils.ParsedBase.parseBase(mergerOptions.getBaseDir()).getWriteId(),
+                AcidUtils.ParsedBaseLight.parseBase(mergerOptions.getBaseDir()).getWriteId(),
                 mergerOptions.getBaseDir());
           }
           pair = new OriginalReaderPairToCompact(baseKey, bucket, options, readerPairOptions,
@@ -1083,9 +1098,9 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
           assert mergerOptions.getBaseDir() != null : "no baseDir?: " + mergerOptions.getRootPath();
           //we are compacting and it's acid schema so create a reader for the 1st bucket file that is not empty
           FileSystem fs = mergerOptions.getBaseDir().getFileSystem(conf);
-          String attemptId = null;
+          Integer attemptId = null;
           if (deltasToAttemptId != null) {
-            attemptId = deltasToAttemptId.get(mergerOptions.getBaseDir().toString());
+            attemptId = deltasToAttemptId.get(mergerOptions.getBaseDir().getName());
           }
           Path bucketPath = AcidUtils.createBucketFile(mergerOptions.getBaseDir(), bucket, attemptId);
           if(fs.exists(bucketPath) && fs.getFileStatus(bucketPath).getLen() > 0) {
@@ -1150,9 +1165,9 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
           continue;
         }
 
-        String attemptId = null;
+        Integer attemptId = null;
         if (deltasToAttemptId != null) {
-          attemptId = deltasToAttemptId.get(delta.toString());
+          attemptId = deltasToAttemptId.get(delta.getName());
         }
 
         for (Path deltaFile : getDeltaFiles(delta, bucket, mergerOptions, attemptId)) {
@@ -1257,7 +1272,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
             || parent.getName().startsWith(AcidUtils.DELETE_DELTA_PREFIX);
         if(isBase || isDelta) {
           if(isBase) {
-            return new TransactionMetaData(AcidUtils.ParsedBase.parseBase(parent).getWriteId(),
+            return new TransactionMetaData(AcidUtils.ParsedBaseLight.parseBase(parent).getWriteId(),
                 parent);
           }
           else {
@@ -1283,7 +1298,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
    * happens as a result of Load Data statement.  Setting {@code rootPath} to base_x/ or delta_x_x
    * causes {@link AcidUtils#getAcidState(Path, Configuration, ValidWriteIdList)} in subsequent
    * {@link OriginalReaderPair} object to return the files in this dir
-   * in {@link AcidUtils.Directory#getOriginalFiles()}
+   * in {@link AcidDirectory#getOriginalFiles()}
    * @return modified clone of {@code baseOptions}
    */
   private Options modifyForNonAcidSchemaRead(Options baseOptions, long writeId, Path rootPath) {
@@ -1293,7 +1308,7 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
    * This determines the set of {@link ReaderPairAcid} to create for a given delta/.
    * For unbucketed tables {@code bucket} can be thought of as a write tranche.
    */
-  static Path[] getDeltaFiles(Path deltaDirectory, int bucket, Options mergerOptions, String attemptId) {
+  static Path[] getDeltaFiles(Path deltaDirectory, int bucket, Options mergerOptions, Integer attemptId) {
     assert (!mergerOptions.isCompacting &&
         deltaDirectory.getName().startsWith(AcidUtils.DELETE_DELTA_PREFIX)
     ) || mergerOptions.isCompacting : "Unexpected delta: " + deltaDirectory +
@@ -1386,7 +1401,9 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
       if (collapse || isSameRow) {
         // Note: for collapse == false, this just sets keysSame.
         keysSame = (collapse && prevKey.compareRow(recordIdentifier) == 0) || (isSameRow);
-        if (!keysSame) {
+        if (keysSame) {
+          keysSame = collapse(recordIdentifier);
+        } else {
           prevKey.set(recordIdentifier);
         }
       } else {
@@ -1400,8 +1417,12 @@ public class OrcRawRecordMerger implements AcidInputFormat.RawReader<OrcStruct>{
     return !keysSame;
   }
 
+  protected boolean collapse(RecordIdentifier recordIdentifier) {
+    return true;
+  }
+
   @Override
-  public RecordIdentifier createKey() {
+  public OrcRawRecordMerger.ReaderKey createKey() {
     return new ReaderKey();
   }
 

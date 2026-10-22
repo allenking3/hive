@@ -9,25 +9,29 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.service.cli.session;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
@@ -62,6 +66,7 @@ import org.apache.hive.service.cli.OperationHandle;
 import org.apache.hive.service.cli.RowSet;
 import org.apache.hive.service.cli.SessionHandle;
 import org.apache.hive.service.cli.TableSchema;
+import org.apache.hive.service.cli.session.store.HiveSessionSnapshot;
 import org.apache.hive.service.cli.operation.ExecuteStatementOperation;
 import org.apache.hive.service.cli.operation.GetCatalogsOperation;
 import org.apache.hive.service.cli.operation.GetColumnsOperation;
@@ -138,7 +143,7 @@ public class HiveSessionImpl implements HiveSession {
     this.operationLock = serverConf.getBoolVar(
         ConfVars.HIVE_SERVER2_PARALLEL_OPS_IN_SESSION) ? null : new Semaphore(1);
     // Set an explicit session name to control the download directory name
-    sessionConf.set(ConfVars.HIVESESSIONID.varname,
+    sessionConf.set(ConfVars.HIVE_SESSION_ID.varname,
         this.sessionHandle.getHandleIdentifier().toString());
     // Use thrift transportable formatter
     sessionConf.set(SerDeUtils.LIST_SINK_OUTPUT_FORMATTER, ThriftFormatter.class.getName());
@@ -208,7 +213,7 @@ public class HiveSessionImpl implements HiveSession {
       FileInputStream initStream = null;
       BufferedReader bufferedReader = null;
       initStream = new FileInputStream(fileName);
-      bufferedReader = new BufferedReader(new InputStreamReader(initStream));
+      bufferedReader = new BufferedReader(new InputStreamReader(initStream, StandardCharsets.UTF_8));
       return bufferedReader;
     }
 
@@ -240,21 +245,13 @@ public class HiveSessionImpl implements HiveSession {
    * @throws HiveSQLException
    */
   private void setSessionHive() throws HiveSQLException {
-    Hive newSessionHive;
     try {
-      newSessionHive = Hive.get(getHiveConf());
-
-      // HMS connections from sessionHive shouldn't be closed by any query execution thread when it
-      // recreates the Hive object. It is allowed to be closed only when session is closed/released.
-      newSessionHive.setAllowClose(false);
+      sessionHive = sessionState.getHiveDb();
     } catch (HiveException e) {
-      throw new HiveSQLException("Failed to get metastore connection", e);
+      String msg = "Failed to create Hive Object: " + e;
+      LOG.error(msg, e);
+      throw new HiveSQLException(msg, e);
     }
-
-    // The previous sessionHive object might still be referred by any async query execution thread.
-    // So, it shouldn't be closed here explicitly. Anyways, Hive object will auto-close HMS connection
-    // when it is garbage collected. So, it is safe to just overwrite sessionHive here.
-    sessionHive = newSessionHive;
   }
 
   private void processGlobalInitFile() {
@@ -408,19 +405,11 @@ public class HiveSessionImpl implements HiveSession {
     // set the thread name with the logging prefix.
     sessionState.updateThreadName();
 
-    // If the thread local Hive is different from sessionHive, it means, the previous query execution in
-    // master thread has re-created Hive object due to changes in MS related configurations in sessionConf.
-    // So, it is necessary to reset sessionHive object based on new sessionConf. Here, we cannot,
-    // directly set sessionHive with thread local Hive because if the previous command was REPL LOAD, then
-    // the config changes lives only within command execution not in session level.
-    // So, the safer option is to invoke Hive.get() which decides if to reuse Thread local Hive or re-create it.
-    if (Hive.getThreadLocal() != sessionHive) {
-      try {
-        setSessionHive();
-      } catch (HiveSQLException e) {
-        throw new RuntimeException(e);
-      }
-    }
+    // If Hive.get() is being shared across different sessions,
+    // sessionHive and Hive.get() may be different, in such case,
+    // the risk of deadlock on HiveMetaStoreClient#SynchronizedHandler can happen.
+    // Refresh the thread-local Hive to avoid the deadlock.
+    Hive.set(sessionHive);
   }
 
   /**
@@ -447,6 +436,18 @@ public class HiveSessionImpl implements HiveSession {
       sessionState.resetThreadName();
     }
 
+    // We have already set the thread-local Hive belonging to the current session,
+    // if the thread-local Hive has been changed/updated after running the operation,
+    // the Hive after should belong to the same session, and we should update the sessionHive.
+    // The thread-local hive would be recreated only when the underlying
+    // HiveMetaStoreClient is incompatible with the newest session conf.
+    Hive localHive = Hive.getThreadLocal();
+    if (localHive != null && localHive != sessionHive) {
+      // The previous sessionHive would be GC'ed finally, or should we force close it?
+      sessionHive = localHive;
+      sessionHive.setAllowClose(false);
+    }
+
     SessionState.detachSession();
     if (ThreadWithGarbageCleanup.currentThread() instanceof ThreadWithGarbageCleanup) {
       ThreadWithGarbageCleanup currentThread =
@@ -471,7 +472,7 @@ public class HiveSessionImpl implements HiveSession {
 
   @Override
   public HiveConf getHiveConf() {
-    sessionConf.setVar(HiveConf.ConfVars.HIVEFETCHOUTPUTSERDE, FETCH_WORK_SERDE_CLASS);
+    sessionConf.setVar(HiveConf.ConfVars.HIVE_FETCH_OUTPUT_SERDE, FETCH_WORK_SERDE_CLASS);
     return sessionConf;
   }
 
@@ -821,6 +822,25 @@ public class HiveSessionImpl implements HiveSession {
     }
   }
 
+  public void onOperationFinished(String statement) {
+    if (sessionManager == null || !sessionManager.isPersistableSessionsEnabled()) {
+      return;
+    }
+    notifyIfStateChanging(statement);
+  }
+
+  private void notifyIfStateChanging(String statement) {
+    if (PersistableSessionUtils.shouldPersistSnapshot(statement, sessionState)
+        && sessionManager != null) {
+      sessionManager.notifySessionStateChanged(sessionHandle);
+    }
+  }
+
+  public HiveSessionSnapshot captureSnapshot() {
+    return PersistableSessionUtils.captureSnapshot(sessionHandle, username, ipAddress,
+        sessionState, getProtocolVersion(), creationTime, lastAccessTime);
+  }
+
   @Override
   public SessionState getSessionState() {
     return sessionState;
@@ -1036,8 +1056,14 @@ public class HiveSessionImpl implements HiveSession {
   @Override
   public void setApplicationName(String value) {
     String oldName = sessionState.getHiveVariables().put("wmapp", value);
-    if (oldName != null && !oldName.equals(value)) {
+    if (Objects.equals(oldName, value)) {
+      return;
+    }
+    if (oldName != null) {
       LOG.info("ApplicationName changed from " + oldName + " to " + value);
+    }
+    if (sessionManager != null && sessionManager.isPersistableSessionsEnabled()) {
+      sessionManager.notifySessionStateChanged(sessionHandle);
     }
   }
 
@@ -1072,4 +1098,49 @@ public class HiveSessionImpl implements HiveSession {
       "TRANSLATION", "TRIM", "TRUE", "UNION", "UNIQUE", "UNKNOWN", "UPDATE", "UPPER", "USAGE",
       "USER", "USING", "VALUE", "VALUES", "VARCHAR", "VARYING", "VIEW", "WHEN", "WHENEVER",
       "WHERE", "WITH", "WORK", "WRITE", "YEAR", "ZONE")));
+
+  @Override
+  public OperationHandle uploadData(
+      ByteBuffer values, String tableName, String path) throws HiveSQLException {
+    acquire(true, true);
+
+    OperationManager operationManager = getOperationManager();
+    Operation operation = operationManager.newUploadDataOperation(
+        getSession(), values, tableName, path);
+    OperationHandle opHandle = operation.getHandle();
+    try {
+      operation.run();
+      opHandleSet.add(opHandle);
+      return opHandle;
+    } catch (HiveSQLException e) {
+      operationManager.closeOperation(opHandle);
+      throw e;
+    } finally {
+      release(true, true);
+    }
+  }
+
+  @Override
+  public OperationHandle downloadData(
+      String tableName,
+      String query,
+      String format,
+      Map<String, String> options) throws HiveSQLException {
+    acquire(true, true);
+
+    OperationManager operationManager = getOperationManager();
+    Operation operation = operationManager.newDownloadDataOperation(
+        getSession(), tableName, query, format, options);
+    OperationHandle opHandle = operation.getHandle();
+    try {
+      operation.run();
+      opHandleSet.add(opHandle);
+      return opHandle;
+    } catch (HiveSQLException e) {
+      operationManager.closeOperation(opHandle);
+      throw e;
+    } finally {
+      release(true, true);
+    }
+  }
 }

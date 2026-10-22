@@ -1,25 +1,25 @@
 /*
- * Copyright 2010 The Apache Software Foundation
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
  * to you under the Apache License, Version 2.0 (the
- * License); you may not use this file except in compliance
+ * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an AS IS BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.serde2;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -65,8 +65,6 @@ import org.apache.hadoop.io.Writable;
 public class MultiDelimitSerDe extends AbstractEncodingAwareSerDe {
 
   private static final byte[] DEFAULT_SEPARATORS = {(byte) 1, (byte) 2, (byte) 3};
-  // Due to HIVE-6404, define our own constant
-  private static final String COLLECTION_DELIM = "collection.delim";
 
   // actual delimiter(fieldDelimited) is replaced by REPLACEMENT_DELIM in row.
   public static final String REPLACEMENT_DELIM_SEQUENCE = "\1";
@@ -95,21 +93,21 @@ public class MultiDelimitSerDe extends AbstractEncodingAwareSerDe {
   private final Text serializeCache = new Text();
 
   @Override
-  public void initialize(Configuration conf, Properties tbl) throws SerDeException {
-    // get the SerDe parameters
-    super.initialize(conf, tbl);
-    serdeParams = new LazySerDeParameters(conf, tbl, getClass().getName());
+  public void initialize(Configuration configuration, Properties tableProperties, Properties partitionProperties)
+      throws SerDeException {
+    super.initialize(configuration, tableProperties, partitionProperties);
 
-    fieldDelimited = tbl.getProperty(serdeConstants.FIELD_DELIM);
+    serdeParams = new LazySerDeParameters(configuration, tableProperties, getClass().getName());
+
+    fieldDelimited = properties.getProperty(serdeConstants.FIELD_DELIM);
     if (fieldDelimited == null || fieldDelimited.isEmpty()) {
       throw new SerDeException("This table does not have serde property \"field.delim\"!");
     }
 
     // get the collection separator and map key separator
-    // TODO: use serdeConstants.COLLECTION_DELIM when the typo is fixed
-    collSep = LazyUtils.getByte(tbl.getProperty(COLLECTION_DELIM),
+    collSep = LazyUtils.getByte(properties.getProperty(serdeConstants.COLLECTION_DELIM),
         DEFAULT_SEPARATORS[1]);
-    keySep = LazyUtils.getByte(tbl.getProperty(serdeConstants.MAPKEY_DELIM),
+    keySep = LazyUtils.getByte(properties.getProperty(serdeConstants.MAPKEY_DELIM),
         DEFAULT_SEPARATORS[2]);
     serdeParams.setSeparator(1, collSep);
     serdeParams.setSeparator(2, keySep);
@@ -126,7 +124,6 @@ public class MultiDelimitSerDe extends AbstractEncodingAwareSerDe {
     assert serdeParams.getColumnNames().size() == serdeParams.getColumnTypes().size();
     numColumns = serdeParams.getColumnNames().size();
   }
-
 
   @Override
   public ObjectInspector getObjectInspector() throws SerDeException {
@@ -157,10 +154,14 @@ public class MultiDelimitSerDe extends AbstractEncodingAwareSerDe {
     } else {
       throw new SerDeException(getClass() + ": expects either BytesWritable or Text object!");
     }
-    byteArrayRef.setData(rowStr.replaceAll(Pattern.quote(fieldDelimited), REPLACEMENT_DELIM_SEQUENCE).getBytes());
+
+    // at this point, rowStr is supposed to be encoded with UTF8 (not with the serde's charset)
+    byteArrayRef.setData(
+        rowStr.replaceAll(Pattern.quote(fieldDelimited), REPLACEMENT_DELIM_SEQUENCE).getBytes(StandardCharsets.UTF_8));
     cachedLazyStruct.init(byteArrayRef, 0, byteArrayRef.getData().length);
     // use the multi-char delimiter to parse the lazy struct
-    cachedLazyStruct.parseMultiDelimit(rowStr.getBytes(), fieldDelimited.getBytes());
+    cachedLazyStruct.parseMultiDelimit(rowStr.getBytes(StandardCharsets.UTF_8),
+        fieldDelimited.getBytes(StandardCharsets.UTF_8));
     return cachedLazyStruct;
   }
 

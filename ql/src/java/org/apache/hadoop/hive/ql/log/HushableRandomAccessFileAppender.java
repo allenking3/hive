@@ -1,30 +1,27 @@
-package org.apache.hadoop.hive.ql.log;
-
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache license, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the license for the specific language governing permissions and
- * limitations under the license.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
+package org.apache.hadoop.hive.ql.log;
 
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import org.apache.logging.log4j.core.Filter;
 import org.apache.logging.log4j.core.Layout;
 import org.apache.logging.log4j.core.LogEvent;
@@ -51,17 +48,6 @@ import org.apache.logging.log4j.core.util.Integers;
 public final class HushableRandomAccessFileAppender extends
     AbstractOutputStreamAppender<RandomAccessFileManager> {
 
-  private static final LoadingCache<String, String> CLOSED_FILES =
-      CacheBuilder.newBuilder().maximumSize(1000)
-          .expireAfterWrite(1, TimeUnit.SECONDS)
-          .build(new CacheLoader<String, String>() {
-            @Override
-            public String load(String key) throws Exception {
-              return key;
-            }
-          });
-
-
   private final String fileName;
   private Object advertisement;
   private final Advertiser advertiser;
@@ -86,7 +72,6 @@ public final class HushableRandomAccessFileAppender extends
   @Override
   public void stop() {
     super.stop();
-    CLOSED_FILES.put(fileName, fileName);
     if (advertiser != null) {
       advertiser.unadvertise(advertisement);
     }
@@ -188,22 +173,6 @@ public final class HushableRandomAccessFileAppender extends
           + name);
       return null;
     }
-
-    /**
-     * In corner cases (e.g exceptions), there seem to be some race between
-     * com.lmax.disruptor.BatchEventProcessor and HS2 thread which is actually
-     * stopping the logs. Because of this, same filename is recreated and
-     * stop() would never be invoked on that instance, causing a mem leak.
-     * To prevent same file being recreated within very short time,
-     * CLOSED_FILES are tracked in cache with TTL of 1 second. This
-     * also helps in avoiding the stale directories created.
-     */
-    if (CLOSED_FILES.getIfPresent(fileName) != null) {
-      // Do not create another file, which got closed in last 5 seconds
-      LOGGER.error(fileName + " was closed recently.");
-      return null;
-    }
-
     if (layout == null) {
       layout = PatternLayout.createDefaultLayout();
     }

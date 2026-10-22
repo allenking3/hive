@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -22,24 +23,13 @@ import org.apache.hadoop.hive.common.StringInternUtils;
 import org.apache.hadoop.hive.ql.exec.TableScanOperator.ProbeDecodeContext;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.BitSet;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
-import org.apache.hadoop.hive.ql.exec.FileSinkOperator;
 import org.apache.hadoop.hive.ql.exec.IConfigureJobConf;
 import org.apache.hadoop.hive.ql.exec.Operator;
 import org.apache.hadoop.hive.ql.exec.OperatorUtils;
@@ -58,6 +48,7 @@ import org.apache.hadoop.mapred.JobConf;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Interner;
+import com.google.common.collect.Iterators;
 
 /**
  * MapWork represents all the information used to run a map task on the cluster.
@@ -103,7 +94,7 @@ public class MapWork extends BaseWork {
   private Map<String, Operator<? extends OperatorDesc>> aliasToWork =
       new LinkedHashMap<String, Operator<? extends OperatorDesc>>();
 
-  private Map<String, PartitionDesc> aliasToPartnInfo = new LinkedHashMap<String, PartitionDesc>();
+  private Map<String, PartitionDesc> aliasToPartnInfo = new LinkedHashMap<>();
 
   private Map<String, SplitSample> nameToSplitSample = new LinkedHashMap<String, SplitSample>();
 
@@ -156,6 +147,8 @@ public class MapWork extends BaseWork {
       new LinkedHashMap<String, List<String>>();
   private Map<String, List<ExprNodeDesc>> eventSourcePartKeyExprMap =
       new LinkedHashMap<String, List<ExprNodeDesc>>();
+  private Map<String, List<ExprNodeDesc>> eventSourcePredicateExprMap =
+      new LinkedHashMap<String, List<ExprNodeDesc>>();
 
   private boolean doSplitsGrouping = true;
 
@@ -178,6 +171,12 @@ public class MapWork extends BaseWork {
   private boolean isMergeFromResolver;
 
   private ProbeDecodeContext probeDecodeContext = null;
+
+  protected List<Path> inputPaths;
+
+  private boolean useInputPathsDirectly;
+
+  private Properties mergeSplitProperties;
 
   public MapWork() {}
 
@@ -310,7 +309,8 @@ public class MapWork extends BaseWork {
           } else {
             hasLlap = true;
           }
-        } else if (isLlapOn && HiveInputFormat.canInjectCaches(inputFormatClass)) {
+        } else if (isLlapOn && HiveInputFormat.canInjectCaches(inputFormatClass,
+            Utilities.getIsVectorized(conf, this))) {
           hasCacheOnly = true;
         } else {
           hasNonLlap = true;
@@ -366,20 +366,28 @@ public class MapWork extends BaseWork {
     }
   }
 
-  /**
-   * @return the aliasToPartnInfo
-   */
-  public Map<String, PartitionDesc> getAliasToPartnInfo() {
-    return aliasToPartnInfo;
+  public Iterator<PartitionDesc> getPartitionDescs() {
+    return Iterators.unmodifiableIterator(aliasToPartnInfo.values().iterator());
   }
 
-  /**
-   * @param aliasToPartnInfo
-   *          the aliasToPartnInfo to set
-   */
-  public void setAliasToPartnInfo(
-      LinkedHashMap<String, PartitionDesc> aliasToPartnInfo) {
-    this.aliasToPartnInfo = aliasToPartnInfo;
+  public PartitionDesc getPartitionDesc(String alias) {
+    return aliasToPartnInfo.get(alias);
+  }
+
+  public int getPartitionCount() {
+    return aliasToPartnInfo.size();
+  }
+
+  public boolean hasPartitionDesc(String alias) {
+    return aliasToPartnInfo.containsKey(alias);
+  }
+
+  public void putPartitionDesc(String alias, PartitionDesc partitionDesc) {
+    aliasToPartnInfo.put(alias, partitionDesc);
+  }
+
+  public void removeAlias(String alias) {
+    aliasToPartnInfo.remove(alias);
   }
 
   public Map<String, Operator<? extends OperatorDesc>> getAliasToWork() {
@@ -608,10 +616,6 @@ public class MapWork extends BaseWork {
     return new ArrayList<Path>(pathToAliases.keySet());
   }
 
-  public ArrayList<PartitionDesc> getPartitionDescs() {
-    return new ArrayList<PartitionDesc>(aliasToPartnInfo.values());
-  }
-
   public Path getTmpHDFSPath() {
     return tmpHDFSPath;
   }
@@ -657,11 +661,24 @@ public class MapWork extends BaseWork {
         samplingType == 2 ? "SAMPLING_ON_START" : null;
   }
 
+  public Collection<TableDesc> getDistinctTableDescs() {
+    Map<String, TableDesc> tables = new LinkedHashMap<>();
+    for (PartitionDesc partition : aliasToPartnInfo.values()) {
+      TableDesc tableDesc = partition.getTableDesc();
+      if (tableDesc != null) {
+        tables.putIfAbsent(tableDesc.getTableName(), tableDesc);
+      }
+    }
+    return Collections.unmodifiableCollection(tables.values());
+  }
+
   @Override
   public void configureJobConf(JobConf job) {
     super.configureJobConf(job);
-    for (PartitionDesc partition : aliasToPartnInfo.values()) {
-      PlanUtils.configureJobConf(partition.getTableDesc(), job);
+    // Configure each table only once, even if we read thousands of its partitions.
+    // This avoids repeating expensive work (like loading storage drivers) for every single partition.
+    for (TableDesc tableDesc : getDistinctTableDescs()) {
+      PlanUtils.configureJobConf(tableDesc, job);
     }
     Collection<Operator<?>> mappers = aliasToWork.values();
     for (IConfigureJobConf icjc : OperatorUtils.findOperators(mappers, IConfigureJobConf.class)) {
@@ -707,6 +724,14 @@ public class MapWork extends BaseWork {
 
   public void setEventSourcePartKeyExprMap(Map<String, List<ExprNodeDesc>> map) {
     this.eventSourcePartKeyExprMap = map;
+  }
+
+  public Map<String, List<ExprNodeDesc>> getEventSourcePredicateExprMap() {
+    return eventSourcePredicateExprMap;
+  }
+
+  public void setEventSourcePredicateExprMap(Map<String, List<ExprNodeDesc>> eventSourcePredicateExprMap) {
+    this.eventSourcePredicateExprMap = eventSourcePredicateExprMap;
   }
 
   public void setDoSplitsGrouping(boolean doSplitsGrouping) {
@@ -923,5 +948,29 @@ public class MapWork extends BaseWork {
       return null;
     }
     return new MapExplainVectorization(this);
+  }
+
+  public List<Path> getInputPaths() {
+    return inputPaths;
+  }
+
+  public void setInputPaths(List<Path> inputPaths) {
+    this.inputPaths = inputPaths;
+  }
+
+  public void setUseInputPathsDirectly(boolean useInputPathsDirectly) {
+    this.useInputPathsDirectly = useInputPathsDirectly;
+  }
+
+  public boolean isUseInputPathsDirectly() {
+    return useInputPathsDirectly;
+  }
+
+  public Properties getMergeSplitProperties() {
+    return mergeSplitProperties;
+  }
+
+  public void setMergeSplitProperties(Properties mergeSplitProperties) {
+    this.mergeSplitProperties = mergeSplitProperties;
   }
 }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.metastore.model;
@@ -30,6 +31,7 @@ public class MReplicationMetrics {
   private String metadata;
   private String progress;
   private int startTime;
+  private String messageFormat;
 
   public MReplicationMetrics() {
   }
@@ -41,6 +43,7 @@ public class MReplicationMetrics {
     ret.setMetadata(mReplicationMetric.metadata);
     ret.setProgress(mReplicationMetric.progress);
     ret.setDumpExecutionId(mReplicationMetric.dumpExecutionId);
+    ret.setMessageFormat(mReplicationMetric.messageFormat);
     return ret;
   }
 
@@ -90,5 +93,13 @@ public class MReplicationMetrics {
 
   public void setStartTime(int startTime) {
     this.startTime = startTime;
+  }
+
+  public String getMessageFormat() {
+    return messageFormat;
+  }
+
+  public void setMessageFormat(String messageFormat) {
+    this.messageFormat = messageFormat;
   }
 }

@@ -1,11 +1,15 @@
 PREHOOK: query: drop table if exists customer
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists customer
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop table if exists orders
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists orders
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table customer (id int, name string, email string)
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -24,12 +28,20 @@ POSTHOOK: Output: database:default
 POSTHOOK: Output: default@orders
 PREHOOK: query: alter table customer add constraint pk_customer_id primary key (id) disable novalidate rely
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@customer
+PREHOOK: Output: default@customer
 POSTHOOK: query: alter table customer add constraint pk_customer_id primary key (id) disable novalidate rely
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@customer
+POSTHOOK: Output: default@customer
 PREHOOK: query: alter table orders add constraint fk_order_customer_id foreign key (customer_id) references customer(id) disable novalidate rely
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@orders
+PREHOOK: Output: default@orders
 POSTHOOK: query: alter table orders add constraint fk_order_customer_id foreign key (customer_id) references customer(id) disable novalidate rely
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@orders
+POSTHOOK: Output: default@orders
 PREHOOK: query: insert into customer values
   (4, 'Heisenberg', 'heisenberg@email.com'),
   (3, 'Smith', 'smith@email.com'),
@@ -1121,12 +1133,20 @@ POSTHOOK: Input: _dummy_database@_dummy_table
 negative: no PK/FK
 PREHOOK: query: alter table customer drop constraint pk_customer_id
 PREHOOK: type: ALTERTABLE_DROPCONSTRAINT
+PREHOOK: Input: default@customer
+PREHOOK: Output: default@customer
 POSTHOOK: query: alter table customer drop constraint pk_customer_id
 POSTHOOK: type: ALTERTABLE_DROPCONSTRAINT
+POSTHOOK: Input: default@customer
+POSTHOOK: Output: default@customer
 PREHOOK: query: alter table orders drop constraint fk_order_customer_id
 PREHOOK: type: ALTERTABLE_DROPCONSTRAINT
+PREHOOK: Input: default@orders
+PREHOOK: Output: default@orders
 POSTHOOK: query: alter table orders drop constraint fk_order_customer_id
 POSTHOOK: type: ALTERTABLE_DROPCONSTRAINT
+POSTHOOK: Input: default@orders
+POSTHOOK: Output: default@orders
 PREHOOK: query: explain select * from customer join orders on customer.id = orders.customer_id order by customer.id limit 3
 PREHOOK: type: QUERY
 PREHOOK: Input: default@customer
@@ -1265,12 +1285,20 @@ POSTHOOK: Input: _dummy_database@_dummy_table
 negatie: no RELY
 PREHOOK: query: alter table customer add constraint pk_customer_id primary key (id) disable novalidate
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@customer
+PREHOOK: Output: default@customer
 POSTHOOK: query: alter table customer add constraint pk_customer_id primary key (id) disable novalidate
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@customer
+POSTHOOK: Output: default@customer
 PREHOOK: query: alter table orders add constraint fk_order_customer_id foreign key (customer_id) references customer(id) disable novalidate
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@orders
+PREHOOK: Output: default@orders
 POSTHOOK: query: alter table orders add constraint fk_order_customer_id foreign key (customer_id) references customer(id) disable novalidate
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@orders
+POSTHOOK: Output: default@orders
 PREHOOK: query: explain select * from customer join orders on customer.id = orders.customer_id order by customer.id limit 3
 PREHOOK: type: QUERY
 PREHOOK: Input: default@customer

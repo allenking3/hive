@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -26,12 +27,12 @@ import java.util.Objects;
 
 /**
  * Helper class to create UDFClassLoader when running under a security manager. To create a class loader:
- * > AddToClassPathAction addAction = new AddToClassPathAction(parentLoader, newPaths, true);
- * > UDFClassLoader childClassLoader = AccessController.doPrivileged(addAction);
+ * &gt; AddToClassPathAction addAction = new AddToClassPathAction(parentLoader, newPaths, true);
+ * &gt; UDFClassLoader childClassLoader = AccessController.doPrivileged(addAction);
  * To try to add to the class path of the existing class loader; call the above without forceNewClassLoader=true.
  * Note that a class loader might be still created as fallback method.
  * <p>
- * This is slightly inconvenient, but forces the caller code to make the doPriviliged call, rather than us making the
+ * This is slightly inconvenient, but forces the caller code to make the doPrivileged call, rather than us making the
  * call on the caller's behalf, in accordance with the security guidelines at:
  * https://docs.oracle.com/javase/8/docs/technotes/guides/security/doprivileged.html
  */
@@ -73,7 +74,7 @@ public class AddToClassPathAction implements PrivilegedAction<UDFClassLoader> {
       // The classloader may have been closed, Cannot add to the same instance
       return !udfClassLoader.isClosed();
     }
-    // Cannot use the same classloader if it is not an instance of {@code UDFClassLoader}, or new loader was explicily
+    // Cannot use the same classloader if it is not an instance of {@code UDFClassLoader}, or new loader was explicitly
     // requested
     return false;
   }

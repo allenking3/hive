@@ -155,10 +155,13 @@ STAGE PLANS:
 PREHOOK: query: alter table stats_nonpart rename to stats_nonpart2
 PREHOOK: type: ALTERTABLE_RENAME
 PREHOOK: Input: default@stats_nonpart
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_nonpart
+PREHOOK: Output: default@stats_nonpart2
 POSTHOOK: query: alter table stats_nonpart rename to stats_nonpart2
 POSTHOOK: type: ALTERTABLE_RENAME
 POSTHOOK: Input: default@stats_nonpart
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_nonpart
 POSTHOOK: Output: default@stats_nonpart2
 PREHOOK: query: explain select count(key2) from stats_nonpart2
@@ -289,7 +292,7 @@ STAGE PLANS:
                     Statistics: Num rows: 1 Data size: 4 Basic stats: COMPLETE Column stats: COMPLETE
                     Group By Operator
                       aggregations: count(key2)
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0
                       Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
@@ -352,12 +355,20 @@ STAGE PLANS:
 
 PREHOOK: query: alter table stats_nonpart2 add constraint primary_key primary key (key2) disable novalidate rely
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@stats_nonpart2
+PREHOOK: Output: default@stats_nonpart2
 POSTHOOK: query: alter table stats_nonpart2 add constraint primary_key primary key (key2) disable novalidate rely
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@stats_nonpart2
+POSTHOOK: Output: default@stats_nonpart2
 PREHOOK: query: alter table stats_nonpart2 drop constraint primary_key
 PREHOOK: type: ALTERTABLE_DROPCONSTRAINT
+PREHOOK: Input: default@stats_nonpart2
+PREHOOK: Output: default@stats_nonpart2
 POSTHOOK: query: alter table stats_nonpart2 drop constraint primary_key
 POSTHOOK: type: ALTERTABLE_DROPCONSTRAINT
+POSTHOOK: Input: default@stats_nonpart2
+POSTHOOK: Output: default@stats_nonpart2
 PREHOOK: query: explain select count(key2) from stats_nonpart2
 PREHOOK: type: QUERY
 PREHOOK: Input: default@stats_nonpart2
@@ -433,10 +444,12 @@ STAGE PLANS:
 PREHOOK: query: drop table stats_nonpart2
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats_nonpart2
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_nonpart2
 POSTHOOK: query: drop table stats_nonpart2
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats_nonpart2
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_nonpart2
 PREHOOK: query: create table stats_part(key int,value string) partitioned by (p int) tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -1021,8 +1034,10 @@ STAGE PLANS:
 PREHOOK: query: drop table stats_part
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats_part
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_part
 POSTHOOK: query: drop table stats_part
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats_part
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_part

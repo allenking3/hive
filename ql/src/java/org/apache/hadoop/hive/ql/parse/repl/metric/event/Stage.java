@@ -9,13 +9,16 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.metric.event;
+
+import org.apache.hadoop.hive.ql.exec.repl.util.SnapshotUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,8 +33,13 @@ public class Stage {
   private Status status;
   private long startTime;
   private long endTime;
+  private long endTimeOnSrc;
+  private long endTimeOnTgt;
+  private long lastSuccessfulDumpId;
   private Map<String, Metric> metrics = new HashMap<>();
   private String errorLogPath;
+  private SnapshotUtils.ReplSnapshotCount replSnapshotCount = new SnapshotUtils.ReplSnapshotCount();
+  private String replStats;
 
   public Stage() {
 
@@ -52,6 +60,11 @@ public class Stage {
       this.metrics.put(metric.getName(), new Metric(metric));
     }
     this.errorLogPath = stage.errorLogPath;
+    this.replSnapshotCount = stage.replSnapshotCount;
+    this.replStats = stage.replStats;
+    this.endTimeOnSrc = stage.endTimeOnSrc;
+    this.endTimeOnTgt = stage.endTimeOnTgt;
+    this.lastSuccessfulDumpId = stage.lastSuccessfulDumpId;
   }
 
   public String getName() {
@@ -86,6 +99,29 @@ public class Stage {
     this.endTime = endTime;
   }
 
+  public long getEndTimeOnSrc() {
+    return endTimeOnSrc;
+  }
+
+  public void setEndTimeOnSrc(long endTimeOnSrc) {
+    this.endTimeOnSrc = endTimeOnSrc;
+  }
+
+  public long getEndTimeOnTgt() {
+    return endTimeOnTgt;
+  }
+
+  public void setEndTimeOnTgt(long endTimeOnTgt) {
+    this.endTimeOnTgt = endTimeOnTgt;
+  }
+
+  public long getLastSuccessfulDumpId() {
+    return lastSuccessfulDumpId;
+  }
+
+  public void setLastSuccessfulDumpId(long lastSuccessfulDumpId) {
+    this.lastSuccessfulDumpId = lastSuccessfulDumpId;
+  }
 
   public void addMetric(Metric metric) {
     this.metrics.put(metric.getName(), metric);
@@ -106,4 +142,22 @@ public class Stage {
   public void setErrorLogPath(String errorLogPath) {
     this.errorLogPath = errorLogPath;
   }
+
+  public void setReplSnapshotsCount(SnapshotUtils.ReplSnapshotCount replSnapshotCount) {
+    this.replSnapshotCount = replSnapshotCount;
+  }
+
+  public SnapshotUtils.ReplSnapshotCount getReplSnapshotCount() {
+    return replSnapshotCount;
+  }
+
+
+  public String getReplStats() {
+    return replStats;
+  }
+
+  public void setReplStats(String replStats) {
+    this.replStats = replStats;
+  }
+
 }

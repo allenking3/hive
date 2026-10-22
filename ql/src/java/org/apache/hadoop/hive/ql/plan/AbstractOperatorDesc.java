@@ -9,18 +9,21 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
 
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.hadoop.hive.ql.plan.Explain.Level;
 
@@ -46,6 +49,8 @@ public abstract class AbstractOperatorDesc implements OperatorDesc {
    * reduce sink and group by op
    */
   protected Map<String, ExprNodeDesc> colExprMap;
+
+  private Set<String> computedFields = new HashSet<String>();
 
   @Override
   @Explain(skipHeader = true, displayName = "Statistics")
@@ -122,8 +127,8 @@ public abstract class AbstractOperatorDesc implements OperatorDesc {
   }
 
   @Override
-  public void setMaxMemoryAvailable(final long memoryAvailble) {
-    this.memAvailable = memoryAvailble;
+  public void setMaxMemoryAvailable(final long memoryAvailable) {
+    this.memAvailable = memoryAvailable;
   }
 
   @Override
@@ -180,5 +185,15 @@ public abstract class AbstractOperatorDesc implements OperatorDesc {
   @Override
   public void setBucketingVersion(int bucketingVersion) {
     this.bucketingVersion = bucketingVersion;
+  }
+
+  @Override
+  public void addComputedField(String column) {
+    computedFields.add(column);
+  }
+
+  @Override
+  public Set<String> getComputedFields() {
+    return computedFields;
   }
 }

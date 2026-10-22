@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -30,10 +31,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
+import com.google.common.base.Preconditions;
 import org.apache.hadoop.hive.ql.exec.NodeUtils.Function;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.parse.SemiJoinBranchInfo;
-import org.apache.hadoop.hive.ql.parse.spark.SparkPartitionPruningSinkOperator;
 import org.apache.hadoop.hive.ql.plan.BaseWork;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeColumnDesc;
@@ -177,6 +178,47 @@ public class OperatorUtils {
     return found;
   }
 
+  /**
+   * Check whether there are more operators in the specified operator tree branch than the given limit
+   * until a ReduceSinkOperator is reached.
+   * The method traverses the parent operators of the specified root operator in dept first manner.
+   * @param start root of the operator tree to check
+   * @param opClazz type of operator to track
+   * @param limit maximum allowed number of operator in a branch of the tree
+   * @return true if limit is exceeded false otherwise
+   */
+  public static boolean hasMoreOperatorsThan(
+      Operator<?> start, Class<?> opClazz, int limit) {
+    return hasMoreOperatorsThan(start, opClazz, limit, new HashSet<>());
+  }
+
+  private static boolean hasMoreOperatorsThan(
+      Operator<?> start, Class<?> opClazz, int limit, Set<Operator<?>> visited) {
+    if (!visited.add(start)) {
+      return limit < 0;
+    }
+
+    if (limit < 0) {
+      return false;
+    }
+
+    if (start instanceof ReduceSinkOperator) {
+      return false;
+    }
+
+    if (opClazz.isInstance(start)) {
+      limit--;
+    }
+
+    if (start.getParentOperators() != null) {
+      for (Operator<?> parent : start.getParentOperators()) {
+        if (hasMoreOperatorsThan(parent, opClazz, limit, visited)) {
+          return true;
+        }
+      }
+    }
+    return limit < 0;
+  }
 
   public static void setChildrenCollector(List<Operator<? extends OperatorDesc>> childOperators, OutputCollector out) {
     if (childOperators == null) {
@@ -360,40 +402,6 @@ public class OperatorUtils {
   }
 
   /**
-   * Given the input operator 'op', walk up the operator tree from 'op', and collect all the
-   * roots that can be reached from it. The results are stored in 'roots'.
-   */
-  public static void findRoots(Operator<?> op, Collection<Operator<?>> roots) {
-    List<Operator<?>> parents = op.getParentOperators();
-    if (parents == null || parents.isEmpty()) {
-      roots.add(op);
-      return;
-    }
-    for (Operator<?> p : parents) {
-      findRoots(p, roots);
-    }
-  }
-
-  /**
-   * Remove the branch that contains the specified operator. Do nothing if there's no branching,
-   * i.e. all the upstream operators have only one child.
-   */
-  public static void removeBranch(SparkPartitionPruningSinkOperator op) {
-    Operator<?> child = op;
-    Operator<?> curr = op;
-
-    while (curr.getChildOperators().size() <= 1) {
-      child = curr;
-      if (curr.getParentOperators() == null || curr.getParentOperators().isEmpty()) {
-        return;
-      }
-      curr = curr.getParentOperators().get(0);
-    }
-
-    curr.removeChild(child);
-  }
-
-  /**
    * Remove operator from the tree, disconnecting it from its
    * parents and children.
    */
@@ -419,20 +427,6 @@ public class OperatorUtils {
       return op.toString() + " (" + ((TableScanOperator) op).getConf().getAlias() + ")";
     }
     return op.toString();
-  }
-
-  /**
-   * Return true if contain branch otherwise return false
-   */
-  public static boolean isInBranch(SparkPartitionPruningSinkOperator op) {
-    Operator<?> curr = op;
-    while (curr.getChildOperators().size() <= 1) {
-      if (curr.getParentOperators() == null || curr.getParentOperators().isEmpty()) {
-        return false;
-      }
-      curr = curr.getParentOperators().get(0);
-    }
-    return true;
   }
 
   public static Set<Operator<?>> getOp(BaseWork work, Class<?> clazz) {
@@ -663,38 +657,19 @@ public class OperatorUtils {
   }
 
   /**
-   * Given an operator and an internalColName look for the original Table columnName
-   * that this internal column maps to. This method finds the original columnName
-   * by checking column Expr mappings and schemas of the start operator and its parents.
-   *
-   * @param start
-   * @param internalColName
+   * Given start, end operators and a colName, look for the original TS colExpr
+   * that it originates from. This method checks column Expr mappings (aliases)
+   * from the start operator and its parents up to the end operator.
+   * It then returns the unwrapped Expr found within a ExprNodeGenericFuncDesc (if any).
+   * @param colName colName to backtrack
+   * @param start start backtracking from this Op
+   * @param end end backtracking at this Op
    * @return the original column name or null if not found
    */
-  public static String findTableColNameOf(Operator<?> start, String internalColName) {
-    // Look for internalCoName alias in current OR Parent RowSchemas
-    Stack<Operator<?>> parentOps = new Stack<>();
-    ColumnInfo keyColInfo = null;
-    parentOps.add(start);
-    while (!parentOps.isEmpty()) {
-      Operator<?> currentOp = parentOps.pop();
-      if (currentOp instanceof ReduceSinkOperator) {
-        // Dont want to follow that parent path
-        continue;
-      }
-      // If columnName is the output of a ColumnExpr get the original columnName from the Expr Map
-      if (currentOp.getColumnExprMap() != null && currentOp.getColumnExprMap().containsKey(internalColName)
-              && currentOp.getColumnExprMap().get(internalColName) instanceof ExprNodeColumnDesc) {
-        internalColName = ((ExprNodeColumnDesc) currentOp.getColumnExprMap().get(internalColName)).getColumn();
-      }
-      keyColInfo = currentOp.getSchema().getColumnInfo(internalColName);
-      if (keyColInfo != null) {
-        // Get original colName alias (or fallback to internal colName)
-        return keyColInfo.getAlias() != null ? keyColInfo.getAlias() : keyColInfo.getInternalName();
-      }
-      parentOps.addAll(currentOp.getParentOperators());
-    }
-    return null;
+  public static ExprNodeColumnDesc findTableOriginColExpr(ExprNodeColumnDesc colName, Operator<?> start, Operator<?> end)
+      throws SemanticException {
+    ExprNodeDesc res = ExprNodeDescUtils.backtrack(colName, start, end, false, true);
+    return (res != null) ? ExprNodeDescUtils.getColumnExpr(res) : null;
   }
 
   public static Set<Operator<?>> getAllOperatorsForSimpleFetch(Set<Operator<?>> opSet) {
@@ -725,4 +700,20 @@ public class OperatorUtils {
     return getAllOperatorsForSimpleFetch(operatorList);
   }
 
+  /**
+   * Traverses the operator chain upwards to find input source operator in that branch
+   *
+   * @param op the starting operator
+   * @return the first matching operator or null if none found
+   */
+  public static Operator<?> findSourceOperatorInSameBranch(Operator<?> op) {
+    while (op != null && !(op instanceof TableScanOperator || op instanceof ReduceSinkOperator
+            || op instanceof CommonJoinOperator)) {
+      // If op has parents it is guaranteed to be 1.
+      List<Operator<?>> parents = op.getParentOperators();
+      Preconditions.checkState(parents.size() <= 1);
+      op = parents.size() == 1 ? parents.get(0) : null;
+    }
+    return op;
+  }
 }

@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Licensed under the Apache License, Version 2.0 (the "License");
-  you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
 
       http://www.apache.org/licenses/LICENSE-2.0
 
@@ -12,42 +16,42 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>org.apache.hive</groupId>
     <artifactId>hive</artifactId>
-    <version>4.0.0-SNAPSHOT</version>
+    <version>4.3.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
-
   <artifactId>hive-it</artifactId>
   <packaging>pom</packaging>
   <name>Hive Integration - Parent</name>
-
   <properties>
     <hive.path.to.root>..</hive.path.to.root>
+    <wiremock-jre8.version>2.32.0</wiremock-jre8.version>
+    <assertj.version>3.27.3</assertj.version>
   </properties>
-
   <modules>
-   <module>custom-serde</module>
-   <module>custom-udfs</module>
-   <module>hcatalog-unit</module>
-   <module>hive-unit</module>
-   <module>hive-blobstore</module>
-   <module>util</module>
-   <module>test-serde</module>
-   <module>qtest</module>
-   <module>qtest-accumulo</module>
-   <module>hive-jmh</module>
-   <module>hive-unit-hadoop2</module>
-   <module>hive-minikdc</module>
-   <module>qtest-druid</module>
-   <module>qtest-kudu</module>
+    <module>custom-serde</module>
+    <module>custom-udfs</module>
+    <module>hcatalog-unit</module>
+    <module>hive-unit</module>
+    <module>hive-blobstore</module>
+    <module>util</module>
+    <module>test-jdbc</module>
+    <module>test-serde</module>
+    <module>qtest</module>
+    <module>qtest-accumulo</module>
+    <module>hive-jmh</module>
+    <module>hive-unit-hadoop2</module>
+    <module>hive-minikdc</module>
+    <module>qtest-kudu</module>
+    <module>qtest-iceberg</module>
+    <module>test-docker</module>
+    <module>hive-iceberg</module>
+    <module>tez-yarn-it</module>
   </modules>
-
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -73,24 +77,29 @@
       </dependency>
       <dependency>
         <groupId>org.apache.hive</groupId>
-        <artifactId>hive-standalone-metastore-common</artifactId>
-        <version>${project.version}</version>
+        <artifactId>hive-standalone-metastore-client</artifactId>
+        <version>${standalone-metastore.version}</version>
       </dependency>
       <dependency>
         <groupId>org.apache.hive</groupId>
         <artifactId>hive-standalone-metastore-common</artifactId>
-        <version>${project.version}</version>
+        <version>${standalone-metastore.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.hive</groupId>
+        <artifactId>hive-standalone-metastore-common</artifactId>
+        <version>${standalone-metastore.version}</version>
         <classifier>tests</classifier>
       </dependency>
       <dependency>
         <groupId>org.apache.hive</groupId>
         <artifactId>hive-standalone-metastore-server</artifactId>
-        <version>${project.version}</version>
+        <version>${standalone-metastore.version}</version>
       </dependency>
       <dependency>
         <groupId>org.apache.hive</groupId>
         <artifactId>hive-standalone-metastore-server</artifactId>
-        <version>${project.version}</version>
+        <version>${standalone-metastore.version}</version>
         <classifier>tests</classifier>
       </dependency>
       <dependency>
@@ -223,22 +232,6 @@
       </dependency>
       <dependency>
         <groupId>org.apache.hive</groupId>
-        <artifactId>hive-druid-handler</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hive</groupId>
-        <artifactId>hive-druid-handler</artifactId>
-        <version>${project.version}</version>
-        <classifier>tests</classifier>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hive</groupId>
-        <artifactId>hive-it-druid</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hive</groupId>
         <artifactId>hive-hbase-handler</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -358,6 +351,12 @@
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-yarn-client</artifactId>
         <version>${hadoop.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>org.jline</groupId>
+            <artifactId>jline</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>org.apache.hadoop</groupId>
@@ -416,12 +415,24 @@
         <groupId>org.apache.hbase</groupId>
         <artifactId>hbase-server</artifactId>
         <version>${hbase.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>org.glassfish.web</groupId>
+            <artifactId>javax.servlet.jsp</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>org.apache.hbase</groupId>
         <artifactId>hbase-server</artifactId>
         <version>${hbase.version}</version>
         <classifier>tests</classifier>
+        <exclusions>
+          <exclusion>
+            <groupId>org.glassfish.web</groupId>
+            <artifactId>javax.servlet.jsp</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>org.apache.hbase</groupId>
@@ -431,6 +442,12 @@
       <dependency>
         <groupId>org.apache.hbase</groupId>
         <artifactId>hbase-mapreduce</artifactId>
+        <version>${hbase.version}</version>
+        <classifier>tests</classifier>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.hbase</groupId>
+        <artifactId>hbase-testing-util</artifactId>
         <version>${hbase.version}</version>
         <classifier>tests</classifier>
       </dependency>
@@ -470,18 +487,24 @@
         <artifactId>hadoop-yarn-registry</artifactId>
         <version>${hadoop.version}</version>
       </dependency>
+      <dependency>
+        <groupId>org.apache.hive</groupId>
+        <artifactId>hive-iceberg-handler</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.awaitility</groupId>
+        <artifactId>awaitility</artifactId>
+        <version>${awaitility.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
-
-  <profiles>
-    <profile>
-      <id>spark-test</id>
-      <modules>
-        <module>qtest-spark</module>
-      </modules>
-    </profile>
-  </profiles>
-
   <build>
     <plugins>
       <plugin>

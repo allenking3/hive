@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -52,8 +53,6 @@ import org.apache.hadoop.hive.ql.exec.persistence.MapJoinTableContainerSerDe;
 import org.apache.hadoop.hive.ql.exec.persistence.MatchTracker;
 import org.apache.hadoop.hive.ql.exec.persistence.ObjectContainer;
 import org.apache.hadoop.hive.ql.exec.persistence.UnwrapRowContainer;
-import org.apache.hadoop.hive.ql.exec.spark.SmallTableCache;
-import org.apache.hadoop.hive.ql.exec.spark.SparkUtilities;
 import org.apache.hadoop.hive.ql.exec.tez.LlapObjectCache;
 import org.apache.hadoop.hive.ql.exec.tez.LlapObjectSubCache;
 import org.apache.hadoop.hive.ql.io.HiveKey;
@@ -67,7 +66,6 @@ import org.apache.hadoop.hive.ql.plan.api.OperatorType;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorConverters;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils;
@@ -80,7 +78,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.esotericsoftware.kryo.KryoException;
+import com.esotericsoftware.kryo.kryo5.KryoException;
 import com.google.common.base.Preconditions;
 
 /**
@@ -180,7 +178,7 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
 
     // On Tez only: The hash map might already be cached in the container we run
     // the task in. On MR: The cache is a no-op.
-    String queryId = HiveConf.getVar(hconf, HiveConf.ConfVars.HIVEQUERYID);
+    String queryId = HiveConf.getVar(hconf, HiveConf.ConfVars.HIVE_QUERY_ID);
     // The cacheKey may have already been defined in the MapJoin conf spec
     // as part of the Shared Work Optimization if it can be reused among
     // multiple mapjoin operators. In that case, we take that key from conf
@@ -230,9 +228,7 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
        * requires changes in the Tez API with regard to finding bucket id and
        * also ability to schedule tasks to re-use containers that have cached the specific bucket.
        */
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("This is not bucket map join, so cache");
-      }
+      LOG.debug("This is not bucket map join, so cache");
 
       Future<Pair<MapJoinTableContainer[], MapJoinTableContainerSerDe[]>> future =
           cache.retrieveAsync(
@@ -351,10 +347,10 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
 
     try {
       TableDesc keyTableDesc = conf.getKeyTblDesc();
-      AbstractSerDe keySerializer = (AbstractSerDe) ReflectionUtil.newInstance(
-          keyTableDesc.getDeserializerClass(), null);
-      SerDeUtils.initializeSerDe(keySerializer, null, keyTableDesc.getProperties(), null);
-      MapJoinObjectSerDeContext keyContext = new MapJoinObjectSerDeContext(keySerializer, false);
+      AbstractSerDe keySerDe = (AbstractSerDe) ReflectionUtil.newInstance(
+          keyTableDesc.getSerDeClass(), null);
+      keySerDe.initialize(null, keyTableDesc.getProperties(), null);
+      MapJoinObjectSerDeContext keyContext = new MapJoinObjectSerDeContext(keySerDe, false);
       for (int pos = 0; pos < order.length; pos++) {
         if (pos == posBigTable) {
           continue;
@@ -366,8 +362,8 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
           valueTableDesc = conf.getValueFilteredTblDescs().get(pos);
         }
         AbstractSerDe valueSerDe = (AbstractSerDe) ReflectionUtil.newInstance(
-            valueTableDesc.getDeserializerClass(), null);
-        SerDeUtils.initializeSerDe(valueSerDe, null, valueTableDesc.getProperties(), null);
+            valueTableDesc.getSerDeClass(), null);
+        valueSerDe.initialize(null, valueTableDesc.getProperties(), null);
         MapJoinObjectSerDeContext valueContext =
             new MapJoinObjectSerDeContext(valueSerDe, hasFilter(pos));
         mapJoinTableSerdes[pos] = new MapJoinTableContainerSerDe(keyContext, valueContext);
@@ -385,9 +381,7 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
     try {
       loader.load(mapJoinTables, mapJoinTableSerdes);
     } catch (HiveException e) {
-      if (LOG.isInfoEnabled()) {
-        LOG.info("Exception loading hash tables. Clearing partially loaded hash table containers.");
-      }
+      LOG.info("Exception loading hash tables. Clearing partially loaded hash table containers");
 
       // there could be some spilled partitions which needs to be cleaned up
       clearAllTableContainers();
@@ -563,6 +557,10 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
               }
             } else {
               storage[pos] = emptyList;
+              if (pos != 0 && condn[pos - 1].getType() == JoinDesc.ANTI_JOIN) {
+                // For AntiJoin, we should call checkAndGenObject() when right side is empty.
+                joinNeeded = true;
+              }
             }
           } else {
             joinNeeded = true;
@@ -732,21 +730,6 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
   @Override
   public void closeOp(boolean abort) throws HiveException {
 
-    // Call the small table cache cache method, this way when a task finishes, we still keep the small table around
-    // for at least 30 seconds, which gives any tasks scheduled in the future a chance to re-use the small table.
-    if (HiveConf.getVar(hconf, ConfVars.HIVE_EXECUTION_ENGINE).equals("spark") &&
-            SparkUtilities.isDedicatedCluster(hconf)) {
-
-      for (byte pos = 0; pos < mapJoinTables.length; pos++) {
-        if (pos != conf.getPosBigTable()) {
-          MapJoinTableContainer container = mapJoinTables[pos];
-          if (container != null && container.getKey() != null) {
-            SmallTableCache.cache(container.getKey(), container);
-          }
-        }
-      }
-    }
-
     if (isFullOuterMapJoin) {
 
       // FULL OUTER MapJoin: After matching the Big Table row keys against the Small Table, we now
@@ -832,9 +815,7 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
         }
       }
 
-      if (LOG.isInfoEnabled()) {
-        LOG.info("spilled: " + spilled + " abort: " + abort + ". Clearing spilled partitions.");
-      }
+      LOG.info("spilled: " + spilled + " abort: " + abort + ". Clearing spilled partitions.");
 
       // spilled tables are loaded always (no sharing), so clear it
       clearAllTableContainers();
@@ -843,12 +824,8 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
 
     // in mapreduce case, we need to always clear up as mapreduce doesn't have object registry.
     if ((this.getExecContext() != null) && (this.getExecContext().getLocalWork() != null)
-        && (this.getExecContext().getLocalWork().getInputFileChangeSensitive())
-        && !(HiveConf.getVar(hconf, ConfVars.HIVE_EXECUTION_ENGINE).equals("spark")
-            && SparkUtilities.isDedicatedCluster(hconf))) {
-      if (LOG.isInfoEnabled()) {
-        LOG.info("MR: Clearing all map join table containers.");
-      }
+        && (this.getExecContext().getLocalWork().getInputFileChangeSensitive())) {
+      LOG.info("MR: Clearing all map join table containers.");
       clearAllTableContainers();
     }
 

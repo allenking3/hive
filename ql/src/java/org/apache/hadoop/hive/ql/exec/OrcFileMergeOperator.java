@@ -6,24 +6,27 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * <p/>
- * http://www.apache.org/licenses/LICENSE-2.0
- * <p/>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.hadoop.hive.ql.CompilationOpContext;
 import org.apache.hadoop.hive.ql.io.orc.Writer;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.orc.TypeDescription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,8 +62,8 @@ public class OrcFileMergeOperator extends
 
   private Map<Integer, Writer> outWriters = new HashMap<>();
   private Path prevPath;
-  private Reader reader;
   private FSDataInputStream fdis;
+  private ObjectInspector obi;
 
   /** Kryo ctor. */
   protected OrcFileMergeOperator() {
@@ -108,11 +111,17 @@ public class OrcFileMergeOperator extends
 
       if (prevPath == null) {
         prevPath = k.getInputPath();
-        reader = OrcFile.createReader(fs, k.getInputPath());
-        if (LOG.isInfoEnabled()) {
-          LOG.info("ORC merge file input path: " + k.getInputPath());
+      }
+      if (obi == null) {
+        Reader reader = OrcFile.createReader(fs, prevPath);
+        obi = reader.getObjectInspector();
+        try {
+          reader.close();
+        } catch (IOException e) {
+          throw new HiveException(String.format("Unable to close reader for %s", filePath), e);
         }
       }
+      LOG.info("ORC merge file input path: " + k.getInputPath());
 
       // store the orc configuration from the first file. All other files should
       // match this configuration before merging else will not be merged
@@ -132,7 +141,7 @@ public class OrcFileMergeOperator extends
             .compress(compression)
             .version(fileVersion)
             .rowIndexStride(rowIndexStride)
-            .inspector(reader.getObjectInspector());
+            .inspector(obi);
         // compression buffer size should only be set if compression is enabled
         if (compression != CompressionKind.NONE) {
           // enforce is required to retain the buffer sizes of old files instead of orc writer
@@ -145,19 +154,12 @@ public class OrcFileMergeOperator extends
           outPath = getOutPath(bucketId);
         }
         outWriters.put(bucketId, OrcFile.createWriter(outPath, options));
-        if (LOG.isDebugEnabled()) {
-          LOG.info("ORC merge file output path: " + outPath);
-        }
+        LOG.info("ORC merge file output path: {}", outPath);
       }
 
       if (!checkCompatibility(k)) {
         addIncompatibleFile(k.getInputPath());
         return;
-      }
-
-      // next file in the path
-      if (!k.getInputPath().equals(prevPath)) {
-        reader = OrcFile.createReader(fs, k.getInputPath());
       }
 
       // initialize buffer to read the entire stripe
@@ -179,7 +181,9 @@ public class OrcFileMergeOperator extends
 
       // add user metadata to footer in case of any
       if (v.isLastStripeInFile()) {
-        outWriters.get(bucketId).appendUserMetadata(v.getUserMetadata());
+        for (Map.Entry<String, ByteBuffer> entry: v.getUserMetadata().entrySet()) {
+          outWriters.get(bucketId).addUserMetadata(entry.getKey(), entry.getValue());
+        }
       }
     } catch (Throwable e) {
       exception = true;

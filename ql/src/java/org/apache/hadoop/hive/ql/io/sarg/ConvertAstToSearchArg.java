@@ -9,17 +9,19 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.sarg;
 
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -27,6 +29,7 @@ import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
+import org.apache.hadoop.hive.common.type.TimestampTZ;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
 import org.apache.hadoop.hive.ql.plan.ExprNodeColumnDesc;
@@ -49,7 +52,7 @@ import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPNotEqual;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPNotNull;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPNull;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPOr;
-import org.apache.hadoop.hive.serde2.io.DateWritable;
+import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
@@ -57,15 +60,21 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.kryo5.Kryo;
+import com.esotericsoftware.kryo.kryo5.io.Input;
+import com.esotericsoftware.kryo.kryo5.io.Output;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 
 public class ConvertAstToSearchArg {
   private static final Logger LOG = LoggerFactory.getLogger(ConvertAstToSearchArg.class);
+
+  private static final int KRYO_OUTPUT_BUFFER_SIZE = 4 * 1024;
+  private static final int KRYO_OUTPUT_BUFFER_MAX_SIZE = 10 * 1024 * 1024;
+
   private final SearchArgument.Builder builder;
   private final Configuration conf;
+  private boolean partial = false;
 
   /*
    * Create a new type for handling precision conversions from Decimal -> Double/Float
@@ -96,6 +105,14 @@ public class ConvertAstToSearchArg {
     this.conf = conf;
     builder = SearchArgumentFactory.newBuilder(conf);
     parse(expression);
+  }
+
+  /**
+   * Returns whether the given expression is partially converted to a search argument from the hive filter.
+   * @return True if the expression is partially converted, otherwise false.
+   */
+  public boolean isPartial() {
+    return partial;
   }
 
   /**
@@ -131,6 +148,7 @@ public class ConvertAstToSearchArg {
         case DATE:
           return BoxType.DATE;
         case TIMESTAMP:
+        case TIMESTAMPLOCALTZ:
           return BoxType.TIMESTAMP;
         case DECIMAL:
           return BoxType.DECIMAL;
@@ -211,15 +229,16 @@ public class ConvertAstToSearchArg {
         } else if (lit instanceof org.apache.hadoop.hive.common.type.Timestamp) {
           ts = ((org.apache.hadoop.hive.common.type.Timestamp) lit)
               .toSqlTimestamp();
+        } else if (lit instanceof org.apache.hadoop.hive.common.type.TimestampTZ) {
+          ts =  Timestamp.valueOf(((TimestampTZ)lit).getZonedDateTime().toLocalDateTime());
         } else {
           ts = org.apache.hadoop.hive.common.type.Timestamp.valueOf(lit.toString())
               .toSqlTimestamp();
         }
         return ts;
       case DATE:
-        return new Date(
-            DateWritable.daysToMillis(
-                org.apache.hadoop.hive.common.type.Date.valueOf(lit.toString()).toEpochDay()));
+        // TODO [ORC-661]: use ChronoLocalDate and day of epoch instead of java's sql Date
+        return Date.valueOf(LocalDate.parse(lit.toString()));
       case DECIMAL:
         return new HiveDecimalWritable(lit.toString());
       case BOOLEAN:
@@ -269,7 +288,7 @@ public class ConvertAstToSearchArg {
   /**
    * Return the boxed literal at the given position
    * @param expr the parent node
-   * @param type the type of the expression
+   * @param boxType the type of the expression
    * @param position the child position to check
    * @return the boxed literal if found otherwise null
    */
@@ -306,11 +325,13 @@ public class ConvertAstToSearchArg {
     String columnName = getColumnName(expression, variable);
     if (columnName == null) {
       builder.literal(SearchArgument.TruthValue.YES_NO_NULL);
+      partial = true;
       return;
     }
     BoxType boxType = getType(expression.getChildren().get(variable));
     if (boxType == null) {
       builder.literal(SearchArgument.TruthValue.YES_NO_NULL);
+      partial = true;
       return;
     }
 
@@ -360,6 +381,7 @@ public class ConvertAstToSearchArg {
       LOG.warn("Exception thrown during SARG creation. Returning YES_NO_NULL." +
           " Exception: " + e.getMessage());
       builder.literal(SearchArgument.TruthValue.YES_NO_NULL);
+      partial = true;
     }
 
     if (needSwap) {
@@ -419,7 +441,7 @@ public class ConvertAstToSearchArg {
       // if it is a reference to a boolean column, covert it to a truth test.
       if (expression instanceof ExprNodeColumnDesc) {
         ExprNodeColumnDesc columnDesc = (ExprNodeColumnDesc) expression;
-        if (columnDesc.getTypeString().equals("boolean")) {
+        if (columnDesc.getTypeString().equals(serdeConstants.BOOLEAN_TYPE_NAME)) {
           builder.equals(columnDesc.getColumn(), PredicateLeaf.Type.BOOLEAN,
               true);
           return;
@@ -428,6 +450,7 @@ public class ConvertAstToSearchArg {
 
       // otherwise, we don't know what to do so make it a maybe
       builder.literal(SearchArgument.TruthValue.YES_NO_NULL);
+      partial = true;
       return;
     }
 
@@ -489,6 +512,7 @@ public class ConvertAstToSearchArg {
       // otherwise, we didn't understand it, so mark it maybe
     } else {
       builder.literal(SearchArgument.TruthValue.YES_NO_NULL);
+      partial = true;
     }
   }
 
@@ -546,8 +570,13 @@ public class ConvertAstToSearchArg {
     return new ConvertAstToSearchArg(conf, expression).buildSearchArgument();
   }
 
+  public static ConvertAstToSearchArg.Result createSearchArgument(Configuration conf, ExprNodeGenericFuncDesc expression) {
+    ConvertAstToSearchArg convertAstToSearchArg = new ConvertAstToSearchArg(conf, expression);
+    return new ConvertAstToSearchArg.Result(convertAstToSearchArg.buildSearchArgument(), convertAstToSearchArg.isPartial());
+  }
+
   private final static ThreadLocal<Kryo> kryo = new ThreadLocal<Kryo>() {
-    protected Kryo initialValue() { return new Kryo(); }
+    protected Kryo initialValue() { return SerializationUtilities.createNewKryo(); }
   };
 
   public static SearchArgument create(String kryo) {
@@ -570,6 +599,33 @@ public class ConvertAstToSearchArg {
 
   public static boolean canCreateFromConf(Configuration conf) {
     return conf.get(TableScanDesc.FILTER_EXPR_CONF_STR) != null || conf.get(SARG_PUSHDOWN) != null;
+  }
+
+  public static String sargToKryo(SearchArgument sarg) {
+    try (Output out = new Output(KRYO_OUTPUT_BUFFER_SIZE, KRYO_OUTPUT_BUFFER_MAX_SIZE)) {
+      Kryo kryo = SerializationUtilities.borrowKryo();
+      kryo.writeObject(out, sarg);
+      SerializationUtilities.releaseKryo(kryo);
+      return Base64.encodeBase64String(out.toBytes());
+    }
+  }
+
+  public static final class Result {
+    private final SearchArgument sarg;
+    private final boolean partial;
+
+    Result(SearchArgument sarg, boolean partial) {
+      this.sarg = sarg;
+      this.partial = partial;
+    }
+
+    public SearchArgument getSearchArgument() {
+      return sarg;
+    }
+
+    public boolean isPartial() {
+      return partial;
+    }
   }
 
 }

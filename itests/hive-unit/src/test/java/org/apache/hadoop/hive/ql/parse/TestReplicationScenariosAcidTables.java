@@ -9,69 +9,131 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hive.cli.CliSessionState;
+import org.apache.hadoop.hive.common.repl.ReplConst;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
+import org.apache.hadoop.hive.metastore.TableType;
+import org.apache.hadoop.hive.metastore.ReplChangeManager;
+import org.apache.hadoop.hive.metastore.Warehouse;
+import org.apache.hadoop.hive.metastore.api.CompactionInfoStruct;
+import org.apache.hadoop.hive.metastore.api.CompactionRequest;
+import org.apache.hadoop.hive.metastore.api.CompactionType;
+import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.AbortTxnRequest;
 import org.apache.hadoop.hive.metastore.api.AbortTxnsRequest;
+import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.OpenTxnRequest;
+import org.apache.hadoop.hive.metastore.api.OpenTxnsResponse;
+import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.SeedTxnIdRequest;
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.TxnType;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.messaging.json.gzip.GzipJSONMessageEncoder;
+import org.apache.hadoop.hive.metastore.txn.entities.CompactionInfo;
 import org.apache.hadoop.hive.metastore.txn.TxnStore;
 import org.apache.hadoop.hive.metastore.txn.TxnUtils;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore.CallerArguments;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore.BehaviourInjection;
+import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
+import org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil;
 import org.apache.hadoop.hive.ql.DriverFactory;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.IDriver;
 import org.apache.hadoop.hive.ql.exec.repl.ReplAck;
 import org.apache.hadoop.hive.ql.exec.repl.ReplDumpWork;
 import org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.ql.metadata.Hive;
+import org.apache.hadoop.hive.ql.parse.repl.DumpType;
+import org.apache.hadoop.hive.ql.parse.repl.dump.EventsDumpMetadata;
+import org.apache.hadoop.hive.ql.parse.repl.load.DumpMetaData;
+import org.apache.hadoop.hive.ql.parse.repl.load.EventDumpDirComparator;
+import org.apache.hadoop.hive.ql.parse.repl.load.FailoverMetaData;
+import org.apache.hadoop.hive.ql.metadata.HiveException;
+import org.apache.hadoop.hive.ql.metadata.HiveUtils;
+import org.apache.hadoop.hive.ql.parse.repl.metric.MetricCollector;
+import org.apache.hadoop.hive.ql.parse.repl.metric.event.Metric;
+import org.apache.hadoop.hive.ql.parse.repl.metric.event.ReplicationMetric;
+import org.apache.hadoop.hive.ql.parse.repl.metric.event.Stage;
+import org.apache.hadoop.hive.ql.parse.repl.metric.event.Status;
 import org.apache.hadoop.hive.ql.processors.CommandProcessorException;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.shims.Utils;
 
 import org.apache.hadoop.security.UserGroupInformation;
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.BeforeClass;
 
 import javax.annotation.Nullable;
-
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.io.File;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 
-import static org.apache.hadoop.hive.metastore.ReplChangeManager.SOURCE_OF_REPLICATION;
+import static org.apache.hadoop.hive.common.repl.ReplConst.REPL_RESUME_STARTED_AFTER_FAILOVER;
+import static org.apache.hadoop.hive.common.repl.ReplConst.REPL_TARGET_DATABASE_PROPERTY;
+import static org.apache.hadoop.hive.common.repl.ReplConst.REPL_TARGET_TABLE_PROPERTY;
+import static org.apache.hadoop.hive.common.repl.ReplConst.SOURCE_OF_REPLICATION;
+import static org.apache.hadoop.hive.common.repl.ReplConst.REPL_ENABLE_BACKGROUND_THREAD;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_REPL_CLEAR_DANGLING_TXNS_ON_TARGET;
+import static org.apache.hadoop.hive.ql.TxnCommandsBaseForTests.runCleaner;
+import static org.apache.hadoop.hive.ql.TxnCommandsBaseForTests.runWorker;
 import static org.apache.hadoop.hive.ql.exec.repl.ReplAck.DUMP_ACKNOWLEDGEMENT;
+import static org.apache.hadoop.hive.ql.exec.repl.ReplAck.LOAD_ACKNOWLEDGEMENT;
+
+import static org.apache.hadoop.hive.ql.parse.repl.metric.ReplicationMetricCollector.isMetricsEnabledForTests;
+import static org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils.OPEN_TXNS;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.fail;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 /**
  * TestReplicationScenariosAcidTables - test replication for ACID tables.
  */
+
 public class TestReplicationScenariosAcidTables extends BaseReplicationScenariosAcidTables {
 
   @BeforeClass
@@ -86,12 +148,12 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
   static void internalBeforeClassSetup(Map<String, String> overrides,
       Class clazz) throws Exception {
 
-    conf = new HiveConf(clazz);
+    conf = new HiveConfForTest(clazz);
     conf.set("dfs.client.use.datanode.hostname", "true");
     conf.set("metastore.warehouse.tenant.colocation", "true");
     conf.set("hadoop.proxyuser." + Utils.getUGI().getShortUserName() + ".hosts", "*");
     MiniDFSCluster miniDFSCluster =
-        new MiniDFSCluster.Builder(conf).numDataNodes(1).format(true).build();
+        new MiniDFSCluster.Builder(conf).numDataNodes(2).format(true).build();
     Map<String, String> acidEnableConf = new HashMap<String, String>() {{
         put("fs.defaultFS", miniDFSCluster.getFileSystem().getUri().toString());
         put("hive.support.concurrency", "true");
@@ -104,11 +166,17 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
         put("hive.metastore.disallow.incompatible.col.type.changes", "false");
         put("metastore.warehouse.tenant.colocation", "true");
         put("hive.in.repl.test", "true");
+        put("hive.txn.readonly.enabled", "true");
+        //HIVE-25267
+        put(MetastoreConf.ConfVars.TXN_OPENTXN_TIMEOUT.getVarname(), "2000");
+        put(HiveConf.ConfVars.REPL_BATCH_INCREMENTAL_EVENTS.varname, "false");
         put(HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET.varname, "false");
+        put(HiveConf.ConfVars.REPL_RETAIN_CUSTOM_LOCATIONS_FOR_DB_ON_TARGET.varname, "false");
       }};
 
     acidEnableConf.putAll(overrides);
 
+    setReplicaExternalBase(miniDFSCluster.getFileSystem(), acidEnableConf);
     primary = new WarehouseInstance(LOG, miniDFSCluster, acidEnableConf);
     acidEnableConf.put(MetastoreConf.ConfVars.REPLDIR.getHiveName(), primary.repldDir);
     replica = new WarehouseInstance(LOG, miniDFSCluster, acidEnableConf);
@@ -127,12 +195,1244 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     super.setup();
   }
 
-  @After
-  public void tearDown() throws Throwable {
-    primary.run("drop database if exists " + primaryDbName + " cascade");
-    replica.run("drop database if exists " + replicatedDbName + " cascade");
-    replicaNonAcid.run("drop database if exists " + replicatedDbName + " cascade");
-    primary.run("drop database if exists " + primaryDbName + "_extra cascade");
+  @Test
+  public void testReplAlterDbEventsNotCapturedInNotificationLog() throws Throwable {
+    String srcDbName = "srcDb";
+    String replicaDb = "tgtDb";
+    try {
+      //Perform empty bootstrap dump and load
+      primary.run("CREATE DATABASE " + srcDbName);
+      long lastEventId = primary.getCurrentNotificationEventId().getEventId();
+      //Assert that repl.source.for is not captured in NotificationLog
+      WarehouseInstance.Tuple dumpData = primary.dump(srcDbName);
+      long latestEventId = primary.getCurrentNotificationEventId().getEventId();
+      assertEquals(lastEventId, latestEventId);
+
+      replica.run("REPL LOAD " + srcDbName + " INTO " + replicaDb);
+      latestEventId = replica.getCurrentNotificationEventId().getEventId();
+      //Assert that repl.target.id, hive.repl.ckpt.key and hive.repl.first.inc.pending is not captured in notificationLog.
+      assertEquals(latestEventId, lastEventId + 1); //This load will generate only 1 event i.e. CREATE_DATABASE
+
+      WarehouseInstance.Tuple incDump = primary.run("use " + srcDbName)
+              .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                      "tblproperties (\"transactional\"=\"true\")")
+              .run("insert into t1 values(1)")
+              .dump(srcDbName);
+
+      //Assert that repl.last.id is not captured in notification log.
+      long noOfEventsInDumpDir = primary.getNoOfEventsDumped(incDump.dumpLocation, conf);
+      lastEventId = primary.getCurrentNotificationEventId().getEventId();
+      replica.run("REPL LOAD " + srcDbName + " INTO " + replicaDb);
+
+      latestEventId = replica.getCurrentNotificationEventId().getEventId();
+
+      //Validate that there is no addition event generated in notificationLog table apart from replayed ones.
+      assertEquals(latestEventId, lastEventId + noOfEventsInDumpDir);
+
+      long targetDbReplId = Long.parseLong(replica.getDatabase(replicaDb)
+              .getParameters().get(ReplConst.REPL_TARGET_TABLE_PROPERTY));
+      //Validate that repl.last.id db property has been updated successfully.
+      assertEquals(targetDbReplId, lastEventId);
+    } finally {
+      primary.run("DROP DATABASE IF EXISTS " + srcDbName + " CASCADE");
+      replica.run("DROP DATABASE IF EXISTS " + replicaDb + " CASCADE");
+    }
+  }
+
+  @Test
+  public void testTargetDbReplIncompatibleWithNoPropSet() throws Throwable {
+    testTargetDbReplIncompatible(false);
+  }
+
+  @Test
+  public void testTargetDbReplIncompatibleWithPropSet() throws Throwable {
+    testTargetDbReplIncompatible(true);
+  }
+
+  private void testTargetDbReplIncompatible(boolean setReplIncompProp) throws Throwable {
+    HiveConf primaryConf = primary.getConf();
+    TxnStore txnHandler = TxnUtils.getTxnStore(primary.getConf());
+
+    primary.run("use " + primaryDbName)
+            .run("CREATE TABLE t1(a string) STORED AS TEXTFILE")
+            .dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName);
+
+    if (setReplIncompProp) {
+      replica.run("ALTER DATABASE " + replicatedDbName +
+              " SET DBPROPERTIES('" + ReplConst.REPL_INCOMPATIBLE + "'='false')");
+      assert "false".equals(replica.getDatabase(replicatedDbName).getParameters().get(ReplConst.REPL_INCOMPATIBLE));
+    }
+
+    assertFalse(MetaStoreUtils.isDbReplIncompatible(replica.getDatabase(replicatedDbName)));
+
+    Long sourceTxnId = openTxns(1, txnHandler, primaryConf).get(0);
+    txnHandler.abortTxn(new AbortTxnRequest(sourceTxnId));
+
+    try {
+      sourceTxnId = openTxns(1, txnHandler, primaryConf).get(0);
+
+      primary.dump(primaryDbName);
+      replica.load(replicatedDbName, primaryDbName);
+      assertFalse(MetaStoreUtils.isDbReplIncompatible(replica.getDatabase(replicatedDbName)));
+
+      Long targetTxnId = txnHandler.getTargetTxnId(HiveUtils.getReplPolicy(replicatedDbName), sourceTxnId);
+      txnHandler.abortTxn(new AbortTxnRequest(targetTxnId));
+      assertTrue(MetaStoreUtils.isDbReplIncompatible(replica.getDatabase(replicatedDbName)));
+
+      WarehouseInstance.Tuple dumpData = primary.dump(primaryDbName);
+
+      assertFalse(ReplUtils.failedWithNonRecoverableError(new Path(dumpData.dumpLocation), conf));
+      replica.loadFailure(replicatedDbName, primaryDbName, null, ErrorMsg.REPL_INCOMPATIBLE_EXCEPTION.getErrorCode());
+      assertTrue(ReplUtils.failedWithNonRecoverableError(new Path(dumpData.dumpLocation), conf));
+
+      primary.dumpFailure(primaryDbName);
+      assertTrue(ReplUtils.failedWithNonRecoverableError(new Path(dumpData.dumpLocation), conf));
+    } finally {
+      txnHandler.abortTxn(new AbortTxnRequest(sourceTxnId));
+    }
+  }
+
+  @Test
+  public void testRemoveDanglingTxnWithOpenTxnOnSource() throws Throwable {
+    List<String> withClauseList = List.of("'" + HIVE_REPL_CLEAR_DANGLING_TXNS_ON_TARGET + "'='true'");
+    HiveConf primaryConf = primary.getConf();
+
+    primary.run("use " + primaryDbName)
+              .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                      "tblproperties (\"transactional\"=\"true\")")
+              .run("insert into t1 values(1)")
+            .run("create table t2 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("insert into t2 values(1)")
+              .dump(primaryDbName, withClauseList);
+
+    // Opening long-running transaction on primary  db
+    Thread longRunningTxnThread = getLongRunningTxnThread(primaryConf);
+    longRunningTxnThread.start();
+    LOG.info("Created new thread {}", longRunningTxnThread.getName());
+
+    replica.load(replicatedDbName, primaryDbName, withClauseList);
+    try {
+      WarehouseInstance.Tuple incrementalDump = primary.run("use " + primaryDbName)
+              .run("insert into t1 values(2)")
+              .run("insert into t1 values(3)")
+              .run("insert into t1 values(4)")
+              .dump(primaryDbName, withClauseList);
+
+      FileSystem fs = new Path(incrementalDump.dumpLocation).getFileSystem(conf);
+      Path dumpPath = new Path(incrementalDump.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+      assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+      //    "_open_txns" file should be present in the dump directory which contains open transactions on the source.
+      Path openTxnDumpPath = new Path(dumpPath, OPEN_TXNS);
+      assertTrue(fs.exists(openTxnDumpPath));
+      List<Long> openTxnCountFromDump = getOpenTxnCountFromDump(fs, openTxnDumpPath);
+      assertEquals(1, openTxnCountFromDump.size());
+
+      replica.load(replicatedDbName, primaryDbName, withClauseList);
+      TxnStore replicaTxnManager = TxnUtils.getTxnStore(replica.getConf());
+      // Get the repl_txn_map for given policy and check if it has the open transactions
+      // It should have the open transactions which are present in the dump file as that was open when dump started.
+      Map<String, String> replayedTxnsForPolicy = replicaTxnManager.getReplayedTxnsForPolicy(replicatedDbName.toLowerCase() + ".*").getReplTxnMapEntry();
+      assertEquals(openTxnCountFromDump.size(), replayedTxnsForPolicy.size());
+
+      Set<Long> replayedTxnIds = replayedTxnsForPolicy.keySet()
+              .stream()
+              .map(Long::valueOf)
+              .collect(Collectors.toSet());
+      assertEquals(new HashSet<>(openTxnCountFromDump), replayedTxnIds);
+    } finally {
+      stopLongRunningThread(longRunningTxnThread);
+    }
+  }
+
+  private static void stopLongRunningThread(Thread longRunningTxnThread) throws InterruptedException {
+    if (longRunningTxnThread.isAlive()) {
+      LOG.info("Interrupting long-running transaction thread...");
+      longRunningTxnThread.interrupt();
+      longRunningTxnThread.join(5000);  // wait max 5 sec
+      LOG.info("Long-running transaction thread cleanup complete");
+    }
+  }
+
+  private Thread getLongRunningTxnThread(HiveConf primaryConf) {
+    return new Thread(new Runnable() {
+      @Override
+      public void run() {
+        LOG.info("Entered new thread");
+        IDriver driver = DriverFactory.newDriver(primaryConf);
+        SessionState.start(new CliSessionState(primaryConf));
+        try {
+          driver.run("insert into " + primaryDbName + ".t1 select * from " + primaryDbName + ".t1 where id in (select reflect(\"java.lang.Thread\", \"sleep\", bigint(1 * 360000)))");
+        } catch (CommandProcessorException e) {
+          throw new RuntimeException(e);
+        }
+        LOG.info("Exit new thread success");
+      }
+    });
+  }
+
+  @Test
+  public void testRemoveDanglingTxnWithOpenTxnOnSourceAndDanglingTxnOnDR() throws Throwable {
+    List<String> withClauseList = List.of("'" + HIVE_REPL_CLEAR_DANGLING_TXNS_ON_TARGET + "'='true'");
+    HiveConf primaryConf = primary.getConf();
+
+    primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("insert into t1 values(1)")
+            .run("create table t2 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("insert into t2 values(1)")
+            .dump(primaryDbName, withClauseList);
+
+    // Adding long running transaction on primarydb
+    Thread longRunningTxnThread = getLongRunningTxnThread(primaryConf);
+    longRunningTxnThread.start();
+    LOG.info("Created new thread {}", longRunningTxnThread.getName());
+
+    replica.load(replicatedDbName, primaryDbName, withClauseList);
+    try {
+      TxnStore replicaTxnManager = TxnUtils.getTxnStore(replica.getConf());
+
+      //Setting and opening some repl created transactions on replica to indicate some dangling transactions
+      int numTxn = 10;
+      int nextTxnId = 500;
+      SeedTxnIdRequest txnIdRequest = new SeedTxnIdRequest(nextTxnId);
+      replicaTxnManager.seedTxnId(txnIdRequest);
+      List<Long> txnList = replOpenTxnForTest(nextTxnId, numTxn, replicatedDbName.toLowerCase() + ".*", replicaTxnManager);
+
+      assertEquals(numTxn, txnList.size());
+      Map<String, String> replayedTxnsForPolicy = replicaTxnManager.getReplayedTxnsForPolicy(replicatedDbName.toLowerCase() + ".*").getReplTxnMapEntry();
+      assertEquals(numTxn, replayedTxnsForPolicy.size());
+
+      WarehouseInstance.Tuple incrementalDump = primary.run("use " + primaryDbName)
+              .run("insert into t1 values(2)")
+              .run("insert into t1 values(3)")
+              .run("insert into t1 values(4)")
+              .dump(primaryDbName, withClauseList);
+      replica.load(replicatedDbName, primaryDbName, withClauseList);
+
+      FileSystem fs = new Path(incrementalDump.dumpLocation).getFileSystem(conf);
+      Path dumpPath = new Path(incrementalDump.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+      assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+
+      Path openTxnDumpPath = new Path(dumpPath, OPEN_TXNS);
+      assertTrue(fs.exists(openTxnDumpPath));
+      List<Long> openTxnCountFromDump = getOpenTxnCountFromDump(fs, openTxnDumpPath);
+      // on the primaryDb / source there should be only one  open transaction i.e long running insert query
+      assertEquals(1, openTxnCountFromDump.size());
+
+      replayedTxnsForPolicy = replicaTxnManager.getReplayedTxnsForPolicy(replicatedDbName.toLowerCase() + ".*").getReplTxnMapEntry();
+      // post replication repl_txn_map should have the open transaction which was present in the dump file
+      // all other dangling transactions should be removed.
+      assertEquals(openTxnCountFromDump.size(), replayedTxnsForPolicy.size());
+      Set<Long> replayedTxnIds = replayedTxnsForPolicy.keySet()
+              .stream()
+              .map(Long::valueOf)
+              .collect(Collectors.toSet());
+      assertEquals(new HashSet<>(openTxnCountFromDump), replayedTxnIds);
+    } finally {
+      stopLongRunningThread(longRunningTxnThread);
+    }
+  }
+
+  @Test
+  public void testClearDanglingTxnRunsOnlyAfterFinalIncrementalRound() throws Throwable {
+    List<String> withClauseList = Arrays.asList(
+            "'" + HiveConf.ConfVars.HIVE_REPL_CLEAR_DANGLING_TXNS_ON_TARGET + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_APPROX_MAX_LOAD_TASKS.varname + "'='1'");
+    String insertStmt = "insert into sales_transactional partition(country) values "
+            + "(102, 'Phone', 800.00, '2026-02-11 11:30:00', 'Canada'),"
+            + "(103, 'Tablet', 450.00, '2026-02-11 12:15:00', 'USA'),"
+            + "(104, 'Monitor', 300.00, '2026-02-11 14:00:00', 'UK')";
+
+    primary.run("use " + primaryDbName)
+            .run("create table sales_transactional (sale_id int, product_name string, amount decimal(10,2), "
+                    + "sale_date timestamp) partitioned by (country string) stored as orc "
+                    + "tblproperties (\"transactional\"=\"true\")")
+            .run(insertStmt)
+            .run(insertStmt);
+
+    primary.dump(primaryDbName, withClauseList);
+    replica.load(replicatedDbName, primaryDbName, withClauseList)
+            .run("use " + replicatedDbName)
+            .run("select count(*) from sales_transactional")
+            .verifyResult("6");
+
+    primary.run("use " + primaryDbName);
+    for (int i = 0; i < 12; i++) {
+      primary.run(insertStmt);
+    }
+    primary.run("truncate table sales_transactional");
+    for (int i = 0; i < 5; i++) {
+      primary.run(insertStmt);
+    }
+
+    WarehouseInstance.Tuple incrementalDump = primary.dump(primaryDbName, withClauseList);
+
+    replica.load(replicatedDbName, primaryDbName, withClauseList)
+            .run("use " + replicatedDbName)
+            .run("repl status " + replicatedDbName)
+            .verifyResult(incrementalDump.lastReplicationId)
+            .run("select count(*) from sales_transactional")
+            .verifyResult("15");
+  }
+
+
+  private List<Long> getOpenTxnCountFromDump(FileSystem fs, Path openTxnDumpPath) throws IOException {
+    List<Long> openTxnIds = new ArrayList<>();
+    String line = null;
+    try (FSDataInputStream fsis = fs.open(openTxnDumpPath);
+         BufferedReader br = new BufferedReader(new InputStreamReader(fsis))) {
+
+      line = br.readLine();
+      if (line != null && !line.trim().isEmpty()) {
+
+        openTxnIds = Arrays.stream(line.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Long::valueOf)
+                .toList();
+      }
+    } catch (NumberFormatException e) {
+      throw new IOException("Failed to parse numeric ID from line: '" + line + "' in file " + openTxnDumpPath, e);
+    } catch (IOException e) {
+      // Catch general IO exceptions for file operations
+      throw new IOException("Error reading from dump file " + openTxnDumpPath + ": " + e.getMessage(), e);
+    }
+    return openTxnIds;
+  }
+
+  private List<Long> replOpenTxnForTest(long startId, int numTxn, String replPolicy, TxnStore txnHandler)
+          throws Exception {
+    MetastoreConf.setLongVar(conf, MetastoreConf.ConfVars.TXN_MAX_OPEN_BATCH, numTxn);
+    long lastId = startId + numTxn - 1;
+    OpenTxnRequest rqst = new OpenTxnRequest(numTxn, "me", "localhost");
+    rqst.setReplPolicy(replPolicy);
+    rqst.setReplSrcTxnIds(LongStream.rangeClosed(startId, lastId).boxed().toList());
+    rqst.setTxn_type(TxnType.REPL_CREATED);
+    OpenTxnsResponse openedTxns = txnHandler.openTxns(rqst);
+    List<Long> txnList = openedTxns.getTxn_ids();
+    assertEquals(txnList.size(), numTxn);
+    return txnList;
+  }
+
+  @Test
+  public void testCompleteFailoverWithReverseBootstrap() throws Throwable {
+    HiveConf primaryConf = primary.getConf();
+    TxnStore txnHandler = TxnUtils.getTxnStore(primary.getConf());
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'");
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    //This dump is not failover ready as target db can be used for replication only after first incremental load.
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+
+    primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .run("insert into t2 partition(name='Carl') values(10)");
+
+    /**Open transactions can be of two types:
+     Case 1) Txns that have not acquired HIVE LOCKS or they belong to different db: These txns would be captured in
+     _failovermetadata file inside dump directory.
+     Case 2) Txns that have acquired HIVE LOCKS and belong to db under replication: These txns would be aborted by hive
+     as part of dump operation.
+     */
+    // Open 3 txns for Database which is not under replication
+    int numTxnsForSecDb = 3;
+    List<Long> txnsForSecDb = openTxns(numTxnsForSecDb, txnHandler, primaryConf);
+
+    // Allocate write ids for both tables of secondary db for 3 txns
+    // t1=5 and t2=5
+    Map<String, Long> tablesInSecDb = new HashMap<>();
+    tablesInSecDb.put("t1", (long) numTxnsForSecDb);
+    tablesInSecDb.put("t2", (long) numTxnsForSecDb);
+    List<Long> lockIdsForSecDb = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName + "_extra",
+            tablesInSecDb, txnHandler, txnsForSecDb, primaryConf);
+
+    //Open 2 txns for Primary Db
+    int numTxnsForPrimaryDb = 2;
+    List<Long> txnsForPrimaryDb = openTxns(numTxnsForPrimaryDb, txnHandler, primaryConf);
+
+    // Allocate write ids for both tables of primary db for 2 txns
+    // t1=5 and t2=5
+    Map<String, Long> tablesInPrimaryDb = new HashMap<>();
+    tablesInPrimaryDb.put("t1", (long) numTxnsForPrimaryDb + 1);
+    tablesInPrimaryDb.put("t2", (long) numTxnsForPrimaryDb + 2);
+    List<Long> lockIdsForPrimaryDb = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName,
+            tablesInPrimaryDb, txnHandler, txnsForPrimaryDb, primaryConf);
+
+    //Open 1 txn with no hive locks acquired
+    List<Long> txnsWithNoLocks = openTxns(1, txnHandler, primaryConf);
+
+    dumpData = primary.dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+    FailoverMetaData failoverMD = new FailoverMetaData(dumpPath, conf);
+
+    List<Long> openTxns = failoverMD.getOpenTxns();
+    List<Long> txnsAborted = failoverMD.getAbortedTxns();
+    assertTrue(txnsAborted.size() == 2);
+    assertTrue(txnsAborted.containsAll(txnsForPrimaryDb));
+    assertTrue(openTxns.size() == 4);
+    assertTrue(openTxns.containsAll(txnsForSecDb));
+    assertTrue(openTxns.containsAll(txnsWithNoLocks));
+    assertTrue(failoverMD.getTxnsWithoutLock().equals(txnsWithNoLocks));
+
+
+    //TxnsForPrimaryDb and txnsWithNoLocks would have been aborted by dump operation.
+    verifyAllOpenTxnsAborted(txnsForPrimaryDb, primaryConf);
+    verifyAllOpenTxnsNotAborted(txnsForSecDb, primaryConf);
+    verifyAllOpenTxnsNotAborted(txnsWithNoLocks, primaryConf);
+    //Abort the txns
+    txnHandler.abortTxns(new AbortTxnsRequest(txnsForSecDb));
+    txnHandler.abortTxns(new AbortTxnsRequest(txnsWithNoLocks));
+    verifyAllOpenTxnsAborted(txnsForSecDb, primaryConf);
+    verifyAllOpenTxnsAborted(txnsWithNoLocks, primaryConf);
+    releaseLocks(txnHandler, lockIdsForSecDb);
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11"});
+
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.LOAD_ACKNOWLEDGEMENT.toString())));
+
+    Path dbRootDir = new Path(dumpData.dumpLocation).getParent();
+    long prevDumpDirModifTime = getLatestDumpDirModifTime(dbRootDir);
+    primary.run("REPL DUMP " + primaryDbName + " with ('" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "' = 'true')");
+    Assert.assertEquals(dumpData.dumpLocation, ReplUtils.getLatestDumpPath(dbRootDir, conf).toString());
+    Assert.assertEquals(prevDumpDirModifTime, getLatestDumpDirModifTime(dbRootDir));
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.LOAD_ACKNOWLEDGEMENT.toString())));
+
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    assertFalse(ReplChangeManager.isSourceOfReplication(replica.getDatabase(replicatedDbName)));
+
+    WarehouseInstance.Tuple reverseDumpData = replica.run("create table t3 (id int)")
+                                                      .run("insert into t2 partition(name='Bob') values(20)")
+                                                      .run("insert into t3 values (2)")
+                                                      .dump(replicatedDbName);
+
+    assertNotEquals(reverseDumpData.dumpLocation, dumpData.dumpLocation);
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(new DumpMetaData(dumpPath, conf).getDumpType() == DumpType.PRE_OPTIMIZED_BOOTSTRAP);
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    //do a second reverse dump.
+    primary.load(primaryDbName, replicatedDbName);
+    reverseDumpData = replica.dump(replicatedDbName);
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+
+    primary.load(primaryDbName, replicatedDbName)
+            .run("use " + primaryDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2", "t3"})
+            .run("repl status " + primaryDbName)
+            .verifyResult(reverseDumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11", "20"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"2"});
+
+    Database primaryDb = primary.getDatabase(primaryDbName);
+    assertFalse(primaryDb == null);
+    assertFalse(ReplUtils.isFirstIncPending(primaryDb.getParameters()));
+    assertTrue(MetaStoreUtils.isTargetOfReplication(primaryDb));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primaryDb));
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    assertFalse(ReplChangeManager.isSourceOfReplication(primaryDb));
+    assertTrue(ReplChangeManager.isSourceOfReplication(replica.getDatabase(replicatedDbName)));
+
+    reverseDumpData = replica.run("insert into t3 values (3)")
+            .run("insert into t2 partition(name='Bob') values(30)")
+            .dump(replicatedDbName);
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(replica.getDatabase(replicatedDbName)));
+
+    primary.load(primaryDbName, replicatedDbName)
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11", "20", "30"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"2", "3"})
+            .run("repl status " + primaryDbName)
+            .verifyResult(reverseDumpData.lastReplicationId);
+    assertFalse(ReplUtils.isFirstIncPending(primary.getDatabase(primaryDbName).getParameters()));
+  }
+
+  @Test
+  public void testFailoverRollback() throws Throwable {
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'");
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .run("insert into t2 partition(name='Carl') values(10)")
+            .dump(primaryDbName, failoverConfigs);
+
+    primary.run("insert into t2 partition(name='Marie') values(40)");
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11"})
+            .run("show partitions t2")
+            .verifyResults(new String[]{"name=Bob", "name=Carl"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+
+    dumpData = primary.run("create table t3(id int)")
+            .run("insert into t3 values (3)")
+            .dump(primaryDbName);
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertEquals(new DumpMetaData(dumpPath, conf).getDumpType(), DumpType.INCREMENTAL);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+    replica.load(replicatedDbName, primaryDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2", "t3"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"3"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11", "40"})
+            .run("show partitions t2")
+            .verifyResults(new String[]{"name=Bob", "name=Carl", "name=Marie"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+  }
+
+  @Test
+  public void testFailoverFailureBeforeReverseReplication() throws Throwable {
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'");
+    List<String> retainPrevDumpDir = Arrays.asList("'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'",
+            "'" + HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET + "'='true'"
+    );
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    //This dump is not failover ready as target db can be used for replication only after first incremental load.
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    assertTrue(MetaStoreUtils.isTargetOfReplication(replica.getDatabase(replicatedDbName)));
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    Path failoverMdFile = new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA);
+    assertTrue(fs.exists(dumpAckFile));
+    assertTrue(fs.exists(failoverMdFile));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+    FailoverMetaData previousFmd = new FailoverMetaData(dumpPath, conf);
+    Long failoverEventId = previousFmd.getFailoverEventId();
+    assertTrue(failoverEventId >= Long.parseLong(dumpData.lastReplicationId));
+    Long failoverMdModifTime = fs.getFileStatus(failoverMdFile).getModificationTime();
+
+    fs.delete(dumpAckFile, false);
+
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t2 partition(name='Carl') values(10)")
+            .run("create table t3 (id int)")
+            .run("insert into t3 values (2)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    failoverMdFile = new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA);
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(failoverMdFile));
+    Assert.assertEquals(failoverMdModifTime, (Long)fs.getFileStatus(failoverMdFile).getModificationTime());
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+    assertTrue(failoverEventId >= Long.parseLong(dumpData.lastReplicationId));
+    FailoverMetaData currentFmd = new FailoverMetaData(dumpPath, conf);
+    assertTrue(currentFmd.equals(previousFmd));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11"});
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.LOAD_ACKNOWLEDGEMENT.toString())));
+
+    WarehouseInstance.Tuple reverseDumpData = replica.run("use " + replicatedDbName)
+            .run("insert into t2 partition(name='Carl') values(12)")
+            .run("create table t3 (id int)")
+            .run("insert into t3 values (10)")
+            .dump(replicatedDbName, retainPrevDumpDir);
+    assertNotEquals(reverseDumpData.dumpLocation, dumpData.dumpLocation);
+    assertTrue(fs.exists(dumpPath));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertTrue(fs.exists(dumpAckFile));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(new DumpMetaData(dumpPath, conf).getDumpType() == DumpType.PRE_OPTIMIZED_BOOTSTRAP);
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    primary.load(primaryDbName, replicatedDbName, retainPrevDumpDir);
+    //do a second reverse dump.
+    reverseDumpData = replica.dump(replicatedDbName, retainPrevDumpDir);
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+
+    primary.load(primaryDbName, replicatedDbName, retainPrevDumpDir)
+            .run("use " + primaryDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2", "t3"})
+            .run("repl status " + primaryDbName)
+            .verifyResult(reverseDumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11", "12"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"10"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+
+    reverseDumpData = replica.run("use " + replicatedDbName)
+            .run("insert into t3 values (15)")
+            .dump(replicatedDbName);
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString()));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(replica.getDatabase(replicatedDbName)));
+
+    primary.load(primaryDbName, replicatedDbName)
+            .run("use " + primaryDbName)
+            .run("select id from t3")
+            .verifyResults(new String[]{"10", "15"});;
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+  }
+
+  @Test
+  public void testFailoverFailureInReverseReplication() throws Throwable {
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'");
+    List<String> retainPrevDumpDir = Arrays.asList("'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'",
+            "'" + HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET + "'='true'"
+    );
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    //This dump is not failover ready as target db can be used for replication only after first incremental load.
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    assertTrue(MetaStoreUtils.isTargetOfReplication(replica.getDatabase(replicatedDbName)));
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11"});
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.LOAD_ACKNOWLEDGEMENT.toString())));
+
+    WarehouseInstance.Tuple reverseDumpData = replica.run("use " + replicatedDbName)
+            .run("insert into t2 partition(name='Bob') values(20)")
+            .run("create table t3 (id int)")
+            .run("insert into t3 values (10)")
+            .dump(replicatedDbName, retainPrevDumpDir);
+    assertNotEquals(reverseDumpData.dumpLocation, dumpData.dumpLocation);
+    assertTrue(fs.exists(dumpPath));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertTrue(fs.exists(dumpAckFile));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(new DumpMetaData(dumpPath, conf).getDumpType() == DumpType.PRE_OPTIMIZED_BOOTSTRAP);
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    fs.delete(dumpAckFile, false);
+    assertFalse(fs.exists(dumpAckFile));
+    WarehouseInstance.Tuple preFailoverDumpData = dumpData;
+    dumpData = replica.dump(replicatedDbName, retainPrevDumpDir);
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertNotEquals(dumpData.dumpLocation, preFailoverDumpData.dumpLocation);
+    assertTrue(fs.exists(new Path(preFailoverDumpData.dumpLocation)));
+    assertNotEquals(reverseDumpData.dumpLocation, dumpData.dumpLocation);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(new DumpMetaData(dumpPath, conf).getDumpType() == DumpType.PRE_OPTIMIZED_BOOTSTRAP);
+    assertTrue(fs.exists(dumpAckFile));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    primary.load(primaryDbName, replicatedDbName);
+    dumpData = replica.dump(replicatedDbName, retainPrevDumpDir);
+
+    primary.load(primaryDbName, replicatedDbName, retainPrevDumpDir)
+            .run("use " + primaryDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2", "t3"})
+            .run("repl status " + primaryDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11", "20"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"10"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+
+    reverseDumpData = replica.run("use " + replicatedDbName)
+            .run("insert into t3 values (3)")
+            .run("insert into t2 partition(name='Bob') values(30)")
+            .dump(replicatedDbName, retainPrevDumpDir);
+    dumpPath = new Path(reverseDumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(replica.getDatabase(replicatedDbName),
+            MetaStoreUtils.FailoverEndpoint.TARGET));
+    fs.delete(dumpAckFile);
+    replica.run("ALTER DATABASE " + replicatedDbName + " SET DBPROPERTIES('" + ReplConst.REPL_FAILOVER_ENDPOINT + "'='"
+            + MetaStoreUtils.FailoverEndpoint.TARGET + "')");
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(replica.getDatabase(replicatedDbName),
+            MetaStoreUtils.FailoverEndpoint.TARGET));
+    assertFalse(fs.exists(dumpAckFile));
+    dumpData = replica.dump(replicatedDbName, retainPrevDumpDir);
+    assertEquals(reverseDumpData.dumpLocation, dumpData.dumpLocation);
+    fs.exists(dumpAckFile);
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(replica.getDatabase(replicatedDbName),
+            MetaStoreUtils.FailoverEndpoint.TARGET));
+
+    primary.load(primaryDbName, replicatedDbName, retainPrevDumpDir)
+            .run("use " + primaryDbName)
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11", "20", "30"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"10", "3"});;
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+  }
+
+  @Test
+  public void testFailoverFailedAndRollback() throws Throwable {
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'");
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    //This dump is not failover ready as target db can be used for replication only after first incremental load.
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    assertTrue(MetaStoreUtils.isTargetOfReplication(replica.getDatabase(replicatedDbName)));
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path dumpAckFile = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertTrue(fs.exists(dumpAckFile));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    fs.delete(dumpAckFile, false);
+
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t2 partition(name='Carl') values(10)")
+            .run("create table t3 (id int)")
+            .run("insert into t3 values (2)")
+            .dump(primaryDbName);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2", "t3"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"11", "10"})
+            .run("select id from t3")
+            .verifyResults(new String[]{"2"});
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(replica.getDatabase(replicatedDbName)));
+  }
+
+  @Test
+  public void testEnablementOfReplBackgroundThreadDuringFailover() throws Throwable{
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'");
+
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .run("insert into t2 partition(name='Carl') values(10)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path failoverReadyMarker = new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString());
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(failoverReadyMarker));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+    assert "true".equals(db.getParameters().get(REPL_ENABLE_BACKGROUND_THREAD));
+  }
+
+  @Test
+  public void testFailoverFailureDuringRollback() throws Throwable {
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'");
+    List<String> retainPrevDumpDir = Arrays.asList("'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR + "'='true'",
+            "'" + HiveConf.ConfVars.REPL_RETAIN_PREV_DUMP_DIR_COUNT + "'='1'");
+    WarehouseInstance.Tuple dumpData = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table t2 (rank int) partitioned by (name string) tblproperties(\"transactional\"=\"true\", " +
+                    "\"transactional_properties\"=\"insert_only\")")
+            .dump(primaryDbName, failoverConfigs);
+
+    FileSystem fs = new Path(dumpData.dumpLocation).getFileSystem(conf);
+    Path dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId);
+
+    Database db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+
+    dumpData = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(1)")
+            .run("insert into t2 partition(name='Bob') values(11)")
+            .run("insert into t2 partition(name='Carl') values(10)")
+            .dump(primaryDbName, failoverConfigs);
+
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path failoverReadyMarker = new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString());
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertTrue(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertTrue(fs.exists(failoverReadyMarker));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs)
+            .run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{"t1", "t2"})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dumpData.lastReplicationId)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1"})
+            .run("select rank from t2 order by rank")
+            .verifyResults(new String[]{"10", "11"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(db, MetaStoreUtils.FailoverEndpoint.TARGET));
+
+    dumpData = primary.run("insert into t1 values (5)")
+            .dump(primaryDbName, retainPrevDumpDir);
+    dumpPath = new Path(dumpData.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+    Path dumpAck = new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString());
+    assertTrue(fs.exists(dumpAck));
+    fs.delete(dumpAck, false);
+    fs.create(failoverReadyMarker);
+    assertTrue(fs.exists(failoverReadyMarker));
+    primary.run("ALTER DATABASE " + primaryDbName + " SET DBPROPERTIES('" + ReplConst.REPL_FAILOVER_ENDPOINT + "'='"
+            + MetaStoreUtils.FailoverEndpoint.SOURCE + "')");
+    assertTrue(MetaStoreUtils.isDbBeingPlannedFailedOverAtEndpoint(primary.getDatabase(primaryDbName),
+            MetaStoreUtils.FailoverEndpoint.SOURCE));
+
+    WarehouseInstance.Tuple newDumpData = primary.dump(primaryDbName, retainPrevDumpDir);
+    assertEquals(newDumpData.dumpLocation, dumpData.dumpLocation);
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(primary.getDatabase(primaryDbName)));
+    assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
+    assertFalse(fs.exists(new Path(dumpPath, FailoverMetaData.FAILOVER_METADATA)));
+    assertFalse(fs.exists(new Path(dumpPath, ReplAck.FAILOVER_READY_MARKER.toString())));
+
+    replica.load(replicatedDbName, primaryDbName)
+            .run("select id from t1")
+            .verifyResults(new String[]{"1", "5"});
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+    db = replica.getDatabase(replicatedDbName);
+    assertTrue(MetaStoreUtils.isTargetOfReplication(db));
+    assertFalse(MetaStoreUtils.isDbBeingPlannedFailedOver(db));
+  }
+
+  private long getLatestDumpDirModifTime(Path dumpRoot) throws Exception {
+    FileSystem fs = dumpRoot.getFileSystem(conf);
+    long latestModifTime = -1;
+    if (fs.exists(dumpRoot)) {
+      for (FileStatus status : fs.listStatus(dumpRoot)) {
+        if (status.getModificationTime() > latestModifTime) {
+          latestModifTime = status.getModificationTime();
+        }
+      }
+    }
+    return latestModifTime;
+  }
+
+  @Test
+  public void testReplOperationsNotCapturedInNotificationLog() throws Throwable {
+    //Perform empty bootstrap dump and load
+    primary.dump(primaryDbName);
+    replica.run("REPL LOAD " + primaryDbName + " INTO " + replicatedDbName);
+    //Perform empty incremental dump and load so that all db level properties are altered.
+    primary.dump(primaryDbName);
+    replica.run("REPL LOAD " + primaryDbName + " INTO " + replicatedDbName);
+
+    long lastEventId = primary.getCurrentNotificationEventId().getEventId();
+    WarehouseInstance.Tuple incDump = primary.dump(primaryDbName);
+    assert primary.getNoOfEventsDumped(incDump.dumpLocation, conf) == 0;
+    long currentEventId = primary.getCurrentNotificationEventId().getEventId();
+    assert lastEventId == currentEventId;
+    lastEventId = replica.getCurrentNotificationEventId().getEventId();
+    replica.run("REPL LOAD " + primaryDbName + " INTO " + replicatedDbName);
+    currentEventId = replica.getCurrentNotificationEventId().getEventId();
+    assert currentEventId == lastEventId;
+
+    primary.run("ALTER DATABASE " + primaryDbName +
+            " SET DBPROPERTIES('" + ReplConst.TARGET_OF_REPLICATION + "'='')");
+    primary.dump(primaryDbName);
+    replica.run("DROP DATABASE " + replicatedDbName);
+    lastEventId = replica.getCurrentNotificationEventId().getEventId();
+    replica.loadFailure(replicatedDbName, primaryDbName);
+    currentEventId = replica.getCurrentNotificationEventId().getEventId();
+    assert lastEventId == currentEventId;
+  }
+
+  @Test
+  public void testReadOperationsNotCapturedInNotificationLog() throws Throwable {
+    //Perform empty bootstrap dump and load
+    String dbName = testName.getMethodName();
+    String replDbName = "replicated_" + testName.getMethodName();
+    try {
+      primary.run("CREATE DATABASE " + dbName + " WITH DBPROPERTIES ( '" +
+              SOURCE_OF_REPLICATION + "' = '1,2,3')");
+      primary.hiveConf.set("hive.txn.readonly.enabled", "true");
+      primary.run("CREATE TABLE " + dbName + ".t1 (id int)");
+      primary.run("CREATE table " + dbName
+              + ".source (q1 int , a1 int) stored as orc tblproperties (\"transactional\"=\"true\")");
+      primary.run("CREATE table " + dbName
+              + ".target (b int, p int) stored as orc tblproperties (\"transactional\"=\"true\")");
+      primary.run("INSERT into " + dbName + ".source values(1,5)");
+      primary.run("INSERT into " + dbName + ".target values(10,1)");
+      primary.dump(dbName);
+      replica.run("REPL LOAD " + dbName + " INTO " + replDbName);
+      //Perform empty incremental dump and load so that all db level properties are altered.
+      primary.dump(dbName);
+      replica.run("REPL LOAD " + dbName + " INTO " + replDbName);
+      primary.run("INSERT INTO " + dbName + ".t1 VALUES(1)");
+      long lastEventId = primary.getCurrentNotificationEventId().getEventId();
+      primary.run("USE " + dbName);
+      primary.run("DESCRIBE DATABASE " + dbName);
+      primary.run("DESCRIBE "+ dbName + ".t1");
+      primary.run("SELECT * FROM " + dbName + ".t1");
+      primary.run("SHOW TABLES " + dbName);
+      primary.run("SHOW TABLE EXTENDED LIKE 't1'");
+      primary.run("SHOW TBLPROPERTIES t1");
+      primary.run("EXPLAIN SELECT * from " + dbName + ".t1");
+      primary.run("SHOW LOCKS");
+      primary.run("EXPLAIN SHOW LOCKS");
+      primary.run("EXPLAIN LOCKS UPDATE target SET b = 1 WHERE p IN (SELECT t.q1 FROM source t WHERE t.a1=5)");
+      long currentEventId = primary.getCurrentNotificationEventId().getEventId();
+      Assert.assertEquals(lastEventId, currentEventId);
+    } finally {
+      primary.run("DROP DATABASE " + dbName + " CASCADE");
+      replica.run("DROP DATABASE " + replDbName + " CASCADE");
+    }
+  }
+
+  @Test
+  public void testXAttrsPreserved() throws Throwable {
+    String nonTxnTable = "nonTxnTable";
+    String unptnedTable = "unptnedTable";
+    String ptnedTable = "ptnedTable";
+    String clusteredTable = "clusteredTable";
+    String clusteredAndPtnedTable = "clusteredAndPtnedTable";
+    primary.run("use " + primaryDbName)
+            .run("create table " + nonTxnTable + " (id int)")
+            .run("create table " + unptnedTable + " (id int) stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table " + ptnedTable + " (id int) partitioned by (name string) stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table " + clusteredTable + " (id int) clustered by (id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("create table " + clusteredAndPtnedTable + " (id int) partitioned by (name string) clustered by(id)" +
+                    "into 3 buckets stored as orc tblproperties (\"transactional\"=\"true\")")
+            .run("insert into " + nonTxnTable + " values (2)").run("INSERT into " + unptnedTable + " values(1)")
+            .run("INSERT into " + ptnedTable + " values(2, 'temp')").run("INSERT into " + clusteredTable + " values(1)")
+            .run("INSERT into " + clusteredAndPtnedTable + " values(1, 'temp')");
+    for (String table : primary.getAllTables(primaryDbName)) {
+      org.apache.hadoop.hive.ql.metadata.Table tb = Hive.get(primary.hiveConf).getTable(primaryDbName, table);
+      if (tb.isPartitioned()) {
+        List<Partition> partitions = primary.getAllPartitions(primaryDbName, table);
+        for (Partition partition: partitions) {
+          Path partitionLoc = new Path(partition.getSd().getLocation());
+          FileSystem fs = partitionLoc.getFileSystem(conf);
+          setXAttrsRecursive(fs, partitionLoc, true);
+        }
+      } else {
+        Path tablePath = tb.getDataLocation();
+        FileSystem fs = tablePath.getFileSystem(conf);
+        setXAttrsRecursive(fs, tablePath, true);
+      }
+    }
+    primary.dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName);
+    Path srcDbPath = new Path(primary.getDatabase(primaryDbName).getLocationUri());
+    Path replicaDbPath = new Path(primary.getDatabase(replicatedDbName).getLocationUri());
+    verifyXAttrsPreserved(srcDbPath.getFileSystem(conf), srcDbPath, replicaDbPath);
+  }
+
+  private void setXAttrsRecursive(FileSystem fs, Path path, boolean isParent) throws Exception {
+    if (fs.getFileStatus(path).isDirectory()) {
+      RemoteIterator<FileStatus> content = fs.listStatusIterator(path);
+      while(content.hasNext()) {
+        setXAttrsRecursive(fs, content.next().getPath(), false);
+      }
+    }
+    if (!isParent) {
+      fs.setXAttr(path, "user.random", "value".getBytes(StandardCharsets.UTF_8));
+    }
+  }
+
+  private void verifyXAttrsPreserved(FileSystem fs, Path src, Path dst) throws Exception {
+    FileStatus srcStatus = fs.getFileStatus(src);
+    FileStatus dstStatus = fs.getFileStatus(dst);
+    if (srcStatus.isDirectory()) {
+      assertTrue(dstStatus.isDirectory());
+      for(FileStatus srcContent: fs.listStatus(src)) {
+        Path dstContent = new Path(dst, srcContent.getPath().getName());
+        assertTrue(fs.exists(dstContent));
+        verifyXAttrsPreserved(fs, srcContent.getPath(), dstContent);
+      }
+    } else {
+      assertFalse(dstStatus.isDirectory());
+    }
+    Map<String, byte[]> values = fs.getXAttrs(dst);
+    for(Map.Entry<String, byte[]> value : fs.getXAttrs(src).entrySet()) {
+      assertEquals(new String(value.getValue()), new String(values.get(value.getKey())));
+    }
   }
 
   @Test
@@ -159,6 +1459,42 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .dump(primaryDbName);
     replica.load(replicatedDbName, primaryDbName);
     verifyInc2Load(replicatedDbName, inc2Dump.lastReplicationId);
+  }
+
+  @Test
+  public void testNotificationFromLoadMetadataAck() throws Throwable {
+    long previousLoadNotificationID = 0;
+    WarehouseInstance.Tuple bootstrapDump = primary.run("use " + primaryDbName)
+            .run("CREATE TABLE t1(a string) STORED AS TEXTFILE")
+            .dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName)
+            .verifyResults(new String[] {});
+    long currentLoadNotificationID = fetchNotificationIDFromDump(new Path(bootstrapDump.dumpLocation));
+    long currentNotificationID = replica.getCurrentNotificationEventId().getEventId();
+    assertTrue(currentLoadNotificationID > previousLoadNotificationID);
+    assertTrue(currentNotificationID == currentLoadNotificationID);
+    previousLoadNotificationID = currentLoadNotificationID;
+    WarehouseInstance.Tuple incrementalDump1 = primary.run("insert into t1 values (1)")
+            .dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName)
+            .verifyResults(new String[] {});
+    currentLoadNotificationID = fetchNotificationIDFromDump(new Path(incrementalDump1.dumpLocation));
+    currentNotificationID = replica.getCurrentNotificationEventId().getEventId();
+    assertTrue(currentLoadNotificationID > previousLoadNotificationID);
+    assertTrue(currentNotificationID == currentLoadNotificationID);
+  }
+
+  private long fetchNotificationIDFromDump(Path dumpLocation) throws Exception {
+    Path hiveDumpDir = new Path(dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR.toString());
+    Path loadMetadataFilePath = new Path(hiveDumpDir, ReplAck.LOAD_METADATA.toString());
+    FileSystem fs = dumpLocation.getFileSystem(conf);
+    BufferedReader reader = new BufferedReader(new InputStreamReader(fs.open(loadMetadataFilePath)));
+    String line = reader.readLine();
+    assertTrue(line != null && reader.readLine() == null);
+    if (reader != null) {
+      reader.close();
+    }
+    return Long.parseLong(line);
   }
 
   @Test
@@ -215,7 +1551,8 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     Map<String, Long> tables = new HashMap<>();
     tables.put("t1", numTxns + 1L);
     tables.put("t2", numTxns + 2L);
-    List<Long> lockIds = allocateWriteIdsForTablesAndAquireLocks(primaryDbName, tables, txnHandler, txns, primaryConf);
+    List<Long> lockIds = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName, tables,
+        txnHandler, txns, primaryConf);
 
     // Bootstrap dump with open txn timeout as 1s.
     List<String> withConfigs = Arrays.asList(
@@ -334,7 +1671,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     Map<String, Long> tablesInSecDb = new HashMap<>();
     tablesInSecDb.put("t1", (long) numTxns);
     tablesInSecDb.put("t2", (long) numTxns);
-    List<Long> lockIds = allocateWriteIdsForTablesAndAquireLocks(primaryDbName + "_extra",
+    List<Long> lockIds = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName + "_extra",
       tablesInSecDb, txnHandler, txns, primaryConf);
 
     // Bootstrap dump with open txn timeout as 300s.
@@ -430,7 +1767,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     Map<String, Long> tablesInSecDb = new HashMap<>();
     tablesInSecDb.put("t1", (long) numTxns);
     tablesInSecDb.put("t2", (long) numTxns);
-    List<Long> lockIds = allocateWriteIdsForTablesAndAquireLocks(primaryDbName + "_extra",
+    List<Long> lockIds = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName + "_extra",
       tablesInSecDb, txnHandler, txns, primaryConf);
 
     WarehouseInstance.Tuple bootstrapDump  = primary
@@ -496,14 +1833,14 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     Map<String, Long> tablesInSecDb = new HashMap<>();
     tablesInSecDb.put("t1", (long) numTxns);
     tablesInSecDb.put("t2", (long) numTxns);
-    List<Long> lockIds = allocateWriteIdsForTablesAndAquireLocks(primaryDbName + "_extra",
+    List<Long> lockIds = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName + "_extra",
       tablesInSecDb, txnHandler, txns, primaryConf);
     // Allocate write ids for both tables of primary db for all txns
     // t1=5+1L and t2=5+2L inserts
     Map<String, Long> tablesInPrimDb = new HashMap<>();
     tablesInPrimDb.put("t1", (long) numTxns + 1L);
     tablesInPrimDb.put("t2", (long) numTxns + 2L);
-    lockIds.addAll(allocateWriteIdsForTablesAndAquireLocks(primaryDbName,
+    lockIds.addAll(allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName,
       tablesInPrimDb, txnHandler, txnsSameDb, primaryConf));
 
     // Bootstrap dump with open txn timeout as 1s.
@@ -571,7 +1908,8 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     Map<String, Long> tables = new HashMap<>();
     tables.put("t1", numTxns + 1L);
     tables.put("t2", numTxns + 2L);
-    List<Long> lockIds = allocateWriteIdsForTablesAndAquireLocks(primaryDbName, tables, txnHandler, txns, primaryConf);
+    List<Long> lockIds = allocateWriteIdsForTablesAndAcquireLocks(PRIMARY_CAT_NAME, primaryDbName, tables,
+        txnHandler, txns, primaryConf);
 
     // Bootstrap dump with open txn timeout as 1s.
     List<String> withConfigs = Arrays.asList(
@@ -770,7 +2108,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             primary.dump(primaryDbName);
 
     long lastReplId = Long.parseLong(bootStrapDump.lastReplicationId);
-    primary.testEventCounts(primaryDbName, lastReplId, null, null, 22);
+    primary.testEventCounts(primaryDbName, lastReplId, null, null, 11);
 
     // Test load
     replica.load(replicatedDbName, primaryDbName)
@@ -879,8 +2217,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .run("repl status " + replicatedDbName)
             .verifyResult("null")
             .run("show tables like t2")
-            .verifyResults(new String[] { })
-            .verifyReplTargetProperty(replicatedDbName);
+            .verifyResults(new String[] { });
 
     // Verify if no create table on t1. Only table t2 should  be created in retry.
     callerVerifier = new BehaviourInjection<CallerArguments, Boolean>() {
@@ -1018,8 +2355,9 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     //End of additional steps
     try {
       replica.loadWithoutExplain("", "`*`");
-    } catch (SemanticException e) {
-      assertEquals("REPL LOAD * is not supported", e.getMessage());
+      fail();
+    } catch (HiveException e) {
+      assertEquals("REPL LOAD Target database name shouldn't be null", e.getMessage());
     }
   }
 
@@ -1127,7 +2465,10 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     fs.delete(lastEvtRoot, true);
     fs.delete(secondLastEvtRoot, true);
     fs.delete(thirdLastEvtRoot, true);
-    org.apache.hadoop.hive.ql.parse.repl.dump.Utils.writeOutput(String.valueOf(lastEventID - 3), ackLastEventID,
+    EventsDumpMetadata eventsDumpMetadata = EventsDumpMetadata.deserialize(ackLastEventID, conf);
+    eventsDumpMetadata.setLastReplId(lastEventID - 3);
+    eventsDumpMetadata.setEventsDumpedCount(eventsDumpMetadata.getEventsDumpedCount() - 3);
+    org.apache.hadoop.hive.ql.parse.repl.dump.Utils.writeOutput(eventsDumpMetadata.serialize(), ackLastEventID,
             primary.hiveConf);
     ReplDumpWork.testDeletePreviousDumpMetaPath(false);
 
@@ -1319,14 +2660,18 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     fs.delete(ackLastEventID, false);
     fs.delete(dumpMetaData, false);
     //delete all the event folder except first one.
-    long firstIncEventID = Long.parseLong(bootstrapDump.lastReplicationId) + 1;
+    long firstIncEventID = -1;
     long lastIncEventID = Long.parseLong(incrementalDump1.lastReplicationId);
     assertTrue(lastIncEventID > (firstIncEventID + 1));
 
-    for (long eventId=firstIncEventID + 1; eventId<=lastIncEventID; eventId++) {
+    for (long eventId=Long.parseLong(bootstrapDump.lastReplicationId) + 1; eventId<=lastIncEventID; eventId++) {
       Path eventRoot = new Path(hiveDumpDir, String.valueOf(eventId));
       if (fs.exists(eventRoot)) {
-        fs.delete(eventRoot, true);
+        if (firstIncEventID == -1){
+          firstIncEventID = eventId;
+        } else {
+          fs.delete(eventRoot, true);
+        }
       }
     }
 
@@ -1390,15 +2735,18 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     long fifthLastIncEventID = Long.parseLong(incrementalDump1.lastReplicationId) - 4;
     long lastIncEventID = Long.parseLong(incrementalDump1.lastReplicationId);
     assertTrue(lastIncEventID > fifthLastIncEventID);
-
+    int deletedEventsCount = 0;
     for (long eventId=fifthLastIncEventID + 1; eventId<=lastIncEventID; eventId++) {
       Path eventRoot = new Path(hiveDumpDir, String.valueOf(eventId));
       if (fs.exists(eventRoot)) {
+        deletedEventsCount++;
         fs.delete(eventRoot, true);
       }
     }
-
-    org.apache.hadoop.hive.ql.parse.repl.dump.Utils.writeOutput(String.valueOf(fifthLastIncEventID), ackLastEventID,
+    EventsDumpMetadata eventsDumpMetadata = EventsDumpMetadata.deserialize(ackLastEventID, conf);
+    eventsDumpMetadata.setLastReplId(fifthLastIncEventID);
+    eventsDumpMetadata.setEventsDumpedCount(eventsDumpMetadata.getEventsDumpedCount() - deletedEventsCount);
+    org.apache.hadoop.hive.ql.parse.repl.dump.Utils.writeOutput(eventsDumpMetadata.serialize(), ackLastEventID,
             primary.hiveConf);
 
     ReplDumpWork.testDeletePreviousDumpMetaPath(false);
@@ -1419,6 +2767,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
 
   @Test
   public void testCheckPointingDataDumpFailureBootstrapDuringIncremental() throws Throwable {
+    isMetricsEnabledForTests(false);
     List<String> dumpClause = Arrays.asList(
             "'" + HiveConf.ConfVars.HIVE_EXEC_COPYFILE_MAXSIZE.varname + "'='1'",
             "'" + HiveConf.ConfVars.HIVE_IN_TEST_REPL.varname + "'='false'",
@@ -1493,7 +2842,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
 
   @Test
   public void testCheckPointingBootstrapDuringIncrementalRegularCopy() throws Throwable {
-
+    isMetricsEnabledForTests(false);
     WarehouseInstance.Tuple bootstrapDump = primary.run("use " + primaryDbName)
             .run("create table t1(a int) stored as orc TBLPROPERTIES ('transactional'='true')")
             .run("insert into t1 values (1)")
@@ -1573,8 +2922,7 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .verifyResults(new String[] {"1"});
 
     List<String> dumpClause = Arrays.asList("'" + ReplUtils.DFS_MAX_DIR_ITEMS_CONFIG + "'='"
-            + (ReplUtils.RESERVED_DIR_ITEMS_COUNT + 5) +"'",
-            "'" + HiveConf.ConfVars.REPL_BOOTSTRAP_ACID_TABLES + "'='true'");
+            + (ReplUtils.RESERVED_DIR_ITEMS_COUNT + 5) +"'");
 
     WarehouseInstance.Tuple incrementalDump1 = primary.run("use " + primaryDbName)
             .run("insert into t1 values (2)")
@@ -1586,29 +2934,22 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .run("insert into t1 values (8)")
             .run("insert into t1 values (9)")
             .run("insert into t1 values (10)")
-            .run("create table t2(a int) clustered by (a) into 2 buckets" +
-                    " stored as orc TBLPROPERTIES ('transactional'='true')")
-            .run("insert into t2 values (100)")
             .dump(primaryDbName, dumpClause);
 
-    int eventCount = Integer.parseInt(incrementalDump1.lastReplicationId)
-            - Integer.parseInt(bootstrapDump.lastReplicationId);
+    int eventCount = primary.getNoOfEventsDumped(incrementalDump1.dumpLocation, conf);
     assertEquals(eventCount, 5);
 
     replica.load(replicatedDbName, primaryDbName)
             .run("select * from " + replicatedDbName + ".t1")
-            .verifyResults(new String[] {"1"})
-            .run("select * from " + replicatedDbName + ".t2")
-            .verifyResults(new String[] {"100"});
+            .verifyResults(new String[] {"1"});
 
     dumpClause = Arrays.asList("'" + ReplUtils.DFS_MAX_DIR_ITEMS_CONFIG + "'='1000'");
 
     WarehouseInstance.Tuple incrementalDump2 = primary.run("use " + primaryDbName)
             .dump(primaryDbName, dumpClause);
 
-    eventCount = Integer.parseInt(incrementalDump2.lastReplicationId)
-            - Integer.parseInt(incrementalDump1.lastReplicationId);
-    assertTrue(eventCount > 5);
+    eventCount = primary.getNoOfEventsDumped(incrementalDump2.dumpLocation, conf);
+    assertTrue(eventCount > 5 && eventCount < 1000);
 
     replica.load(replicatedDbName, primaryDbName)
             .run("select * from " + replicatedDbName + ".t1")
@@ -2073,30 +3414,6 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     assertTrue(fs.exists(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString())));
   }
 
-  @Test
-  public void testReplTargetOfReplication() throws Throwable {
-    // Bootstrap
-    WarehouseInstance.Tuple bootstrapDump = prepareDataAndDump(primaryDbName, null);
-    replica.load(replicatedDbName, primaryDbName).verifyReplTargetProperty(replicatedDbName);
-    verifyLoadExecution(replicatedDbName, bootstrapDump.lastReplicationId, true);
-
-    //Try to do a dump on replicated db. It should fail
-    replica.run("alter database " + replicatedDbName + " set dbproperties ('repl.source.for'='1')");
-    try {
-      replica.dump(replicatedDbName);
-    } catch (Exception e) {
-      Assert.assertEquals("Cannot dump database as it is a Target of replication.", e.getMessage());
-      Assert.assertEquals(ErrorMsg.REPL_DATABASE_IS_TARGET_OF_REPLICATION.getErrorCode(),
-        ErrorMsg.getErrorMsg(e.getMessage()).getErrorCode());
-    }
-    replica.run("alter database " + replicatedDbName + " set dbproperties ('repl.source.for'='')");
-
-    //Try to dump a different db on replica. That should succeed
-    replica.run("create database " + replicatedDbName + "_extra with dbproperties ('repl.source.for' = '1, 2, 3')")
-      .dump(replicatedDbName + "_extra");
-    replica.run("drop database if exists " + replicatedDbName + "_extra cascade");
-  }
-
   private void verifyPathExist(FileSystem fs, Path filePath) throws IOException {
     assertTrue("Path not found:" + filePath, fs.exists(filePath));
   }
@@ -2109,9 +3426,12 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .run("insert into t1 values (1)")
             .run("insert into t1 values (2)")
             .run("create materialized view mat_view as select * from t1")
+            .run("create materialized view mat_view_txn TBLPROPERTIES ('transactional'='true') as select * from t1")
             .run("show tables")
-            .verifyResults(new String[]{"t1", "mat_view"})
+            .verifyResults(new String[]{"t1", "mat_view", "mat_view_txn"})
             .run("select * from mat_view")
+            .verifyResults(new String[]{"1", "2"})
+            .run("select * from mat_view_txn")
             .verifyResults(new String[]{"1", "2"})
             .dump(primaryDbName);
 
@@ -2129,6 +3449,9 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
             .run("alter materialized view mat_view rebuild")
             .run("select * from mat_view")
             .verifyResults(new String[]{"1", "2", "3"})
+            .run("alter materialized view mat_view_txn rebuild")
+            .run("select * from mat_view_txn")
+            .verifyResults(new String[]{"1", "2", "3"})
             .dump(primaryDbName);
 
     //confirm materialized-view not replicated
@@ -2143,6 +3466,9 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
     primary.run("use " + primaryDbName)
             .run("alter materialized view mat_view disable rewrite")
             .run("select * from mat_view")
+            .verifyResults(new String[]{"1", "2", "3"})
+            .run("alter materialized view mat_view_txn disable rewrite")
+            .run("select * from mat_view_txn")
             .verifyResults(new String[]{"1", "2", "3"})
             .dump(primaryDbName);
 
@@ -2434,4 +3760,700 @@ public class TestReplicationScenariosAcidTables extends BaseReplicationScenarios
       .verifyResults(new String[] { "bangalore", "paris", "sydney" })
       .verifyReplTargetProperty(replicatedDbName);
   }
+
+
+  @Test
+  public void testTxnTblReplWithSameNameAsDroppedNonTxnTbl() throws Throwable {
+    List<String> withClauseOptions = new LinkedList<>();
+    withClauseOptions.add("'" + HiveConf.ConfVars.HIVE_DISTCP_DOAS_USER.varname
+        + "'='" + UserGroupInformation.getCurrentUser().getUserName() + "'");
+
+    String tbl = "t1";
+    primary
+        .run("use " + primaryDbName)
+        .run("create table " + tbl + " (id int)")
+        .run("insert into table " + tbl + " values (1)")
+        .dump(primaryDbName, withClauseOptions);
+
+    replica
+        .load(replicatedDbName, primaryDbName)
+        .run("use " + replicatedDbName)
+        .run("select id from " + tbl)
+        .verifyResults(new String[] {"1"});
+
+    assertFalse(AcidUtils.isTransactionalTable(replica.getTable(replicatedDbName, tbl)));
+
+    primary
+        .run("use " + primaryDbName)
+        .run("drop table " + tbl)
+        .run("create table " + tbl + " (id int) clustered by(id) into 3 buckets stored as orc " +
+            "tblproperties (\"transactional\"=\"true\")")
+        .run("insert into table " + tbl + " values (2)")
+        .dump(primaryDbName, withClauseOptions);
+
+    replica
+        .load(replicatedDbName, primaryDbName)
+        .run("use " + replicatedDbName)
+        .run("select id from " + tbl)
+        .verifyResults(new String[] {"2"});
+
+    assertTrue(AcidUtils.isTransactionalTable(replica.getTable(replicatedDbName, tbl)));
+  }
+
+  @Test
+  public void testTxnTblReplWithSameNameAsDroppedExtTbl() throws Throwable {
+    List<String> withClauseOptions = new LinkedList<>();
+    withClauseOptions.add("'" + HiveConf.ConfVars.HIVE_DISTCP_DOAS_USER.varname
+        + "'='" + UserGroupInformation.getCurrentUser().getUserName() + "'");
+
+    String tbl = "t1";
+    primary
+        .run("use " + primaryDbName)
+        .run("create external table " + tbl + " (id int)")
+        .run("insert into table " + tbl + " values (1)")
+        .dump(primaryDbName, withClauseOptions);
+
+    replica
+        .load(replicatedDbName, primaryDbName)
+        .run("use " + replicatedDbName)
+        .run("select id from " + tbl)
+        .verifyResults(new String[] {"1"});
+
+    assertFalse(AcidUtils.isTransactionalTable(replica.getTable(replicatedDbName, tbl)));
+    assertTrue(replica.getTable(replicatedDbName, tbl).getTableType().equals(TableType.EXTERNAL_TABLE.toString()));
+
+    primary
+        .run("use " + primaryDbName)
+        .run("drop table " + tbl)
+        .run("create table " + tbl + " (id int) clustered by(id) into 3 buckets stored as orc " +
+            "tblproperties (\"transactional\"=\"true\")")
+        .run("insert into table " + tbl + " values (2)")
+        .dump(primaryDbName, withClauseOptions);
+
+    replica
+        .load(replicatedDbName, primaryDbName)
+        .run("use " + replicatedDbName)
+        .run("select id from " + tbl)
+        .verifyResults(new String[] {"2"});
+
+    assertTrue(AcidUtils.isTransactionalTable(replica.getTable(replicatedDbName, tbl)));
+    assertFalse(replica.getTable(replicatedDbName, tbl).getTableType().equals(TableType.EXTERNAL_TABLE.toString()));
+  }
+
+  @Test
+  public void testReplTargetLastIdNotUpdatedInCaseOfResume() throws Throwable {
+    Map<String, String> params = new HashMap<>();
+    params.put(REPL_RESUME_STARTED_AFTER_FAILOVER, "true");
+    params.put(REPL_TARGET_TABLE_PROPERTY, "19");
+    params.put(REPL_TARGET_DATABASE_PROPERTY, "15");
+
+    // create database and set the parameters
+    String dbName = "db1";
+    Database db1 = primary.run("create database " + dbName)
+                          .getDatabase(dbName);
+    db1.setParameters(params);
+
+    // let's change 'repl.last.id', now this should not update 'repl.target.last.id' as it finds
+    // 'repl.resume.started' flag
+    primary.run("alter database " + dbName + " set dbproperties('repl.last.id'='21')");
+    Map<String, String> updatedParams = db1.getParameters();
+
+
+    assertEquals(params.get(REPL_TARGET_DATABASE_PROPERTY),
+      updatedParams.get(REPL_TARGET_DATABASE_PROPERTY));
+    assertEquals("15", updatedParams.get(REPL_TARGET_DATABASE_PROPERTY));
+  }
+  @Test
+  public void testBatchingOfIncrementalEvents() throws Throwable {
+    final int REPL_MAX_LOAD_TASKS = 5;
+    List<String> incrementalBatchConfigs = Arrays.asList(
+            String.format("'%s'='%s'", HiveConf.ConfVars.REPL_BATCH_INCREMENTAL_EVENTS, "true"),
+            String.format("'%s'='%d'", HiveConf.ConfVars.REPL_APPROX_MAX_LOAD_TASKS, REPL_MAX_LOAD_TASKS)
+    );
+
+    //bootstrap run, config should have no effect
+    WarehouseInstance.Tuple bootstrapDump = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int)")
+            .run("insert into table t1 values (1)")
+            .dump(primaryDbName, incrementalBatchConfigs);
+
+    FileSystem fs = new Path(bootstrapDump.dumpLocation).getFileSystem(conf);
+
+    replica.load(replicatedDbName, primaryDbName, incrementalBatchConfigs)
+            .run("use " + replicatedDbName)
+            .run("select * from t1")
+            .verifyResults(new String[]{"1"});
+
+    //incremental run
+    WarehouseInstance.Tuple incrementalDump = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(2)")
+            .run("insert into t1 values(3)")
+            .run("insert into t1 values(4)")
+            .run("insert into t1 values(5)")
+            .dump(primaryDbName, incrementalBatchConfigs);
+
+    Path dumpPath = new Path(incrementalDump.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path ackLastEventID = new Path(dumpPath, ReplAck.EVENTS_DUMP.toString());
+    EventsDumpMetadata eventsDumpMetadata = EventsDumpMetadata.deserialize(ackLastEventID, conf);
+    assertTrue(eventsDumpMetadata.isEventsBatched());
+
+    int eventsCountInAckFile = eventsDumpMetadata.getEventsDumpedCount(), expectedEventsCount = 0;
+    String eventsBatchDirPrefix = ReplUtils.INC_EVENTS_BATCH.replaceAll("%d", "");
+
+    List<FileStatus> batchFiles = Arrays.stream(fs.listStatus(dumpPath))
+            .filter(fileStatus -> fileStatus.getPath().getName()
+                    .startsWith(eventsBatchDirPrefix)).collect(Collectors.toList());
+
+
+    for (FileStatus fileStatus : batchFiles) {
+      int eventsPerBatch = fs.listStatus(fileStatus.getPath()).length;
+      assertTrue(eventsPerBatch <= REPL_MAX_LOAD_TASKS);
+      expectedEventsCount += eventsPerBatch;
+    }
+    assertEquals(eventsCountInAckFile, expectedEventsCount);
+
+    // Repl Load should be agnostic of batch size and REPL_BATCH_INCREMENTAL_EVENTS config.
+    // hence not passing incrementalBatchConfigs here.
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("select * from t1")
+            .verifyResults(new String[]{"1", "2", "3", "4", "5"});
+
+    assertTrue(fs.exists(new Path(dumpPath, LOAD_ACKNOWLEDGEMENT.toString())));
+
+    ReplDumpWork.testDeletePreviousDumpMetaPath(true);
+    //second round of incremental dump.
+    incrementalDump = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(6)")
+            .run("insert into t1 values(7)")
+            .run("insert into t1 values(8)")
+            .run("insert into t1 values(9)")
+            .dump(primaryDbName, incrementalBatchConfigs);
+
+    // simulate a failure in repl dump when batching was enabled.
+    dumpPath = new Path(incrementalDump.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    batchFiles = Arrays.stream(fs.listStatus(dumpPath))
+            .filter(fileStatus -> fileStatus.getPath().getName()
+                    .startsWith(eventsBatchDirPrefix))
+            .sorted(new EventDumpDirComparator()).collect(Collectors.toList());
+
+
+    FileStatus lastBatch = batchFiles.get(batchFiles.size() - 1);
+    Path lastBatchPath = lastBatch.getPath();
+
+    FileStatus[] eventsOfLastBatch = fs.listStatus(lastBatchPath);
+    Arrays.sort(eventsOfLastBatch, new EventDumpDirComparator());
+    Map<FileStatus, Long> modificationTimes = batchFiles.stream().filter(file -> !Objects.equals(lastBatch, file))
+            .collect(Collectors.toMap(Function.identity(), FileStatus::getModificationTime));
+
+    long lastReplId = Long.parseLong(eventsOfLastBatch[0].getPath().getName()) - 1;
+    ackLastEventID = new Path(dumpPath, ReplAck.EVENTS_DUMP.toString());
+    eventsDumpMetadata = EventsDumpMetadata.deserialize(ackLastEventID, conf);
+    eventsDumpMetadata.setLastReplId(lastReplId);
+    eventsDumpMetadata.setEventsDumpedCount(eventsDumpMetadata.getEventsDumpedCount() - (eventsOfLastBatch.length - 1));
+    org.apache.hadoop.hive.ql.parse.repl.dump.Utils.writeOutput(eventsDumpMetadata.serialize(),
+            ackLastEventID,
+            primary.hiveConf);
+    fs.delete(new Path(dumpPath, DUMP_ACKNOWLEDGEMENT.toString()), false);
+    //delete all events of last batch except one.
+    for (int idx = 1; idx < eventsOfLastBatch.length; idx++)
+      fs.delete(eventsOfLastBatch[idx].getPath(), true);
+
+    // when we try to resume a failed dump which was batched without setting REPL_BATCH_INCREMENTAL_EVENTS = true
+    // in the next run dump should fail.
+    primary.dumpFailure(primaryDbName);
+    if (ReplUtils.failedWithNonRecoverableError(dumpPath, conf)) {
+      fs.delete(new Path(dumpPath, ReplAck.NON_RECOVERABLE_MARKER.toString()), false);
+    }
+
+    WarehouseInstance.Tuple dumpAfterFailure = primary.dump(primaryDbName, incrementalBatchConfigs);
+    //ensure dump did recover and dump location of new dump is same as the previous one.
+    assertEquals(dumpAfterFailure.dumpLocation, incrementalDump.dumpLocation);
+
+    List<FileStatus> filesAfterFailedDump = Arrays.stream(fs.listStatus(dumpPath))
+            .filter(fileStatus -> fileStatus.getPath().getName()
+                    .startsWith(eventsBatchDirPrefix))
+            .sorted(new EventDumpDirComparator()).collect(Collectors.toList());
+
+    //ensure all event files are dumped again.
+    assertEquals(batchFiles, filesAfterFailedDump);
+
+    //ensure last batch had events dumped and was indeed modified.
+    assertNotEquals(lastBatch.getModificationTime(),
+            filesAfterFailedDump.get(filesAfterFailedDump.size() - 1).getModificationTime());
+
+    assertArrayEquals(fs.listStatus(lastBatchPath),
+            fs.listStatus(filesAfterFailedDump.get(filesAfterFailedDump.size() - 1).getPath()));
+
+    //ensure remaining batches were not modified.
+    assertTrue(filesAfterFailedDump.stream()
+            .filter(file -> !Objects.equals(file, lastBatch))
+            .allMatch(file -> file.getModificationTime() == modificationTimes.get(file)));
+    //ensure successful repl load.
+    replica.load(replicatedDbName, primaryDbName)
+            .run("use " + replicatedDbName)
+            .run("select * from t1")
+            .verifyResults(new String[]{"1", "2", "3", "4", "5", "6", "7", "8", "9"});
+
+    ReplDumpWork.testDeletePreviousDumpMetaPath(false);
+  }
+  @Test
+  public void testEventsDumpedCountWithFilteringOfOpenTransactions() throws Throwable {
+    final int REPL_MAX_LOAD_TASKS = 5;
+    List<String> incrementalBatchConfigs = Arrays.asList(
+            String.format("'%s'='%s'", HiveConf.ConfVars.REPL_BATCH_INCREMENTAL_EVENTS, "true"),
+            String.format("'%s'='%d'", HiveConf.ConfVars.REPL_APPROX_MAX_LOAD_TASKS, REPL_MAX_LOAD_TASKS),
+            String.format("'%s'='%s'", HiveConf.ConfVars.REPL_FILTER_TRANSACTIONS, "true")
+    );
+
+    WarehouseInstance.Tuple bootstrapDump = primary.run("use " + primaryDbName)
+            .run("create table t1 (id int) stored as orc tblproperties (\"transactional\"=\"true\")")
+            .run("insert into table t1 values (1)")
+            .dump(primaryDbName, incrementalBatchConfigs);
+
+    FileSystem fs = new Path(bootstrapDump.dumpLocation).getFileSystem(conf);
+
+    replica.load(replicatedDbName, primaryDbName, incrementalBatchConfigs)
+            .run("use " + replicatedDbName)
+            .run("select * from t1")
+            .verifyResults(new String[]{"1"});
+
+    isMetricsEnabledForTests(true);
+    MetricCollector collector = MetricCollector.getInstance();
+    //incremental run
+    WarehouseInstance.Tuple incrementalDump = primary.run("use " + primaryDbName)
+            .run("insert into t1 values(2)")
+            .run("insert into t1 values(3)")
+            .run("select * from t1")  // will open a read only transaction which should be filtered.
+            .run("insert into t1 values(4)")
+            .run("insert into t1 values(5)")
+            .dump(primaryDbName, incrementalBatchConfigs);
+
+    ReplicationMetric metric = collector.getMetrics().getLast();
+    Stage stage = metric.getProgress().getStageByName("REPL_DUMP");
+    Metric eventMetric = stage.getMetricByName(ReplUtils.MetricName.EVENTS.name());
+    long eventCountFromMetrics = eventMetric.getTotalCount();
+
+    Path dumpPath = new Path(incrementalDump.dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path ackLastEventID = new Path(dumpPath, ReplAck.EVENTS_DUMP.toString());
+    EventsDumpMetadata eventsDumpMetadata = EventsDumpMetadata.deserialize(ackLastEventID, conf);
+
+    int eventsCountInAckFile = eventsDumpMetadata.getEventsDumpedCount(), eventCountFromStagingDir = 0;
+
+    String eventsBatchDirPrefix = ReplUtils.INC_EVENTS_BATCH.replaceAll("%d", "");
+    List<FileStatus> batchFiles = Arrays.stream(fs.listStatus(dumpPath))
+            .filter(fileStatus -> fileStatus.getPath().getName()
+                    .startsWith(eventsBatchDirPrefix)).collect(Collectors.toList());
+
+    for (FileStatus fileStatus : batchFiles) {
+      eventCountFromStagingDir += fs.listStatus(fileStatus.getPath()).length;
+    }
+    // open transactions were filtered.
+    assertTrue(eventCountFromStagingDir < eventCountFromMetrics);
+    // ensure event count is captured appropriately in EventsDumpMetadata.
+    assertEquals(eventsCountInAckFile, eventCountFromStagingDir);
+  }
+
+  @Test
+  public void testResumeWorkFlow() throws Throwable {
+    isMetricsEnabledForTests(true);
+
+    MetricCollector.getInstance().getMetrics().clear();
+
+    // Do bootstrap
+    primary.run("use " + primaryDbName)
+      .run("create table tb1(id int)")
+      .run("insert into tb1 values(10)")
+      .dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName);
+
+    // incremental
+    primary.run("use " + primaryDbName)
+      .run("insert into tb1 values(20)")
+      .dump(primaryDbName);
+    replica.load(replicatedDbName, primaryDbName);
+
+    // suppose this is the point of failover
+    List<String> failoverConfigs = Arrays.asList("'" + HiveConf.ConfVars.HIVE_REPL_FAILOVER_START + "'='true'");
+    primary.dump(primaryDbName, failoverConfigs);
+    replica.load(replicatedDbName, primaryDbName, failoverConfigs);
+
+    // let's modify replica/target after failover
+    replica.run("use " + replicatedDbName)
+      .run("insert into tb1 values(30),(40)")
+      .run("create table tb2(id int)")
+      .run("insert into tb2 values(10),(20)");
+
+    // orchestrator will do the swapping and setting correct db params
+    Map<String, String> dbParams = replica.getDatabase(replicatedDbName).getParameters();
+    String lastId = dbParams.get("repl.last.id");
+    String targetLastId = dbParams.get("repl.target.last.id");
+
+    primary.run("alter database " + primaryDbName
+      + " set dbproperties('repl.resume.started'='true', 'repl.source.for'='', 'repl.target" +
+      ".for'='true', 'repl.last.id'='" + targetLastId + "' ,'repl.target.last.id'='" + lastId +
+      "')");
+
+    replica.run("alter database " + replicatedDbName
+      + " set dbproperties('repl.target.for'='', 'repl.source.for'='p1','repl.resume" +
+      ".started'='true')");
+
+    // initiate RESET (1st cycle of optimised bootstrap)
+    primary.dump(primaryDbName);
+
+    MetricCollector collector = MetricCollector.getInstance();
+    ReplicationMetric metric = collector.getMetrics().getLast();
+    assertEquals(Status.RESUME_READY, metric.getProgress().getStatus());
+
+    replica.load(replicatedDbName, primaryDbName);
+    metric = collector.getMetrics().getLast();
+    assertEquals(Status.RESUME_READY, metric.getProgress().getStatus());
+
+    // this will be completion cycle for RESET
+    primary.dump(primaryDbName);
+    metric = collector.getMetrics().getLast();
+    assertEquals(metric.getProgress()
+                       .getStages()
+                       .get(0)
+                       .getMetrics()
+                       .stream()
+                       .filter(m -> Objects.equals(m.getName(), "TABLES"))
+                       .findFirst()
+                       .get()
+                       .getTotalCount(), 1);
+
+    replica.load(replicatedDbName, primaryDbName);
+    metric = collector.getMetrics().getLast();
+    assertEquals(metric.getProgress()
+                       .getStages()
+                       .get(0)
+                       .getMetrics()
+                       .stream()
+                       .filter(m -> Objects.equals(m.getName(), "TABLES"))
+                       .findFirst()
+                       .get()
+                       .getTotalCount(), 1);
+
+    // AFTER RESET : 1. New table got dropped
+    //               2. Changes made on existing table got discarded.
+    replica.run("use "+ replicatedDbName)
+           .run("select id from tb1")
+           .verifyResults(new String[]{"10", "20"})
+           .run("show tables in " + replicatedDbName)
+           .verifyResults(new String[]{"tb1"});
+
+    // verify that the db params got reset after RESUME
+    Map<String, String> srcParams = primary.getDatabase(primaryDbName).getParameters();
+    assertNotNull(srcParams.get("repl.source.for"));
+    assertNull(srcParams.get("repl.target.for"));
+    assertNull(srcParams.get("repl.resume.started"));
+    assertNull(srcParams.get("repl.target.last.id"));
+    assertNull(srcParams.get("repl.last.id"));
+
+    Map<String, String> targetParams = replica.getDatabase(replicatedDbName).getParameters();
+    assertTrue(Boolean.parseBoolean(targetParams.get("repl.target.for")));
+    assertNull(targetParams.get("repl.source.for"));
+    assertNull(targetParams.get("repl.resume.started"));
+    assertNotNull(targetParams.get("repl.target.last.id"));
+    assertNotNull(targetParams.get("repl.last.id"));
+  }
+
+  @Test
+  public void testSizeOfDatabaseReplicationViaDistCp() throws Throwable {
+    testSizeOfDatabaseReplication(true);
+  }
+
+  @Test
+  public void testSizeOfDatabaseReplicationViaRegularCopy() throws Throwable {
+    testSizeOfDatabaseReplication(false);
+
+  }
+  private void testSizeOfDatabaseReplication(boolean useDistcp) throws Throwable {
+    isMetricsEnabledForTests(true);
+    HiveConf primaryConf = primary.getConf();
+    HiveConf replicaConf = replica.getConf();
+
+    MetastoreConf.setTimeVar(primaryConf, MetastoreConf.ConfVars.REPL_METRICS_UPDATE_FREQUENCY, 10,
+        TimeUnit.MINUTES);
+    MetastoreConf.setTimeVar(replicaConf, MetastoreConf.ConfVars.REPL_METRICS_UPDATE_FREQUENCY, 10,
+        TimeUnit.MINUTES);
+
+    List<String> withClause = new ArrayList<>();
+    withClause.add("'" + HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET.varname + "'='true'");
+    if (useDistcp) {
+      List<String> clauseForDistcp = Arrays.asList(
+          "'" + HiveConf.ConfVars.HIVE_EXEC_COPYFILE_MAXSIZE.varname + "'='1'",
+          "'" + HiveConf.ConfVars.HIVE_IN_TEST_REPL.varname + "'='false'",
+          "'" + HiveConf.ConfVars.HIVE_EXEC_COPYFILE_MAXNUMFILES.varname + "'='0'",
+          "'" + HiveConf.ConfVars.HIVE_DISTCP_DOAS_USER.varname + "'='"
+              + UserGroupInformation.getCurrentUser().getUserName() + "'");
+      withClause.addAll(clauseForDistcp);
+    }
+
+    List<String> managedTblList = new ArrayList<String>();
+
+    primary.run("use " + primaryDbName);
+
+    int pt = 2;
+    for (int i = 0; i < 2; i++) {
+      primary.run("CREATE TABLE ptnmgned" + i + " (a int) partitioned by (b int)");
+      managedTblList.add("ptnmgned" + i);
+
+      for (int j = 0; j < pt; j++) {
+        primary.run("ALTER TABLE ptnmgned" + i + " ADD PARTITION(b=" + j + ")");
+        // insert some rows in each partitions of table
+        for (int k = 0; k < pt; k++) {
+          primary.run("INSERT INTO TABLE ptnmgned" + i + " PARTITION(b=" + j + ") VALUES (" + k + ")");
+        }
+      }
+    }
+    // create 2 un-partitioned table
+    for (int i = 0; i < 2; i++) {
+      primary.run("CREATE TABLE unptnmgned" + i + " (a int)");
+      managedTblList.add("unptnmgned" + i);
+      //insert some rows in each tables
+      for (int j = 0; j < 2; j++) {
+        primary.run("INSERT INTO TABLE unptnmgned" + i + " VALUES (" + j + ")");
+      }
+    }
+    // start bootstrap dump
+    WarehouseInstance.Tuple tuple = primary.dump(primaryDbName, withClause);
+
+    List<String> newTableList = new ArrayList<String>();
+    newTableList.addAll(managedTblList);
+
+    // start bootstrap load
+    replica.load(replicatedDbName, primaryDbName, withClause)
+        .run("use " + replicatedDbName)
+        .run("show tables")
+        .verifyResults(newTableList);
+
+    MetricCollector collector = MetricCollector.getInstance();
+    ReplicationMetric metric = collector.getMetrics().getLast();
+    double dataReplicationSizeInKB = metric.getMetadata().getReplicatedDBSizeInKB();
+    assertNotEquals(0.0, dataReplicationSizeInKB);
+
+    primary.run("use " + primaryDbName);
+    // create 2 un-partitioned table for incremental dump
+    for (int i = 0; i < 2; i++) {
+      primary.run("CREATE TABLE incrunptnmgned" + i + "(a int)");
+      managedTblList.add("incrunptnmgned" + i);
+      // insert some rows in each tables
+      for (int j = 0; j < 2; j++) {
+        primary.run("INSERT INTO TABLE incrunptnmgned" + i + " VALUES (" + j + ")");
+      }
+    }
+
+    for (int i = 0; i < 2; i++) {
+      //insert some rows in each tables
+      for (int j = 2; j < 4; j++) {
+        primary.run("INSERT INTO TABLE unptnmgned" + i + " VALUES (" + j + ")");
+      }
+    }
+
+    newTableList.clear();
+    newTableList.addAll(managedTblList);
+
+    //start incremental dump
+    WarehouseInstance.Tuple newTuple = primary.dump(primaryDbName, withClause);
+
+    //start incremental load
+    replica.load(replicatedDbName, primaryDbName, withClause)
+        .run("use " + replicatedDbName)
+        .run("show tables")
+        .verifyResults(newTableList);
+
+    metric = collector.getMetrics().getLast();
+    dataReplicationSizeInKB = metric.getMetadata().getReplicatedDBSizeInKB();
+    assertNotEquals(0.0, dataReplicationSizeInKB);
+
+    MetastoreConf.setTimeVar(primaryConf, MetastoreConf.ConfVars.REPL_METRICS_UPDATE_FREQUENCY, 1,
+        TimeUnit.MINUTES);
+    MetastoreConf.setTimeVar(replicaConf, MetastoreConf.ConfVars.REPL_METRICS_UPDATE_FREQUENCY, 1,
+        TimeUnit.MINUTES);
+    isMetricsEnabledForTests(false);
+  }
+
+  private void runCompaction(String dbName, String tblName, String partName, CompactionType compactionType)
+          throws Throwable {
+    HiveConf hiveConf = new HiveConf(primary.getConf());
+    TxnStore txnHandler = TxnUtils.getTxnStore(hiveConf);
+    markPreviousCompactionsAsComplete(txnHandler, hiveConf);
+    CompactionRequest rqst = new CompactionRequest(dbName, tblName, compactionType);
+    rqst.setPartitionname(partName);
+    txnHandler.compact(rqst);
+    hiveConf.setBoolVar(HiveConf.ConfVars.COMPACTOR_CRUD_QUERY_BASED, false);
+    runWorker(hiveConf);
+    runCleaner(hiveConf);
+  }
+
+  private void markPreviousCompactionsAsComplete(TxnStore txnHandler, HiveConf conf) throws Throwable {
+    Connection conn = TestTxnDbUtil.getConnection(conf);
+    Statement stmt = conn.createStatement();
+    ResultSet rs = stmt.executeQuery("select CQ_ID from COMPACTION_QUEUE");
+    List<Long> openCompactionIds = new ArrayList<>();
+    while (rs.next()) {
+      openCompactionIds.add(rs.getLong(1));
+    }
+    openCompactionIds.forEach(id->{
+      CompactionInfoStruct compactionInfoStruct = new CompactionInfoStruct();
+      compactionInfoStruct.setId(id);
+      CompactionInfo compactionInfo = CompactionInfo.compactionStructToInfo(compactionInfoStruct);
+      try {
+        txnHandler.markCompacted(compactionInfo);
+      } catch (MetaException e) {
+        throw new RuntimeException(e);
+      }
+    });
+  }
+
+  private FileStatus[] getDirsInTableLoc(WarehouseInstance wh, String db, String table) throws Throwable {
+    Path tblLoc = new Path(wh.getTable(db, table).getSd().getLocation());
+    FileSystem fs = tblLoc.getFileSystem(wh.getConf());
+    return fs.listStatus(tblLoc, EximUtil.getDirectoryFilter(fs));
+  }
+
+  private FileStatus[] getDirsInPartitionLoc(WarehouseInstance wh, Partition partition)
+          throws Throwable {
+    Path tblLoc = new Path(partition.getSd().getLocation());
+    FileSystem fs = tblLoc.getFileSystem(wh.getConf());
+    return fs.listStatus(tblLoc, EximUtil.getDirectoryFilter(fs));
+  }
+
+  private long getMinorCompactedTxnId(FileStatus[] fileStatuses) {
+    for (FileStatus fileStatus : fileStatuses) {
+      if (fileStatus.getPath().getName().startsWith(AcidUtils.DELTA_PREFIX)) {
+        AcidUtils.ParsedDeltaLight delta = AcidUtils.ParsedDelta.parse(fileStatus.getPath());
+        if (delta.getVisibilityTxnId() != 0) {
+          return delta.getVisibilityTxnId();
+        }
+      }
+    }
+    return -1;
+  }
+
+  private long getMajorCompactedWriteId(FileStatus[] fileStatuses, boolean replica) {
+    for (FileStatus fileStatus : fileStatuses) {
+      if (fileStatus.getPath().getName().startsWith(AcidUtils.BASE_PREFIX)) {
+        AcidUtils.ParsedBaseLight pbl = AcidUtils.ParsedBase.parseBase(fileStatus.getPath());
+        long writeId = pbl.getWriteId();
+        if (replica) {
+          assertEquals(0, pbl.getVisibilityTxnId());
+        }
+        return writeId;
+      }
+    }
+    return -1;
+  }
+
+  @Test
+  public void testAcidTablesBootstrapWithMajorCompaction() throws Throwable {
+    String tableName = testName.getMethodName();
+    String tableNamepart = testName.getMethodName() + "_part";
+    primary.run("use " + primaryDbName)
+            .run("create table " + tableName + " (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("insert into " + tableName + " values(1)")
+            .run("insert into " + tableName + " values(2)")
+            .run("create table " + tableNamepart + " (id int) partitioned by (part int) clustered by(id) " +
+                    "into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\") ")
+            .run("insert into " + tableNamepart + " values(1, 2)")
+            .run("insert into " + tableNamepart + " values(2, 2)");
+    runCompaction(primaryDbName, tableName, null, CompactionType.MAJOR);
+
+    List<Partition> partList = primary.getAllPartitions(primaryDbName, tableNamepart);
+    for (Partition part : partList) {
+      Table tbl = primary.getTable(primaryDbName, tableNamepart);
+      String partName = Warehouse.makePartName(tbl.getPartitionKeys(), part.getValues());
+      runCompaction(primaryDbName, tableNamepart, partName, CompactionType.MAJOR);
+    }
+
+    List<String> withClause = Arrays.asList(
+            "'" + HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET.varname + "'='true'");
+    WarehouseInstance.Tuple dump = primary.dump(primaryDbName, withClause);
+    replica.load(replicatedDbName, primaryDbName, withClause);
+    replica.run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{tableName, tableNamepart})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dump.lastReplicationId)
+            .run("select id from " + tableName + " order by id")
+            .verifyResults(new String[]{"1", "2"})
+            .run("select id from " + tableNamepart + " order by id")
+            .verifyResults(new String[]{"1", "2"});
+
+    FileStatus[] fileStatuses = getDirsInTableLoc(primary, primaryDbName, tableName);
+    long writeId = getMajorCompactedWriteId(fileStatuses, false);
+    assertTrue(writeId != -1);
+
+    fileStatuses = getDirsInTableLoc(replica, replicatedDbName, tableName);
+    // replica write id should be same as source write id.
+    assertEquals(writeId, getMajorCompactedWriteId(fileStatuses, true));
+
+    // check for partitioned table.
+    for (Partition part : partList) {
+      fileStatuses = getDirsInPartitionLoc(primary, part);
+      writeId = getMajorCompactedWriteId(fileStatuses, false);
+      assertTrue(writeId != -1);
+      Partition partReplica = replica.getPartition(replicatedDbName, tableNamepart, part.getValues());
+      fileStatuses = getDirsInPartitionLoc(replica, partReplica);
+      assertEquals(writeId, getMajorCompactedWriteId(fileStatuses, true));
+    }
+  }
+
+  @Test
+  public void testAcidTablesBootstrapWithMinorCompaction() throws Throwable {
+    String tableName = testName.getMethodName();
+    String tableNamepart = testName.getMethodName() + "_part";
+    primary.run("use " + primaryDbName)
+            .run("create table " + tableName + " (id int) clustered by(id) into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\")")
+            .run("insert into " + tableName + " values(1)")
+            .run("insert into " + tableName + " values(2)")
+            .run("create table " + tableNamepart + " (id int) partitioned by (part int) clustered by(id) " +
+                    "into 3 buckets stored as orc " +
+                    "tblproperties (\"transactional\"=\"true\") ")
+            .run("insert into " + tableNamepart + " values(1, 2)")
+            .run("insert into " + tableNamepart + " values(2, 2)");
+
+    runCompaction(primaryDbName, tableName, null, CompactionType.MINOR);
+
+    List<Partition> partList = primary.getAllPartitions(primaryDbName, tableNamepart);
+    for (Partition part : partList) {
+      Table tbl = primary.getTable(primaryDbName, tableNamepart);
+      String partName = Warehouse.makePartName(tbl.getPartitionKeys(), part.getValues());
+      runCompaction(primaryDbName, tableNamepart, partName, CompactionType.MINOR);
+    }
+    List<String> withClause = Arrays.asList(
+            "'" + HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET.varname + "'='true'");
+
+    WarehouseInstance.Tuple dump = primary.dump(primaryDbName, withClause);
+    replica.load(replicatedDbName, primaryDbName, withClause);
+    replica.run("use " + replicatedDbName)
+            .run("show tables")
+            .verifyResults(new String[]{tableName, tableNamepart})
+            .run("repl status " + replicatedDbName)
+            .verifyResult(dump.lastReplicationId)
+            .run("select id from " + tableName + " order by id")
+            .verifyResults(new String[]{"1", "2"})
+            .run("select id from " + tableNamepart + " order by id")
+            .verifyResults(new String[]{"1", "2"});
+
+    FileStatus[] fileStatuses = getDirsInTableLoc(primary, primaryDbName, tableName);
+    assertTrue(-1 != getMinorCompactedTxnId(fileStatuses));
+
+    fileStatuses = getDirsInTableLoc(replica, replicatedDbName, tableName);
+    Assert.assertEquals(-1, getMinorCompactedTxnId(fileStatuses));
+
+    // check for partitioned table.
+    for (Partition part : partList) {
+      fileStatuses = getDirsInPartitionLoc(primary, part);
+      assertTrue(-1 != getMinorCompactedTxnId(fileStatuses));
+      Partition partReplica = replica.getPartition(replicatedDbName, tableNamepart, part.getValues());
+      fileStatuses = getDirsInPartitionLoc(replica, partReplica);
+      assertTrue(-1 == getMinorCompactedTxnId(fileStatuses));
+    }
+  }
+
 }

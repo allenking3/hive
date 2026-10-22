@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.repl.atlas;
@@ -35,9 +36,15 @@ public class AtlasReplInfo {
   private String srcFsUri;
   private String tgtFsUri;
   private long timeStamp;
+  private Path tableListFile;
 
   public AtlasReplInfo(String atlasEndpoint, String srcDB, String tgtDB, String srcCluster,
                        String tgtCluster, Path stagingDir, HiveConf conf) {
+    this(atlasEndpoint, srcDB, tgtDB, srcCluster, tgtCluster, stagingDir, null, conf);
+  }
+
+  public AtlasReplInfo(String atlasEndpoint, String srcDB, String tgtDB, String srcCluster,
+                       String tgtCluster, Path stagingDir, Path tableListFile, HiveConf conf) {
     this.atlasEndpoint = atlasEndpoint;
     this.srcDB = srcDB;
     this.tgtDB = tgtDB;
@@ -45,6 +52,7 @@ public class AtlasReplInfo {
     this.tgtCluster = tgtCluster;
     this.stagingDir = stagingDir;
     this.conf = conf;
+    this.tableListFile = tableListFile;
   }
 
   public String getSrcDB() {
@@ -97,5 +105,17 @@ public class AtlasReplInfo {
 
   public void setTimeStamp(long timeStamp) {
     this.timeStamp = timeStamp;
+  }
+
+  public Path getTableListFile() {
+    return tableListFile;
+  }
+
+  public void setTableListFile(Path tableListFile) {
+    this.tableListFile = tableListFile;
+  }
+
+  public boolean isTableLevelRepl() {
+    return this.tableListFile != null;
   }
 }

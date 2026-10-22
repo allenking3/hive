@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.process.show.transactions;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 
 import java.io.DataOutputStream;
@@ -47,7 +48,7 @@ public class ShowTransactionsOperation extends DDLOperation<ShowTransactionsDesc
     GetOpenTxnsInfoResponse rsp = context.getDb().showTransactions();
 
     // Write the results into the file
-    try (DataOutputStream os = DDLUtils.getOutputStream(new Path(desc.getResFile()), context)) {
+    try (DataOutputStream os = ShowUtils.getOutputStream(new Path(desc.getResFile()), context)) {
       if (!sessionState.isHiveServerQuery()) {
         writeHeader(os);
       }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.common.format.datetime;
@@ -176,7 +177,7 @@ import java.util.stream.Collectors;
  *   - Retains the exact format (capitalization and length) provided in the pattern string. If p.m.
  *     is in the pattern, we expect a.m. or p.m. in the output; if AM is in the pattern, we expect
  *     AM or PM in the output. If the case is mixed (Am or aM) then the output case will match the
- *     case of the pattern's first character (Am => AM, aM => am).
+ *     case of the pattern's first character (Am =&gt; AM, aM =&gt; am).
  * - String to datetime conversion:
  *   - Conflicts with HH24 and SSSSS.
  *   - It doesn't matter which meridian indicator is in the pattern.
@@ -253,21 +254,21 @@ import java.util.stream.Collectors;
  * - Output is right padded with trailing spaces unless the pattern is marked with the fill mode
  *   modifier (FM). Capitalization happens as follows:
  *   - If the first letter of the pattern is lowercase then the output is lowercase:
- *     'mONTH' -> 'may'
+ *     'mONTH' -&gt; 'may'
  *   - If the first two letters of the pattern are uppercase then the output is uppercase:
- *     'MOnth' -> 'MAY'
+ *     'MOnth' -&gt; 'MAY'
  *   - If the first letter of the pattern is uppercase and the second is lowercase then the output
- *     is capitalized: 'Month' -> 'May'.
+ *     is capitalized: 'Month' -&gt; 'May'.
  * - For string to datetime conversion, the case of the pattern does not matter.
  *
  * MONTH|Month|month
  * Name of month of year
  * - For datetime to string conversion, will include trailing spaces up to length 9 (length of
  *   longest month of year name: "September"). Case is taken into account according to the
- *   following example (pattern => output):
- *   - MONTH => JANUARY
- *   - Month => January
- *   - month => january
+ *   following example (pattern =&gt; output):
+ *   - MONTH =&gt; JANUARY
+ *   - Month =&gt; January
+ *   - month =&gt; january
  * - For string to datetime conversion, neither the case of the pattern nor the case of the input
  *   are taken into account.
  * - For string to datetime conversion, conflicts with MM and MON.
@@ -276,10 +277,10 @@ import java.util.stream.Collectors;
  * MON|Mon|mon
  * Abbreviated name of month of year
  * - For datetime to string conversion, case is taken into account according to the following
- *   example (pattern => output):
- *   - MON => JAN
- *   - Mon => Jan
- *   - mon => jan
+ *   example (pattern =&gt; output):
+ *   - MON =&gt; JAN
+ *   - Mon =&gt; Jan
+ *   - mon =&gt; jan
  * - For string to datetime conversion, neither the case of the pattern nor the case of the input
  *   are taken into account.
  * - For string to datetime conversion, conflicts with MM and MONTH.
@@ -289,7 +290,7 @@ import java.util.stream.Collectors;
  * Name of day of week
  * - For datetime to string conversion, will include trailing spaces until length is 9 (length of
  *   longest day of week name: "Wednesday"). Case is taken into account according to the following
- *   example (pattern => output):
+ *   example (pattern =&gt; output):
  *   - DAY = SUNDAY
  *   - Day = Sunday
  *   - day = sunday
@@ -300,7 +301,7 @@ import java.util.stream.Collectors;
  * DY|Dy|dy
  * Abbreviated name of day of week
  * - For datetime to string conversion, case is taken into account according to the following
- *   example (pattern => output):
+ *   example (pattern =&gt; output):
  *   - DY = SUN
  *   - Dy = Sun
  *   - dy = sun
@@ -329,11 +330,11 @@ import java.util.stream.Collectors;
  *   zone agnostic.
  *
  * C. Separators
- * -|.|/|,|'|;|:|<space>
+ * -|.|/|,|'|;|:|&lt;space&gt;
  * Separator
  * - Uses loose matching. Existence of a sequence of separators in the format should match the
  *   existence of a sequence of separators in the input regardless of the types of the separator or
- *   the length of the sequence where length > 1. E.g. input=“2019-. ;10/10”, pattern=“YYYY-MM-DD”
+ *   the length of the sequence where length &gt; 1. E.g. input=“2019-. ;10/10”, pattern=“YYYY-MM-DD”
  *   is valid; input=“20191010”, pattern=“YYYY-MM-DD” is not valid.
  * - If the last separator character in the separator substring is "-" and is immediately followed
  *   by a time zone hour (tzh) token, it's a negative sign and not counted as a separator, UNLESS
@@ -847,8 +848,10 @@ public class HiveSqlDateTimeFormatter implements Serializable {
         !(temporalFields.contains(ChronoField.MONTH_OF_YEAR) &&
             temporalFields.contains(ChronoField.DAY_OF_MONTH) ||
             temporalFields.contains(ChronoField.DAY_OF_YEAR))) {
-      throw new IllegalArgumentException("Missing day of year or (month of year + day of month)"
-          + " tokens.");
+      throw new IllegalArgumentException("""
+          Missing day of year or (month of year + day of month)\
+           tokens.\
+          """);
     }
     if (containsIsoFields &&
         !(temporalFields.contains(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
@@ -856,8 +859,10 @@ public class HiveSqlDateTimeFormatter implements Serializable {
       throw new IllegalArgumentException("Missing week of year (iw) or day of week (id) tokens.");
     }
     if (roundYearCount > 0 && yearCount > 0) {
-      throw new IllegalArgumentException("Invalid duplication of format element: Both year and"
-          + "round year are provided");
+      throw new IllegalArgumentException("""
+          Invalid duplication of format element: Both year and\
+          round year are provided\
+          """);
     }
     for (TemporalField tokenType : temporalFields) {
       if (Collections.frequency(temporalFields, tokenType) > 1) {
@@ -1281,8 +1286,10 @@ public class HiveSqlDateTimeFormatter implements Serializable {
         return 0;
       }
       if ("0".equals(substring)) {
-        throw new IllegalArgumentException("Value of hour of day (hh/hh12) in input is 0. "
-            + "The value should be between 1 and 12.");
+        throw new IllegalArgumentException("""
+            Value of hour of day (hh/hh12) in input is 0. \
+            The value should be between 1 and 12.\
+            """);
       }
     }
     if (token.temporalField == ChronoField.YEAR

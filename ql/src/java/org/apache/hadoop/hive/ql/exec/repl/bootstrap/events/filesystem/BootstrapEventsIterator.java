@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.repl.bootstrap.events.filesystem;
 
@@ -118,6 +119,10 @@ public class BootstrapEventsIterator implements Iterator<BootstrapEvent> {
     this.dbNameToLoadIn = dbNameToLoadIn;
     this.needLogger = needLogger;
     this.hiveConf = hiveConf;
+    if (needLogger) {
+      String dbName = StringUtils.isBlank(dbNameToLoadIn) ? "" : dbNameToLoadIn;
+      replLogger = new BootstrapLoadLogger(dbName, dumpDirectory, 0, 0);
+    }
   }
 
   @Override
@@ -179,7 +184,11 @@ public class BootstrapEventsIterator implements Iterator<BootstrapEvent> {
       long numTables = getNumTables(dbDumpPath, fs);
       long numFunctions = getNumFunctions(dbDumpPath, fs);
       String dbName = StringUtils.isBlank(dbNameToLoadIn) ? dbDumpPath.getName() : dbNameToLoadIn;
-      replLogger = new BootstrapLoadLogger(dbName, dumpDirectory, numTables, numFunctions);
+      if (replLogger != null) {
+        replLogger.setParams(dbName, dumpDirectory, numTables, numFunctions);
+      } else {
+        replLogger = new BootstrapLoadLogger(dbName, dumpDirectory, numTables, numFunctions);
+      }
       replLogger.startLog();
     } catch (IOException e) {
       // Ignore the exception

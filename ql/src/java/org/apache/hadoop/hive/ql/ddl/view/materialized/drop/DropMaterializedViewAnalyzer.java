@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.view.materialized.drop;
@@ -26,6 +27,8 @@ import org.apache.hadoop.hive.ql.ddl.DDLSemanticAnalyzerFactory.DDLType;
 import org.apache.hadoop.hive.ql.exec.TaskFactory;
 import org.apache.hadoop.hive.ql.hooks.ReadEntity;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
+import org.apache.hadoop.hive.ql.hooks.WriteEntity.WriteType;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
 import org.apache.hadoop.hive.ql.metadata.Table;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.BaseSemanticAnalyzer;
@@ -50,7 +53,10 @@ public class DropMaterializedViewAnalyzer extends BaseSemanticAnalyzer {
     Table materializedView = getTable(viewName, throwException);
     if (materializedView != null) {
       inputs.add(new ReadEntity(materializedView));
-      outputs.add(new WriteEntity(materializedView, WriteEntity.WriteType.DDL_EXCLUSIVE));
+
+      boolean tableWithSuffix = AcidUtils.isTableSoftDeleteEnabled(materializedView, conf);
+      outputs.add(new WriteEntity(materializedView,
+        tableWithSuffix ? WriteType.DDL_EXCL_WRITE : WriteType.DDL_EXCLUSIVE));
     }
 
     DropMaterializedViewDesc desc = new DropMaterializedViewDesc(viewName, ifExists);

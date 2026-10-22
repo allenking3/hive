@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.jdbc;
@@ -83,7 +84,6 @@ public abstract class BaseJdbcWithMiniLlap {
   // This method should be called by sub-classes in a @BeforeClass initializer
   public static MiniHS2 beforeTest(HiveConf inputConf) throws Exception {
     conf = inputConf;
-    Class.forName(MiniHS2.getJdbcDriverName());
     miniHS2 = new MiniHS2(conf, MiniClusterType.LLAP);
     dataFileDir = conf.get("test.data.files").replace('\\', '/').replace("c:", "");
     kvDataFilePath = new Path(dataFileDir, "kv1.txt");
@@ -91,7 +91,6 @@ public abstract class BaseJdbcWithMiniLlap {
     over10KFilePath = new Path(dataFileDir, "over10k");
     Map<String, String> confOverlay = new HashMap<String, String>();
     miniHS2.start(confOverlay);
-    miniHS2.getDFS().getFileSystem().mkdirs(new Path("/apps_staging_dir/anonymous"));
     return miniHS2;
   }
 
@@ -499,10 +498,12 @@ public abstract class BaseJdbcWithMiniLlap {
     assertEquals(0, c5Value.size());
 
     Map<?,?> c6Value = (Map<?,?>) rowValues[5];
-    assertEquals(0, c6Value.size());
+    assertEquals(1, c6Value.size());
+    assertEquals(null, c6Value.get(1));
 
     Map<?,?> c7Value = (Map<?,?>) rowValues[6];
-    assertEquals(0, c7Value.size());
+    assertEquals(1, c7Value.size());
+    assertEquals("b", c7Value.get("a"));
 
     List<?> c8Value = (List<?>) rowValues[7];
     assertEquals(null, c8Value.get(0));
@@ -518,7 +519,10 @@ public abstract class BaseJdbcWithMiniLlap {
     assertEquals(0, c13Value.size());
 
     Map<?,?> c14Value = (Map<?,?>) rowValues[13];
-    assertEquals(0, c14Value.size());
+    assertEquals(1, c14Value.size());
+    Map<?,?> mapVal = (Map<?,?>) c14Value.get(Integer.valueOf(1));
+    assertEquals(1, mapVal.size());
+    assertEquals(100, mapVal.get(Integer.valueOf(10)));
 
     List<?> c15Value = (List<?>) rowValues[14];
     assertEquals(null, c15Value.get(0));
@@ -553,8 +557,9 @@ public abstract class BaseJdbcWithMiniLlap {
     assertEquals("y", c6Value.get(Integer.valueOf(2)));
 
     c7Value = (Map<?,?>) rowValues[6];
-    assertEquals(1, c7Value.size());
+    assertEquals(2, c7Value.size());
     assertEquals("v", c7Value.get("k"));
+    assertEquals("c", c7Value.get("b"));
 
     c8Value = (List<?>) rowValues[7];
     assertEquals("a", c8Value.get(0));
@@ -577,7 +582,7 @@ public abstract class BaseJdbcWithMiniLlap {
 
     c14Value = (Map<?,?>) rowValues[13];
     assertEquals(2, c14Value.size());
-    Map<?,?> mapVal = (Map<?,?>) c14Value.get(Integer.valueOf(1));
+    mapVal = (Map<?,?>) c14Value.get(Integer.valueOf(1));
     assertEquals(2, mapVal.size());
     assertEquals(Integer.valueOf(12), mapVal.get(Integer.valueOf(11)));
     assertEquals(Integer.valueOf(14), mapVal.get(Integer.valueOf(13)));
@@ -711,8 +716,6 @@ public abstract class BaseJdbcWithMiniLlap {
         rowProcessor.process(row);
         ++rowCount;
       }
-       //In arrow-mode this will throw exception unless all buffers have been released
-       //See org.apache.hadoop.hive.llap.LlapArrowBatchRecordReader
       reader.close();
     }
     LlapBaseInputFormat.close(handleId);

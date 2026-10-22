@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.llap.cache;
 
@@ -179,7 +180,7 @@ public class LowLevelCacheImpl implements LowLevelCache, BufferUsageManager, Lla
   }
 
   @Override
-  public long markBuffersForProactiveEviction(Predicate<CacheTag> predicate) {
+  public long markBuffersForProactiveEviction(Predicate<CacheTag> predicate, boolean isInstantDeallocation) {
     long markedBytes = 0;
     // Proactive eviction does not need to be perfectly accurate - the iterator returned here might be missing some
     // concurrent inserts / removals but it's fine for us here.
@@ -191,6 +192,9 @@ public class LowLevelCacheImpl implements LowLevelCache, BufferUsageManager, Lla
           Collection<LlapDataBuffer> buffers = fileCache.getCache().values();
           for (LlapDataBuffer buffer : buffers) {
             markedBytes += buffer.markForEviction();
+            if (isInstantDeallocation) {
+              allocator.deallocate(buffer);
+            }
           }
         } finally {
           fileCache.decRef();
@@ -332,6 +336,7 @@ public class LowLevelCacheImpl implements LowLevelCache, BufferUsageManager, Lla
         while (true) { // Overwhelmingly executes once, or maybe twice (replacing stale value).
           LlapDataBuffer oldVal = subCache.getCache().putIfAbsent(offset, buffer);
           if (oldVal == null) {
+            buffer.setStart(offset);
             buffer.setFileCache(subCache);
             // Cached successfully, add to policy.
             cachePolicy.cache(buffer, priority);

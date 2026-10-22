@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.udf.generic;
 
@@ -173,8 +174,8 @@ public class TestGenericUDFAddMonths {
     ObjectInspector[] arguments = { valueOI0, valueOI1 };
 
     udf.initialize(arguments);
-    runAndVerify("2014-02-30", 1, "2014-04-02", udf);
-    runAndVerify("2014-02-32", 1, "2014-04-04", udf);
+    runAndVerify("2014-02-30", 1, null, udf);
+    runAndVerify("2014-02-32", 1, null, udf);
     runAndVerify("2014-01", 1, null, udf);
   }
 
@@ -187,8 +188,8 @@ public class TestGenericUDFAddMonths {
 
     udf.initialize(arguments);
 
-    runAndVerify("2014-02-30 10:30:00", 1, "2014-04-02", udf);
-    runAndVerify("2014-02-32 10:30:00", 1, "2014-04-04", udf);
+    runAndVerify("2014-02-30 10:30:00", 1, null, udf);
+    runAndVerify("2014-02-32 10:30:00", 1, null, udf);
     runAndVerify("2014/01/31 10:30:00", 1, null, udf);
     runAndVerify("2014-01-31T10:30:00", 1, "2014-02-28", udf);
   }

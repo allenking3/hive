@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.drop;
@@ -21,6 +22,7 @@ package org.apache.hadoop.hive.ql.ddl.table.drop;
 import org.apache.hadoop.hive.common.TableName;
 import org.apache.hadoop.hive.llap.LlapHiveUtils;
 import org.apache.hadoop.hive.llap.ProactiveEviction;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
 import org.apache.hadoop.hive.ql.ddl.DDLUtils;
@@ -35,6 +37,8 @@ import org.apache.hadoop.hive.ql.parse.HiveTableName;
 import org.apache.hadoop.hive.ql.parse.ReplicationSpec;
 
 import com.google.common.collect.Iterables;
+
+import java.util.Map;
 
 /**
  * Operation process of dropping a table.
@@ -73,7 +77,7 @@ public class DropTableOperation extends DDLOperation<DropTableDesc> {
        * to repeats. What can happen, sometimes, is that a drone processing a replication task can
        * have been abandoned for not returning in time, but still execute its task after a while,
        * which should not result in it mucking up data that has been impressed later on. So, for eg.,
-       * if we create partition P1, followed by droppping it, followed by creating it yet again,
+       * if we create partition P1, followed by dropping it, followed by creating it yet again,
        * the replication of that drop should not drop the newer partition if it runs after the destination
        * object is already in the newer state.
        *
@@ -86,15 +90,18 @@ public class DropTableOperation extends DDLOperation<DropTableDesc> {
        * drop the partitions inside it that are older than this event. To wit, DROP TABLE FOR REPL
        * acts like a recursive DROP TABLE IF OLDER.
        */
-      if (!replicationSpec.allowEventReplacementInto(table.getParameters())) {
-        // Drop occured as part of replicating a drop, but the destination
+      Map<String, String> dbParams = context.getDb().getDatabase(table.getDbName()).getParameters();
+      if (!replicationSpec.allowEventReplacementInto(dbParams)) {
+        // Drop occurred as part of replicating a drop, but the destination
         // table was newer than the event being replicated. Ignore, but drop
         // any partitions inside that are older.
         if (table.isPartitioned()) {
           PartitionIterable partitions = new PartitionIterable(context.getDb(), table, null,
               MetastoreConf.getIntVar(context.getConf(), MetastoreConf.ConfVars.BATCH_RETRIEVE_MAX));
-          for (Partition p : Iterables.filter(partitions, replicationSpec.allowEventReplacementInto())) {
-            context.getDb().dropPartition(table.getDbName(), table.getTableName(), p.getValues(), true);
+          for (Partition p : partitions) {
+            if (replicationSpec.allowEventReplacementInto(dbParams)) {
+              context.getDb().dropPartition(table.getDbName(), table.getTableName(), p.getValues(), true);
+            }
           }
         }
         LOG.debug("DDLTask: Drop Table is skipped as table {} is newer than update", desc.getTableName());
@@ -103,13 +110,13 @@ public class DropTableOperation extends DDLOperation<DropTableDesc> {
     }
 
     // TODO: API w/catalog name
-    context.getDb().dropTable(desc.getTableName(), desc.isPurge());
+    context.getDb().dropTable(table, desc.isPurge());
     DDLUtils.addIfAbsentByName(new WriteEntity(table, WriteEntity.WriteType.DDL_NO_LOCK), context);
 
     if (LlapHiveUtils.isLlapMode(context.getConf())) {
       TableName tableName = HiveTableName.of(table);
       ProactiveEviction.Request.Builder llapEvictRequestBuilder = ProactiveEviction.Request.Builder.create();
-      llapEvictRequestBuilder.addTable(tableName.getDb(), tableName.getTable());
+      llapEvictRequestBuilder.addTable(table.getCatName(), tableName.getDb(), tableName.getTable());
       ProactiveEviction.evict(context.getConf(), llapEvictRequestBuilder.build());
     }
 

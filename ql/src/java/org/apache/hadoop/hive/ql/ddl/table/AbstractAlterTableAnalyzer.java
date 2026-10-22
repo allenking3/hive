@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table;
@@ -21,8 +22,13 @@ package org.apache.hadoop.hive.ql.ddl.table;
 import java.util.Map;
 
 import org.apache.hadoop.hive.common.TableName;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
+import org.apache.hadoop.hive.ql.Context;
 import org.apache.hadoop.hive.ql.QueryState;
+import org.apache.hadoop.hive.ql.ddl.DDLDesc.DDLDescWithWriteId;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.ql.metadata.Table;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.HiveParser;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
@@ -52,6 +58,9 @@ public abstract class AbstractAlterTableAnalyzer extends AbstractBaseAlterTableA
       if (command.getType() == HiveParser.TOK_ALTERTABLE_RENAMEPART) {
         partitionSpec = getPartSpec(partitionSpecNode);
       } else {
+        if (command.getType() == HiveParser.TOK_ALTERTABLE_COMPACT) {
+          HiveConf.setVar(conf, HiveConf.ConfVars.REWRITE_POLICY, Context.RewritePolicy.PARTITION.name());
+        }
         partitionSpec = getValidatedPartSpec(getTable(tableName), partitionSpecNode, conf, false);
       }
     }
@@ -61,4 +70,11 @@ public abstract class AbstractAlterTableAnalyzer extends AbstractBaseAlterTableA
 
   protected abstract void analyzeCommand(TableName tableName, Map<String, String> partitionSpec, ASTNode command)
       throws SemanticException;
+
+  protected void setAcidDdlDesc(Table table, DDLDescWithWriteId desc) {
+
+    if (AcidUtils.isTransactionalTable(table)) {
+      setAcidDdlDesc(desc);
+    }
+  }
 }

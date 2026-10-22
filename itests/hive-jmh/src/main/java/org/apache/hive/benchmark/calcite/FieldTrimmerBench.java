@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hive.benchmark.calcite;
 
@@ -55,13 +56,13 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
  * This test measures the performance for field trimmer.
- * <p/>
+ * <p>
  * This test uses JMH framework for benchmarking.
  * You may execute this benchmark tool using JMH command line in different ways:
- * <p/>
+ * <p>
  * To use the settings shown in the main() function, use:
  * $ java -cp target/benchmarks.jar org.apache.hive.benchmark.calcite.FieldTrimmerBench
- * <p/>
+ * <p>
  * To use the default settings used by JMH, use:
  * $ java -jar target/benchmarks.jar org.apache.hive.benchmark.calcite.FieldTrimmerBench
  */

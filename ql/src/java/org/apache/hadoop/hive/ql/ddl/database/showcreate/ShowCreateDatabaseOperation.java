@@ -9,19 +9,22 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.database.showcreate;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
 
 import java.io.DataOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.ql.ddl.DDLOperation;
@@ -39,7 +42,7 @@ public class ShowCreateDatabaseOperation extends DDLOperation<ShowCreateDatabase
 
   @Override
   public int execute() throws HiveException {
-    DataOutputStream outStream = DDLUtils.getOutputStream(desc.getResFile(), context);
+    DataOutputStream outStream = ShowUtils.getOutputStream(desc.getResFile(), context);
     try {
       return showCreateDatabase(outStream);
     } catch (Exception e) {
@@ -50,7 +53,7 @@ public class ShowCreateDatabaseOperation extends DDLOperation<ShowCreateDatabase
   }
 
   private int showCreateDatabase(DataOutputStream outStream) throws Exception {
-    Database database = context.getDb().getDatabase(desc.getDatabaseName());
+    Database database = context.getDb().getDatabase(desc.getCatalogName(), desc.getDatabaseName());
 
     StringBuilder createDbCommand = new StringBuilder();
     createDbCommand.append("CREATE DATABASE `").append(database.getName()).append("`\n");
@@ -64,13 +67,13 @@ public class ShowCreateDatabaseOperation extends DDLOperation<ShowCreateDatabase
       createDbCommand.append("MANAGEDLOCATION\n  '");
       createDbCommand.append(database.getManagedLocationUri()).append("'\n");
     }
-    String propertiesToString = DDLUtils.propertiesToString(database.getParameters(), null);
+    String propertiesToString = ShowUtils.propertiesToString(database.getParameters(), Collections.emptySet());
     if (!propertiesToString.isEmpty()) {
       createDbCommand.append("WITH DBPROPERTIES (\n");
       createDbCommand.append(propertiesToString).append(")\n");
     }
 
-    outStream.write(createDbCommand.toString().getBytes("UTF-8"));
+    outStream.write(createDbCommand.toString().getBytes(StandardCharsets.UTF_8));
     return 0;
   }
 }

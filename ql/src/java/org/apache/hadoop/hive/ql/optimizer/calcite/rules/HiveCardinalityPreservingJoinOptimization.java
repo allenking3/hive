@@ -9,15 +9,17 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.rules;
 
 import static java.util.Collections.singletonList;
+import static org.apache.hadoop.hive.ql.optimizer.calcite.HiveCalciteUtil.findRexTableInputRefs;
 
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -41,8 +43,6 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexTableInputRef;
 import org.apache.calcite.rex.RexUtil;
-import org.apache.calcite.rex.RexVisitor;
-import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.ImmutableBitSet;
@@ -255,7 +255,7 @@ public class HiveCardinalityPreservingJoinOptimization extends HiveRelFieldTrimm
       }
 
       RexNode rexNode = expressionLineage.iterator().next();
-      List<RexTableInputRef> refs = rexTableInputRef(rexNode);
+      Set<RexTableInputRef> refs = findRexTableInputRefs(rexNode);
       if (refs.isEmpty()) {
         if (!RexUtil.isConstant(rexNode)) {
           LOG.debug("Unknown expression that should be a constant: {}", rexNode);
@@ -278,20 +278,6 @@ public class HiveCardinalityPreservingJoinOptimization extends HiveRelFieldTrimm
     return tablesOrdered.stream()
         .map(relOptHiveTable -> fieldMappingBuilders.get(relOptHiveTable).build())
         .collect(Collectors.toList());
-  }
-
-  public List<RexTableInputRef> rexTableInputRef(RexNode rexNode) {
-    List<RexTableInputRef> rexTableInputRefList = new ArrayList<>();
-    RexVisitor<RexTableInputRef> visitor = new RexVisitorImpl<RexTableInputRef>(true) {
-      @Override
-      public RexTableInputRef visitTableInputRef(RexTableInputRef ref) {
-        rexTableInputRefList.add(ref);
-        return ref;
-      }
-    };
-
-    rexNode.accept(visitor);
-    return rexTableInputRefList;
   }
 
   private RexNode joinCondition(

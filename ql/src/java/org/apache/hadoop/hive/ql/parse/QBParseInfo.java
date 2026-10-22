@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse;
@@ -53,6 +54,7 @@ public class QBParseInfo {
   private String alias;
   private ASTNode joinExpr;
   private ASTNode hints;
+  private ASTNode colAliases;
   private List<ASTNode> hintList;
   private final Map<String, ASTNode> aliasToSrc;
   /**
@@ -73,6 +75,7 @@ public class QBParseInfo {
   private final Set<String> destCubes;
   private final Set<String> destGroupingSets;
   private final Map<String, ASTNode> destToHaving;
+  private final Map<String, ASTNode> destToQualify;
   private final Map<String, Boolean> destToOpType;
   // insertIntoTables/insertOverwriteTables map a table's fullName to its ast;
   private final Map<String, ASTNode> insertIntoTables;
@@ -125,6 +128,9 @@ public class QBParseInfo {
   // used by Windowing
   private final Map<String, Map<String, ASTNode>> destToWindowingExprs;
 
+  // is the query insert overwrite directory
+  private boolean isInsertOverwriteDir = false;
+
 
   @SuppressWarnings("unused")
   private static final Logger LOG = LoggerFactory.getLogger(QBParseInfo.class.getName());
@@ -140,6 +146,7 @@ public class QBParseInfo {
     destToWhereExpr = new HashMap<String, ASTNode>();
     destToGroupby = new HashMap<String, ASTNode>();
     destToHaving = new HashMap<String, ASTNode>();
+    destToQualify = new HashMap<>();
     destToClusterby = new HashMap<String, ASTNode>();
     destToDistributeby = new HashMap<String, ASTNode>();
     destToSortby = new HashMap<String, ASTNode>();
@@ -205,8 +212,11 @@ public class QBParseInfo {
   /**
    * See also {@link #getInsertOverwriteTables()}
    */
-  public boolean isInsertIntoTable(String dbName, String table) {
-    String fullName = dbName + "." + table;
+  public boolean isInsertIntoTable(String dbName, String table, String branchName) {
+    String  fullName = dbName + "." + table;
+    if (branchName != null) {
+      fullName += "." + branchName;
+    }
     return insertIntoTables.containsKey(fullName.toLowerCase());
   }
 
@@ -218,6 +228,10 @@ public class QBParseInfo {
    */
   public boolean isInsertIntoTable(String fullTableName) {
     return insertIntoTables.containsKey(fullTableName.toLowerCase());
+  }
+
+  public void setInsertOverwriteDirectory(boolean isInsertOverwriteDir) {
+    this.isInsertOverwriteDir = isInsertOverwriteDir;
   }
 
   public Map<String, ASTNode> getAggregationExprsForClause(String clause) {
@@ -646,6 +660,18 @@ public class QBParseInfo {
     return destToLateralView;
   }
 
+  public void setQualifyExprForClause(String dest, ASTNode ast) {
+    destToQualify.put(dest, ast);
+  }
+
+  public ASTNode getQualifyExprForClause(String dest) {
+    return destToQualify.get(dest);
+  }
+
+  public boolean hasQualifyClause() {
+    return !destToQualify.isEmpty();
+  }
+
   protected static enum ClauseType {
     CLUSTER_BY_CLAUSE,
     DISTRIBUTE_BY_CLAUSE,
@@ -684,6 +710,10 @@ public class QBParseInfo {
 
   public boolean hasInsertTables() {
     return this.insertIntoTables.size() > 0 || this.insertOverwriteTables.size() > 0;
+  }
+
+  public boolean isInsertOverwriteDirectory() {
+    return isInsertOverwriteDir;
   }
 
   /**
@@ -725,6 +755,14 @@ public class QBParseInfo {
     }
 
     return true;
+  }
+
+  public ASTNode getColAliases() {
+    return colAliases;
+  }
+
+  public void setColAliases(ASTNode colAliases) {
+    this.colAliases = colAliases;
   }
 }
 

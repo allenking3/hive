@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.column.update;
@@ -57,7 +58,8 @@ public class AlterTableUpdateColumnsOperation extends AbstractAlterTableOperatio
     Deserializer deserializer = table.getDeserializer(true);
     try {
       LOG.info("Updating metastore columns for table: {}", table.getTableName());
-      List<FieldSchema> fields = HiveMetaStoreUtils.getFieldsFromDeserializer(table.getTableName(), deserializer);
+      List<FieldSchema> fields = HiveMetaStoreUtils.getFieldsFromDeserializer(table.getTableName(), deserializer,
+          context.getConf());
       StorageDescriptor sd = getStorageDescriptor(table, partition);
       sd.setCols(fields);
     } catch (org.apache.hadoop.hive.serde2.SerDeException | MetaException e) {

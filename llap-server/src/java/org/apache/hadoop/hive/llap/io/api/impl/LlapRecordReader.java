@@ -9,18 +9,23 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.io.api.impl;
 
 import java.util.ArrayList;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -47,6 +52,7 @@ import org.apache.hadoop.hive.ql.exec.TableScanOperator;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatchCtx;
 import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.ql.io.BucketIdentifier;
 import org.apache.hadoop.hive.ql.io.orc.OrcInputFormat;
 import org.apache.hadoop.hive.ql.io.orc.OrcRecordUpdater;
 import org.apache.hadoop.hive.ql.io.orc.OrcSplit;
@@ -57,6 +63,7 @@ import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.plan.MapWork;
+import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector.Category;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
@@ -68,12 +75,15 @@ import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
+import org.apache.orc.OrcConf;
 import org.apache.orc.TypeDescription;
 import org.apache.orc.impl.SchemaEvolution;
 import org.apache.tez.common.counters.TezCounters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+
+import static org.apache.hadoop.hive.llap.LlapHiveUtils.throwIfCacheOnlyRead;
 
 class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>, Consumer<ColumnVectorBatch> {
 
@@ -82,12 +92,14 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
 
   private final FileSplit split;
   private final IncludesImpl includes;
+  private final List<Integer> missingColIndices;
   private final SearchArgument sarg;
   private final VectorizedRowBatchCtx rbCtx;
   private final boolean isVectorized;
   private final boolean probeDecodeEnabled;
   private VectorizedOrcAcidRowBatchReader acidReader;
-  private final Object[] partitionValues;
+  private Object[] partitionValues;
+  private VectorizedRowBatch acidInputVrb;
 
   private final ArrayBlockingQueue<Object> queue;
   private final AtomicReference<Throwable> pendingError = new AtomicReference<>(null);
@@ -108,6 +120,7 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
   private final ExecutorService executor;
   private final boolean isAcidScan;
   private final boolean isAcidFormat;
+  private final BucketIdentifier bucketIdentifier;
 
   /**
    * Creates the record reader and checks the input-specific compatibility.
@@ -123,6 +136,7 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
         cvp, executor, sourceInputFormat, sourceSerDe, reporter, daemonConf);
     if (!rr.checkOrcSchemaEvolution()) {
       rr.close();
+      throwIfCacheOnlyRead(HiveConf.getBoolVar(job, ConfVars.LLAP_IO_CACHE_ONLY));
       return null;
     }
     return rr;
@@ -139,7 +153,7 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     this.sarg = ConvertAstToSearchArg.createFromConf(job);
     final String fragmentId = LlapTezUtils.getFragmentId(job);
     final String dagId = LlapTezUtils.getDagId(job);
-    final String queryId = HiveConf.getVar(job, HiveConf.ConfVars.HIVEQUERYID);
+    final String queryId = HiveConf.getVar(job, HiveConf.ConfVars.HIVE_QUERY_ID);
     MDC.put("dagId", dagId);
     MDC.put("queryId", queryId);
     TezCounters taskCounters = null;
@@ -157,8 +171,12 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     rbCtx = ctx != null ? ctx : LlapInputFormat.createFakeVrbCtx(mapWork);
 
     isAcidScan = AcidUtils.isFullAcidScan(jobConf);
-    TypeDescription schema = OrcInputFormat.getDesiredRowTypeDescr(
-        job, isAcidScan, Integer.MAX_VALUE);
+    this.bucketIdentifier = BucketIdentifier.from(jobConf, split.getPath());
+
+    String orcSchemaOverrideString = job.get(ColumnProjectionUtils.ORC_SCHEMA_STRING);
+    TypeDescription schema = orcSchemaOverrideString == null ?
+        OrcInputFormat.getDesiredRowTypeDescr(job, isAcidScan, Integer.MAX_VALUE) :
+        TypeDescription.fromString(orcSchemaOverrideString);
 
     int queueLimitBase = getQueueVar(ConfVars.LLAP_IO_VRB_QUEUE_LIMIT_MAX, job, daemonConf);
     int queueLimitMin = getQueueVar(ConfVars.LLAP_IO_VRB_QUEUE_LIMIT_MIN, job, daemonConf);
@@ -209,6 +227,8 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     // Create the consumer of encoded data; it will coordinate decoding to CVBs.
     feedback = rp = cvp.createReadPipeline(this, split, includes, sarg, counters, includes,
         sourceInputFormat, sourceSerDe, reporter, job, mapWork.getPathToPartitionInfo());
+    missingColIndices = includes.getReaderLogicalColumnIds().stream()
+        .filter(idx -> !includes.getLogicalOrderedColumnIds().contains(idx)).toList();
   }
 
   private static int getQueueVar(ConfVars var, JobConf jobConf, Configuration daemonConf) {
@@ -394,35 +414,46 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
         // Exclude the row column.
         int acidColCount = acidReader.includeAcidColumns() ?
             OrcInputFormat.getRootColumn(false) - 1 : 0;
-        VectorizedRowBatch inputVrb = new VectorizedRowBatch(
-            //so +1 is the OrcRecordUpdater.ROW?
-            acidColCount + 1 + vrb.getDataColumnCount());
+        ensureAcidInputVrb(acidColCount, vrb.getDataColumnCount());
         // By assumption, ACID columns are currently always in the beginning of the arrays.
-        System.arraycopy(cvb.cols, 0, inputVrb.cols, 0, acidColCount);
+        System.arraycopy(cvb.cols, 0, acidInputVrb.cols, 0, acidColCount);
         for (int ixInReadSet = acidColCount; ixInReadSet < cvb.cols.length; ++ixInReadSet) {
           int ixInVrb = includes.getPhysicalColumnIds().get(ixInReadSet) -
               (acidReader.includeAcidColumns() ? 0 : OrcRecordUpdater.ROW);
-          // TODO: should we create the batch from vrbctx, and reuse the vectors, like below? Future work.
-          inputVrb.cols[ixInVrb] = cvb.cols[ixInReadSet];
+          cvb.swapColumnVector(ixInReadSet, acidInputVrb.cols, ixInVrb);
         }
-        inputVrb.size = cvb.size;
-        acidReader.setBaseAndInnerReader(new AcidWrapper(inputVrb));
+        acidInputVrb.size = cvb.size;
+        acidReader.setBaseAndInnerReader(new AcidWrapper(acidInputVrb));
         acidReader.next(NullWritable.get(), vrb);
       } else {
          // TODO: WTF? The old code seems to just drop the ball here.
         throw new AssertionError("Unsupported mode");
       }
     } else {
-      if (includes.getPhysicalColumnIds().size() != cvb.cols.length) {
+      List<Integer> logicalOrderedColumnIds = includes.getLogicalOrderedColumnIds();
+      long cvbColsPresent = Arrays.stream(cvb.cols).filter(Objects::nonNull).count();
+      if (logicalOrderedColumnIds.size() != cvbColsPresent) {
         throw new RuntimeException("Unexpected number of columns, VRB has "
-            + includes.getPhysicalColumnIds().size() + " included, but the reader returned "
-            + cvb.cols.length);
+            + logicalOrderedColumnIds.size() + " included, but the reader returned "
+            + cvbColsPresent);
       }
       // VRB was created from VrbCtx, so we already have pre-allocated column vectors.
       // Return old CVs (if any) to caller. We assume these things all have the same schema.
-      for (int ixInReadSet = 0; ixInReadSet < cvb.cols.length; ++ixInReadSet) {
-        int ixInVrb = includes.getPhysicalColumnIds().get(ixInReadSet);
+      // Reader may return nulls in cvb.cols if the file schema lacked any of the columns that were required by reader
+      // schema, they are dealt with later.
+      for (int ixInReadSet = 0; ixInReadSet < cvbColsPresent; ++ixInReadSet) {
+        int ixInVrb = logicalOrderedColumnIds.get(ixInReadSet);
         cvb.swapColumnVector(ixInReadSet, vrb.cols, ixInVrb);
+      }
+      // null out col vectors for which the (ORC) file had no data
+      if (missingColIndices.size() != (cvb.cols.length - cvbColsPresent)) {
+        throw new RuntimeException("Unexpected number of missing columns, expected " + missingColIndices.size() +
+            ", but reader returned " + (cvb.cols.length - cvbColsPresent) + " missing column vectors.");
+      }
+      for (int index : missingColIndices) {
+        vrb.cols[index].noNulls = false;
+        vrb.cols[index].isRepeating = true;
+        vrb.cols[index].isNull[0] = true;
       }
       vrb.selectedInUse = false;//why?
       vrb.size = cvb.size;
@@ -431,7 +462,19 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     if (wasFirst) {
       firstReturnTime = counters.startTimeCounter();
     }
+
+    if (bucketIdentifier != null) {
+      rbCtx.setBucketAndWriteIdOf(vrb, bucketIdentifier);
+    }
+
     return true;
+  }
+
+  private void ensureAcidInputVrb(int acidColCount, int dataColCount) {
+    if (acidInputVrb == null) {
+      //+1 is the OrcRecordUpdater.ROW
+      acidInputVrb = new VectorizedRowBatch(acidColCount + 1 + dataColCount);
+    }
   }
 
   public VectorizedRowBatchCtx getVectorizedRowBatchCtx() {
@@ -608,7 +651,10 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     return 0.0f;
   }
 
-  
+  void setPartitionValues(Object[] partitionValues) {
+    this.partitionValues = partitionValues;
+  }
+
   /** This class encapsulates include-related logic for LLAP readers. It is not actually specific
    *  to LLAP IO but in LLAP IO in particular, I want to encapsulate all this mess for now until
    *  we have smth better like Schema Evolution v2. This can also hypothetically encapsulate
@@ -632,12 +678,14 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
   private static class IncludesImpl implements SchemaEvolutionFactory, Includes {
     private List<Integer> readerLogicalColumnIds;
     private List<Integer> filePhysicalColumnIds;
+    private List<Integer> logicalOrderedColumnIds;
     private Integer acidStructColumnId = null;
     private final boolean includeAcidColumns;
 
     // For current schema evolution.
     private TypeDescription readerSchema;
     private JobConf jobConf;
+    private SchemaEvolution evolution;
 
     // ProbeDecode Context for row-level filtering
     private TableScanOperator.ProbeDecodeContext probeDecodeContext = null;
@@ -712,13 +760,64 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
           readerSchema, readerLogicalColumnIds);
       Reader.Options options = new Reader.Options(jobConf)
           .include(readerIncludes).includeAcidColumns(includeAcidColumns);
-      return new SchemaEvolution(fileSchema, readerSchema, options);
+      evolution = new SchemaEvolution(fileSchema, readerSchema, options);
+
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Generated ORC schema evolution. Reader schema: {}, Reader included: {}, File schema: {}, File " +
+            "included: {}", evolution.getReaderSchema(), evolution.getReaderIncluded(), evolution.getFileSchema(),
+            evolution.getFileIncluded());
+      }
+      generateLogicalOrderedColumnIds();
+      return evolution;
+    }
+
+    /**
+     * LLAP IO always returns the column vectors in the order as they are seen in the file.
+     * To support logical column reordering, we need to do a matching between file and read schemas.
+     * (this only supports one level of schema reordering, not within complex types, also not supported for ORC ACID)
+     */
+    private void generateLogicalOrderedColumnIds() {
+      if (acidStructColumnId != null) {
+        // ACID case - no op
+        LOG.debug("Not generating logical ordered column IDs for an ACID file read.");
+        return;
+      }
+      adjustPhysicalColumnIds(evolution);
+      // Logical ordered column ids rely on schema names, thus force positional evolution must be off
+      if (jobConf.getBoolean(OrcConf.FORCE_POSITIONAL_EVOLUTION.getHiveConfName(), true)) {
+        logicalOrderedColumnIds = filePhysicalColumnIds;
+        LOG.debug("Not generating logical ordered column IDs by column name matching, as it is not possible with " +
+            "orc.force.positional.evolution turned on.");
+        return;
+      }
+      logicalOrderedColumnIds = new ArrayList<>();
+      Map<Integer, String> fileSchemaMap = new HashMap<>();
+      Map<String, Integer> readSchemaMap = new HashMap<>();
+      int order = 0;
+      for (String fieldName : evolution.getFileSchema().getFieldNames()) {
+        fileSchemaMap.put(order++, fieldName);
+      }
+      order = 0;
+      for (String fieldName : evolution.getReaderSchema().getFieldNames()) {
+        readSchemaMap.put(fieldName, order++);
+      }
+      for (int physicalId : filePhysicalColumnIds) {
+        Integer id = readSchemaMap.get(fileSchemaMap.get(physicalId));
+        if (id != null) {
+          logicalOrderedColumnIds.add(id);
+        }
+      }
+      LOG.debug("Logical ordered column IDs generated. Result: {}, fileSchemaMap: {}, readSchemaMap: {}",
+          logicalOrderedColumnIds, fileSchemaMap, readSchemaMap);
     }
 
     @Override
     public boolean[] generateFileIncludes(TypeDescription fileSchema) {
-      return OrcInputFormat.genIncludedColumns(
-          fileSchema, filePhysicalColumnIds, acidStructColumnId);
+      if (acidStructColumnId == null && evolution != null) {
+        return evolution.getFileIncluded();
+      } else {
+        return OrcInputFormat.genIncludedColumns(fileSchema, filePhysicalColumnIds, acidStructColumnId);
+      }
     }
 
     public void setProbeDecodeContext(TableScanOperator.ProbeDecodeContext currProbeDecodeContext) {
@@ -736,6 +835,11 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
     }
 
     @Override
+    public List<Integer> getLogicalOrderedColumnIds() {
+      return logicalOrderedColumnIds != null ? logicalOrderedColumnIds : readerLogicalColumnIds;
+    }
+
+    @Override
     public TypeDescription[] getBatchReaderTypes(TypeDescription fileSchema) {
       return OrcInputFormat.genIncludedTypes(
           fileSchema, filePhysicalColumnIds, acidStructColumnId);
@@ -749,7 +853,7 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
 
     @Override
     public String getQueryId() {
-      return HiveConf.getVar(jobConf, HiveConf.ConfVars.HIVEQUERYID);
+      return HiveConf.getVar(jobConf, HiveConf.ConfVars.HIVE_QUERY_ID);
     }
 
     @Override
@@ -768,6 +872,24 @@ class LlapRecordReader implements RecordReader<NullWritable, VectorizedRowBatch>
       Pattern pattern = Pattern.compile("_col([0-9]+)");
       Matcher matcher = pattern.matcher(this.probeDecodeContext.getMjBigTableKeyColName());
       return matcher.find() ? Integer.parseInt(matcher.group(1)) : -1;
+    }
+
+    /**
+     * Takes the file include bool array from SchemaEvolution and transforms it into a list of col indices, so that
+     * column reorders are reflected between logical- and physicalColumnIds.
+     * @param evolution - provided by ORC libs as per file schema and read schema
+     */
+    private void adjustPhysicalColumnIds(SchemaEvolution evolution) {
+      List<Integer> newFilePhysicalColumnIds = new ArrayList<>();
+      boolean[] firstLevelPhysicalIncludes = OrcInputFormat.firstLevelFileIncludes(evolution);
+      for (int i = 1; i < firstLevelPhysicalIncludes.length; ++i) {
+        if (firstLevelPhysicalIncludes[i]) {
+          newFilePhysicalColumnIds.add(i - 1);
+        }
+      }
+      LOG.debug("Adjusting file physical included columnd IDs based on ORC SchemaEvolution. Original: {}, Adjusted: {}",
+          this.filePhysicalColumnIds, newFilePhysicalColumnIds);
+      this.filePhysicalColumnIds = newFilePhysicalColumnIds;
     }
 
     @Override

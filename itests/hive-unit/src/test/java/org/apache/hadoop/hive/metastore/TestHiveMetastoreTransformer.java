@@ -9,24 +9,27 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.metastore;
 
 import java.io.File;
-import java.io.IOException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
+import java.util.Optional;
 
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient.GetTablesRequestBuilder;
+import org.apache.hadoop.hive.metastore.api.GetPartitionsByNamesRequest;
+import org.apache.hadoop.hive.metastore.client.builder.GetTablesRequestBuilder;
 import org.apache.hadoop.hive.metastore.api.Catalog;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.ExtendedTableInfo;
@@ -44,19 +47,19 @@ import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf.ConfVars;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.ACCESSTYPE_NONE;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.ACCESSTYPE_READONLY;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.ACCESSTYPE_READWRITE;
+import static org.apache.hadoop.hive.metastore.utils.MetaStoreUtils.convertToGetPartitionsByNamesRequest;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
 import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
-import org.apache.hadoop.hive.ql.parse.WarehouseInstance;
 import org.apache.hadoop.util.StringUtils;
 
 import com.google.common.collect.Lists;
@@ -154,11 +157,12 @@ public class TestHiveMetastoreTransformer {
 
   /**
    * EXTERNAL_TABLE
-   *   1) Old table with no capabilities
-   *   2a) New table with capabilities with no client requirements
-   *   2b) New table with capabilities with no matching client requirements
-   *   2c) New table with capabilities with partial match requirements
-   *   2d) New table with capabilities with full match requirements
+   *   1) Old table (name in upper case) with no capabilities
+   *   2) Old table with no capabilities
+   *   3a) New table with capabilities with no client requirements
+   *   3b) New table with capabilities with no matching client requirements
+   *   3c) New table with capabilities with partial match requirements
+   *   3d) New table with capabilities with full match requirements
    */
   @Test
   public void testTransformerExternalTable() throws Exception {
@@ -168,15 +172,38 @@ public class TestHiveMetastoreTransformer {
       Map<String, Object> tProps = new HashMap<>();
       int buckets = 32;
 
-      String tblName = basetblName;
+      // create external table with uppercase
+      String tblNameUpper = "TAB_EXT1";
       tProps.put("DBNAME", dbName);
-      tProps.put("TBLNAME", tblName);
+      tProps.put("TBLNAME", tblNameUpper);
       tProps.put("TBLTYPE", TableType.EXTERNAL_TABLE);
       tProps.put("BUCKETS", buckets);
       StringBuilder properties = new StringBuilder();
       properties.append("EXTERNAL").append("=").append("TRUE");
       tProps.put("PROPERTIES", properties.toString());
       Table tbl = createTableWithCapabilities(tProps);
+
+      Table hiveTbl = client.getTable(dbName, tblNameUpper.toLowerCase(Locale.ROOT));
+      Path actualPath = new Path(hiveTbl.getSd().getLocation());
+      Database db = client.getDatabase(dbName);
+      LOG.info("Table=" + tblNameUpper + ",Table Details=" + hiveTbl);
+      assertEquals("Created and retrieved tables do not match:" + hiveTbl.getTableName() + ":" +
+              tblNameUpper.toLowerCase(Locale.ROOT), hiveTbl.getTableName(),
+          tblNameUpper.toLowerCase(Locale.ROOT));
+      Path expectedTablePath = new Path(db.getLocationUri(), tblNameUpper.toLowerCase(Locale.ROOT));
+      assertEquals(String.format("Table location %s is not a subset of the database location %s",
+          actualPath.toString(), db.getLocationUri()), expectedTablePath.toString(), actualPath.toString());
+
+      String tblName = basetblName;
+      tProps = new HashMap<>();
+      tProps.put("DBNAME", dbName);
+      tProps.put("TBLNAME", tblName);
+      tProps.put("TBLTYPE", TableType.EXTERNAL_TABLE);
+      tProps.put("BUCKETS", buckets);
+      properties = new StringBuilder();
+      properties.append("EXTERNAL").append("=").append("TRUE");
+      tProps.put("PROPERTIES", properties.toString());
+      tbl = createTableWithCapabilities(tProps);
 
       // retrieve the table
       Table tbl2 = client.getTable(dbName, tblName);
@@ -796,6 +823,7 @@ public class TestHiveMetastoreTransformer {
       count = 300;
       tProps.put("TBLNAME", "test_limit");
       tProps.put("TABLECOUNT", count);
+      tProps.remove("CAPABILITIES"); // CAPABILITIES are already appended to PROPERTIES
       tables = createTables(tProps);
       assertEquals("Unexpected number of tables created", count, tables.size());
 
@@ -854,7 +882,8 @@ public class TestHiveMetastoreTransformer {
       for (int i = 1; i <= pCount; i++) {
         partValues.add("partcol=" + i);
       }
-      List<Partition> parts = client.getPartitionsByNames(dbName, tblName, partValues, false, null);
+      GetPartitionsByNamesRequest req = convertToGetPartitionsByNamesRequest(dbName, tblName, partValues);
+      List<Partition> parts = client.getPartitionsByNames(req).getPartitions();
       assertEquals("Return list size does not match expected size", pCount, parts.size());
 
       tblName = "test_gp_ext_bucketed_wc";
@@ -868,7 +897,8 @@ public class TestHiveMetastoreTransformer {
       tProps.put("PROPERTIES", properties.toString());
       table = createTableWithCapabilities(tProps);
 
-      parts = client.getPartitionsByNames(dbName, tblName, partValues, false, null);
+      req = convertToGetPartitionsByNamesRequest(dbName, tblName, partValues);
+      parts = client.getPartitionsByNames(req).getPartitions();
       LOG.debug("Return list size=" + parts.size());
 
       for (Partition part : parts) {
@@ -879,7 +909,8 @@ public class TestHiveMetastoreTransformer {
       capabilities.clear();
       capabilities.add("HIVEBUCKET2");
       setHMSClient("TestGetPartitionByNames#2", (String[])(capabilities.toArray(new String[0])));
-      parts = client.getPartitionsByNames(dbName, tblName, partValues, false, null);
+      req = convertToGetPartitionsByNamesRequest(dbName, tblName, partValues);
+      parts = client.getPartitionsByNames(req).getPartitions();
 
       for (Partition part : parts) {
         assertEquals("Partition bucket count does not match", bucketCount, part.getSd().getNumBuckets());
@@ -889,7 +920,8 @@ public class TestHiveMetastoreTransformer {
       capabilities.clear();
       capabilities.add("ACCEPTS_UNMODIFIED_METADATA");
       setHMSClient("TestGetPartitionByNames#3", (String[])(capabilities.toArray(new String[0])));
-      parts = client.getPartitionsByNames(dbName, tblName, partValues, false, null);
+      req = convertToGetPartitionsByNamesRequest(dbName, tblName, partValues);
+      parts = client.getPartitionsByNames(req).getPartitions();
 
       for (Partition part : parts) {
         assertEquals("Partition bucket count does not match", bucketCount, part.getSd().getNumBuckets());
@@ -905,14 +937,16 @@ public class TestHiveMetastoreTransformer {
       properties.append("transactional_properties=insert_only");
       tProps.put("TBLNAME", tblName);
       tProps.put("PROPERTIES", properties.toString());
-      setHMSClient("createTable", new String[] {"HIVEMANAGEDINSERTWRITE,HIVEFULLACIDWRITE"});
+      tProps.put("TBLTYPE", type);
+      setHMSClient("createTable", new String[] {"HIVEMANAGEDINSERTWRITE", "HIVEFULLACIDWRITE"});
       table = createTableWithCapabilities(tProps);
       resetHMSClient();
 
       capabilities.clear();
       capabilities.add("CONNECTORREAD");
       setHMSClient("TestGetPartitionByNames#3", (String[])(capabilities.toArray(new String[0])));
-      parts = client.getPartitionsByNames(dbName, tblName, partValues, false, null);
+      req = convertToGetPartitionsByNamesRequest(dbName, tblName, partValues);
+      parts = client.getPartitionsByNames(req).getPartitions();
       assertEquals("Partition count does not match", pCount, parts.size());
 
       LOG.info("Test execution complete:testGetPartitionsByNames");
@@ -1246,7 +1280,7 @@ public class TestHiveMetastoreTransformer {
       table_params = new StringBuilder();
       table_params.append("key1=val1");
       table_params.append(";");
-      table_params.append("transactional_properties=insert_only");
+      table_params.append("transactional=true;transactional_properties=insert_only");
       tProps.put("PROPERTIES", table_params.toString());
 
       List<String> capabilities = new ArrayList<>();
@@ -1742,7 +1776,7 @@ public class TestHiveMetastoreTransformer {
     String tblName  = (String)props.get("TBLNAME");
     List<String> caps = (List<String>)props.get("CAPABILITIES");
     StringBuilder table_params = new StringBuilder();
-    table_params.append((String)props.get("PROPERTIES"));
+    Optional.ofNullable(props.get("PROPERTIES")).ifPresent(table_params::append);
     if (caps != null)
       table_params.append(CAPABILITIES_KEY).append("=").append(String.join(",", caps));
     props.put("PROPERTIES", table_params.toString());

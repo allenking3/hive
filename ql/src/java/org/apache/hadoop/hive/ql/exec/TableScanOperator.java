@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -57,7 +58,7 @@ import org.apache.hadoop.mapred.JobConf;
  * read as part of map-reduce framework
  **/
 public class TableScanOperator extends Operator<TableScanDesc> implements
-    Serializable, VectorizationContextRegion {
+    Serializable, VectorizationContextRegion, IConfigureJobConf {
   private static final long serialVersionUID = 1L;
 
   private VectorizationContext taskVectorizationContext;
@@ -86,6 +87,14 @@ public class TableScanOperator extends Operator<TableScanDesc> implements
   private String schemaEvolutionColumnsTypes;
 
   private ProbeDecodeContext probeDecodeContextSet;
+
+  @Override
+  public void configureJobConf(JobConf job) {
+    // Safety checks: table metadata may be null in certain scenarios, particularly in test cases.
+    if (getConf() != null && getConf().getTableMetadata() != null) {
+      Utilities.setTableCreateTime(job, getConf().getTableMetadata());
+    }
+  }
 
   /**
    * Inner wrapper class for TS ProbeDecode optimization
@@ -258,9 +267,7 @@ public class TableScanOperator extends Operator<TableScanDesc> implements
           values.add(o == null ? defaultPartitionName : o.toString());
         }
         partitionSpecs = FileUtils.makePartName(conf.getPartColumns(), values);
-        if (LOG.isInfoEnabled()) {
-          LOG.info("Stats Gathering found a new partition spec = " + partitionSpecs);
-        }
+        LOG.info("Stats Gathering found a new partition spec = " + partitionSpecs);
       }
       // find which column contains the raw data size (both partitioned and non partitioned
       int uSizeColumn = -1;
@@ -322,7 +329,7 @@ public class TableScanOperator extends Operator<TableScanDesc> implements
       jc = new JobConf(hconf);
     }
 
-    defaultPartitionName = HiveConf.getVar(hconf, HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    defaultPartitionName = HiveConf.getVar(hconf, HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     currentStat = null;
     stats = new HashMap<String, Stat>();
 
@@ -408,9 +415,7 @@ public class TableScanOperator extends Operator<TableScanDesc> implements
     sc.setContextSuffix(getOperatorId());
     if (!statsPublisher.connect(sc)) {
       // just return, stats gathering should not block the main query.
-      if (LOG.isInfoEnabled()) {
-        LOG.info("StatsPublishing error: cannot connect to database.");
-      }
+      LOG.info("StatsPublishing error: cannot connect to database.");
       if (isStatsReliable) {
         throw new HiveException(ErrorMsg.STATSPUBLISHER_CONNECTION_ERROR.getErrorCodedMsg());
       }
@@ -432,9 +437,7 @@ public class TableScanOperator extends Operator<TableScanDesc> implements
           throw new HiveException(ErrorMsg.STATSPUBLISHER_PUBLISHING_ERROR.getErrorCodedMsg());
         }
       }
-      if (LOG.isInfoEnabled()) {
-        LOG.info("publishing : " + key + " : " + statsToPublish.toString());
-      }
+      LOG.info("publishing : " + key + " : " + statsToPublish);
     }
     if (!statsPublisher.closeConnection(sc)) {
       if (isStatsReliable) {

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer;
 
@@ -100,9 +101,7 @@ public class PartitionColumnsSeparator extends Transform {
       ExprNodeDesc newPredicate = generateInClauses(predicate);
       if (newPredicate != null) {
         // Replace filter in current FIL with new FIL
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Generated new predicate with IN clause: " + newPredicate);
-        }
+        LOG.debug("Generated new predicate with IN clause: {}", newPredicate);
         final List<ExprNodeDesc> subExpr =
                 new ArrayList<ExprNodeDesc>(2);
         subExpr.add(predicate);
@@ -211,10 +210,10 @@ public class PartitionColumnsSeparator extends Transform {
      * Has atleast one subexpression containing a partition/virtualcolumn and has
      * exactly refer to a single table alias.
      * @param en Expression Node Descriptor
-     * @return true if there is atleast one subexpression with partition/virtual column
+     * @return true if there is at least one subexpression with partition/virtual column
      * and has exactly refer to a single table alias. If not, return false.
      */
-    private boolean hasAtleastOneSubExprWithPartColOrVirtualColWithOneTableAlias(ExprNodeDesc en) {
+    private boolean hasAtLeastOneSubExprWithPartColOrVirtualColWithOneTableAlias(ExprNodeDesc en) {
       if (en == null || en.getChildren() == null) {
         return false;
       }
@@ -348,9 +347,7 @@ public class PartitionColumnsSeparator extends Transform {
       /***************************************************************************************/
       // 1. If the input node is not an IN operator, we bail out.
       if (fd == null) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Partition columns not separated for " + fd + ", is not IN operator : ");
-        }
+        LOG.debug("Partition columns not separated for {}, is not IN operator : ", fd);
         return null;
       }
 
@@ -366,28 +363,25 @@ public class PartitionColumnsSeparator extends Transform {
         return null;
       }
 
-      // 3. See if the IN (STRUCT(EXP1, EXP2,..) has atleast one expression with partition
+      // 3. See if the IN (STRUCT(EXP1, EXP2,..) has at least one expression with partition
       // column with single table alias. If not bail out.
       // We might have expressions containing only partitioning columns, say, T1.A + T2.B
       // where T1.A and T2.B are both partitioning columns.
       // However, these expressions should not be considered as valid expressions for separation.
-      if (!hasAtleastOneSubExprWithPartColOrVirtualColWithOneTableAlias(children.get(0))) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Partition columns not separated for " + fd +
-            ", there are no expression containing partition columns in struct fields");
-        }
+      if (!hasAtLeastOneSubExprWithPartColOrVirtualColWithOneTableAlias(children.get(0))) {
+        LOG.debug(
+            "Partition columns not separated for {}, there are no expression containing partition columns in struct fields",
+            fd);
         return null;
       }
 
-      // 4. See if all the field expressions of the left hand side of IN are expressions 
+      // 4. See if all the field expressions of the left hand side of IN are expressions
       // containing constants or only partition columns coming from same table.
       // If so, we need not perform this optimization and we should bail out.
       if (hasAllSubExprWithConstOrPartColOrVirtualColWithOneTableAlias(children.get(0))) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Partition columns not separated for " + fd +
+          LOG.debug("Partition columns not separated for {}" +
           ", all fields are expressions containing constants or only partition columns"
-          + "coming from same table");
-        }
+          + "coming from same table", fd);
         return null;
       }
 

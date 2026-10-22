@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.repl;
 
@@ -21,24 +22,30 @@ import com.google.common.primitives.Ints;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.repl.ReplScope;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.ReplCopyTask;
 import org.apache.hadoop.hive.ql.exec.Task;
 import org.apache.hadoop.hive.ql.exec.TaskFactory;
-import org.apache.hadoop.hive.ql.exec.repl.util.FileList;
 import org.apache.hadoop.hive.ql.exec.repl.util.TaskTracker;
+import org.apache.hadoop.hive.ql.exec.util.Retryable;
 import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.parse.EximUtil;
 import org.apache.hadoop.hive.ql.parse.ReplicationSpec;
+import org.apache.hadoop.hive.ql.parse.repl.ReplLogger;
+import org.apache.hadoop.hive.ql.parse.repl.load.FailoverMetaData;
 import org.apache.hadoop.hive.ql.parse.repl.metric.ReplicationMetricCollector;
 import org.apache.hadoop.hive.ql.plan.Explain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 @Explain(displayName = "Replication Dump Operator", explainLevels = { Explain.Level.USER,
     Explain.Level.DEFAULT,
@@ -47,7 +54,7 @@ public class ReplDumpWork implements Serializable {
   private static final long serialVersionUID = 1L;
   private static final Logger LOG = LoggerFactory.getLogger(ReplDumpWork.class);
   final ReplScope replScope;
-  final ReplScope oldReplScope;
+  ReplScope oldReplScope;
   final String dbNameOrPattern, astRepresentationForErrorMsg, resultTempPath;
   Long eventTo;
   Long eventFrom;
@@ -64,6 +71,10 @@ public class ReplDumpWork implements Serializable {
   private boolean shouldOverwrite;
   private transient ReplicationMetricCollector metricCollector;
   private ReplicationSpec replicationSpec;
+  private ReplLogger replLogger;
+  private FailoverMetaData fmd;
+  private boolean firstDumpAfterFailover;
+  private boolean secondDumpAfterFailover;
 
   public static void injectNextDumpDirForTest(String dumpDir) {
     injectNextDumpDirForTest(dumpDir, false);
@@ -88,14 +99,17 @@ public class ReplDumpWork implements Serializable {
     testDeletePreviousDumpMetaPath = failDeleteDumpMeta;
   }
 
-  public ReplDumpWork(ReplScope replScope, ReplScope oldReplScope,
+  public ReplDumpWork(ReplScope replScope,
                       String astRepresentationForErrorMsg,
                       String resultTempPath) {
     this.replScope = replScope;
-    this.oldReplScope = oldReplScope;
     this.dbNameOrPattern = replScope.getDbName();
     this.astRepresentationForErrorMsg = astRepresentationForErrorMsg;
     this.resultTempPath = resultTempPath;
+  }
+
+  void setOldReplScope(ReplScope replScope) {
+    oldReplScope = replScope;
   }
 
   int maxEventLimit() throws Exception {
@@ -109,16 +123,37 @@ public class ReplDumpWork implements Serializable {
     return maxEventLimit;
   }
 
+  public boolean isFirstDumpAfterFailover() {
+    return firstDumpAfterFailover;
+  }
+
+  public void setFirstDumpAfterFailover(boolean firstDumpAfterFailover) {
+    this.firstDumpAfterFailover = firstDumpAfterFailover;
+  }
+
+  FailoverMetaData getFailoverMetadata() {
+    return fmd;
+  }
+
+  void setFailoverMetadata(FailoverMetaData fmd) {
+    this.fmd = fmd;
+  }
+
   void setEventFrom(long eventId) {
     eventFrom = eventId;
   }
 
   // Override any user specification that changes the last event to be dumped.
-  void overrideLastEventToDump(Hive fromDb, long bootstrapLastId) throws Exception {
+  void overrideLastEventToDump(Hive fromDb, long bootstrapLastId, long failoverEventId) throws Exception {
     // If we are bootstrapping ACID tables, we need to dump all the events upto the event id at
     // the beginning of the bootstrap dump and also not dump any event after that. So we override
-    // both, the last event as well as any user specified limit on the number of events. See
-    // bootstrampDump() for more details.
+    // both, the last event and any user specified limit on the number of events. See
+    // bootstrapDump() for more details.
+    if (failoverEventId > 0) {
+      LOG.info("eventTo : {} marked as failover eventId.", eventTo);
+      eventTo = failoverEventId;
+      return;
+    }
     if (bootstrapLastId > 0) {
       eventTo = bootstrapLastId;
       LoggerFactory.getLogger(this.getClass())
@@ -133,6 +168,10 @@ public class ReplDumpWork implements Serializable {
       LoggerFactory.getLogger(this.getClass())
           .debug("eventTo not specified, using current event id : {}", eventTo);
     }
+  }
+
+  public boolean isBootstrap() {
+    return isBootstrap || firstDumpAfterFailover;
   }
 
   void setBootstrap(boolean bootstrap) {
@@ -182,42 +221,86 @@ public class ReplDumpWork implements Serializable {
     this.resultValues = resultValues;
   }
 
-  public List<Task<?>> externalTableCopyTasks(TaskTracker tracker, HiveConf conf) {
+  public List<Task<?>> externalTableCopyTasks(TaskTracker tracker, HiveConf conf) throws IOException {
     if (conf.getBoolVar(HiveConf.ConfVars.REPL_DUMP_SKIP_IMMUTABLE_DATA_COPY)) {
       return Collections.emptyList();
     }
     List<Task<?>> tasks = new ArrayList<>();
-    while (externalTblCopyPathIterator.hasNext() && tracker.canAddMoreTasks()) {
-      DirCopyWork dirCopyWork = new DirCopyWork(metricCollector, currentDumpPath.toString());
-      dirCopyWork.loadFromString(externalTblCopyPathIterator.next());
-      Task<DirCopyWork> task = TaskFactory.get(dirCopyWork, conf);
-      tasks.add(task);
-      tracker.addTask(task);
-      LOG.debug("added task for {}", dirCopyWork);
+    Retryable retryable = Retryable.builder()
+            .withHiveConf(conf)
+            .withRetryOnException(UncheckedIOException.class).build();
+    try {
+      retryable.executeCallable((Callable<Void>) ()-> {
+        try{
+          int numEntriesToSkip = tasks == null ? 0 : tasks.size();
+          while (externalTblCopyPathIterator.hasNext() &&  tracker.canAddMoreTasks()) {
+            if(numEntriesToSkip > 0) {
+              //skip tasks added in previous attempts of this retryable block
+              externalTblCopyPathIterator.next();
+              numEntriesToSkip--;
+              continue;
+            }
+            DirCopyWork dirCopyWork = new DirCopyWork(metricCollector, currentDumpPath.toString());
+            dirCopyWork.loadFromString(externalTblCopyPathIterator.next());
+            Task<DirCopyWork> task = TaskFactory.get(dirCopyWork, conf);
+            tasks.add(task);
+            tracker.addTask(task);
+            LOG.debug("added task for {}", dirCopyWork);
+          }
+        } catch (UncheckedIOException e) {
+          LOG.error("Reading entry for data copy failed for external tables, attempting retry.", e);
+          throw e;
+        }
+        return null;
+      });
+    } catch (Exception e) {
+      throw new IOException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()));
     }
     return tasks;
   }
 
-  public List<Task<?>> managedTableCopyTasks(TaskTracker tracker, HiveConf conf) {
+  public List<Task<?>> managedTableCopyTasks(TaskTracker tracker, HiveConf conf) throws IOException {
     if (conf.getBoolVar(HiveConf.ConfVars.REPL_DUMP_SKIP_IMMUTABLE_DATA_COPY)) {
       return Collections.emptyList();
     }
     List<Task<?>> tasks = new ArrayList<>();
-    while (managedTblCopyPathIterator.hasNext() && tracker.canAddMoreTasks()) {
-      ReplicationSpec replSpec = new ReplicationSpec();
-      replSpec.setIsReplace(true);
-      replSpec.setInReplicationScope(true);
-      EximUtil.DataCopyPath managedTableCopyPath = new EximUtil.DataCopyPath(replSpec);
-      managedTableCopyPath.loadFromString(managedTblCopyPathIterator.next());
-      //If its incremental, in checkpointing case, dump dir may exist. We will delete the event dir.
-      //In case of bootstrap checkpointing we will not delete the entire dir and just do a sync
-      Task<?> copyTask = ReplCopyTask.getDumpCopyTask(
-              managedTableCopyPath.getReplicationSpec(), managedTableCopyPath.getSrcPath(),
-              managedTableCopyPath.getTargetPath(), conf, false, shouldOverwrite, !isBootstrap,
-        getCurrentDumpPath().toString(), getMetricCollector());
-      tasks.add(copyTask);
-      tracker.addTask(copyTask);
-      LOG.debug("added task for {}", managedTableCopyPath);
+    Retryable retryable = Retryable.builder()
+            .withHiveConf(conf)
+            .withRetryOnException(UncheckedIOException.class).build();
+    try {
+      retryable.executeCallable((Callable<Void>) ()-> {
+        try{
+          int numEntriesToSkip = tasks == null ? 0 : tasks.size();
+          while (managedTblCopyPathIterator.hasNext() && tracker.canAddMoreTasks()) {
+            if(numEntriesToSkip > 0) {
+              //skip tasks added in previous attempts of this retryable block
+              managedTblCopyPathIterator.next();
+              numEntriesToSkip--;
+              continue;
+            }
+            ReplicationSpec replSpec = new ReplicationSpec();
+            replSpec.setIsReplace(true);
+            replSpec.setInReplicationScope(true);
+            EximUtil.DataCopyPath managedTableCopyPath = new EximUtil.DataCopyPath(replSpec);
+            managedTableCopyPath.loadFromString(managedTblCopyPathIterator.next());
+            //If its incremental, in checkpointing case, dump dir may exist. We will delete the event dir.
+            //In case of bootstrap checkpointing we will not delete the entire dir and just do a sync
+            Task<?> copyTask = ReplCopyTask.getDumpCopyTask(
+                    managedTableCopyPath.getReplicationSpec(), managedTableCopyPath.getSrcPath(),
+                    managedTableCopyPath.getTargetPath(), conf, false, shouldOverwrite, !isBootstrap(),
+                    getCurrentDumpPath().toString(), getMetricCollector());
+            tasks.add(copyTask);
+            tracker.addTask(copyTask);
+            LOG.debug("added task for {}", managedTableCopyPath);
+          }
+        } catch (UncheckedIOException e) {
+          LOG.error("Reading entry for data copy failed for managed tables, attempting retry.", e);
+          throw e;
+        }
+        return null;
+      });
+    } catch (Exception e) {
+      throw new IOException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()));
     }
     return tasks;
   }
@@ -239,6 +322,10 @@ public class ReplDumpWork implements Serializable {
     return tasks;
   }
 
+  public boolean shouldOverWrite() {
+    return shouldOverwrite;
+  }
+
   public void setShouldOverwrite(boolean shouldOverwrite) {
     this.shouldOverwrite = shouldOverwrite;
   }
@@ -257,5 +344,25 @@ public class ReplDumpWork implements Serializable {
 
   public void setReplicationSpec(ReplicationSpec replicationSpec) {
     this.replicationSpec = replicationSpec;
+  }
+
+  public Iterator<String> getExternalTblCopyPathIterator() {
+    return externalTblCopyPathIterator;
+  }
+
+  public ReplLogger getReplLogger() {
+    return replLogger;
+  }
+
+  public void setReplLogger(ReplLogger replLogger) {
+    this.replLogger = replLogger;
+  }
+
+  public boolean isSecondDumpAfterFailover() {
+    return secondDumpAfterFailover;
+  }
+
+  public void setSecondDumpAfterFailover(boolean secondDumpAfterFailover) {
+    this.secondDumpAfterFailover = secondDumpAfterFailover;
   }
 }

@@ -1,15 +1,20 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.io.parquet.write;
 
@@ -45,10 +50,12 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.ShortObjectInspec
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.HiveDecimalUtils;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.MapLogicalTypeAnnotation;
 import org.apache.parquet.schema.Type;
@@ -57,6 +64,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 /**
  *
@@ -69,6 +77,7 @@ public class DataWritableWriter {
   protected final RecordConsumer recordConsumer;
   private final GroupType schema;
   private final boolean defaultDateProleptic;
+  private final boolean isLegacyZoneConversion;
   private Configuration conf;
 
   /* This writer will be created when writing the first row in order to get
@@ -80,6 +89,8 @@ public class DataWritableWriter {
     this.recordConsumer = recordConsumer;
     this.schema = schema;
     this.defaultDateProleptic = defaultDateProleptic;
+    this.isLegacyZoneConversion =
+        HiveConf.ConfVars.HIVE_PARQUET_TIMESTAMP_WRITE_LEGACY_CONVERSION_ENABLED.defaultBoolVal;
   }
 
 	public DataWritableWriter(final RecordConsumer recordConsumer, final GroupType schema,
@@ -88,6 +99,8 @@ public class DataWritableWriter {
     this.schema = schema;
     this.defaultDateProleptic = defaultDateProleptic;
     this.conf = conf;
+    this.isLegacyZoneConversion =
+        HiveConf.getBoolVar(this.conf, HiveConf.ConfVars.HIVE_PARQUET_TIMESTAMP_WRITE_LEGACY_CONVERSION_ENABLED);
   }
 
   /**
@@ -151,7 +164,8 @@ public class DataWritableWriter {
         case TIMESTAMP:
           return new TimestampDataWriter((TimestampObjectInspector)inspector);
         case DECIMAL:
-          return new DecimalDataWriter((HiveDecimalObjectInspector)inspector);
+          return new DecimalDataWriter((HiveDecimalObjectInspector) inspector,
+              getSchemaDecimalTypeInfo(type, (HiveDecimalObjectInspector) inspector));
         case DATE:
           return new DateDataWriter((DateObjectInspector)inspector);
         default:
@@ -172,6 +186,22 @@ public class DataWritableWriter {
         return new StructDataWriter((StructObjectInspector)inspector, groupType);
       }
     }
+  }
+
+  /**
+   * Return the decimal type information defined by the Parquet schema. This ensures the writer
+   * uses the declared precision/scale.
+   * @param type Type that contains information about the type schema.
+   * @param inspector The object inspector used to get the value type.
+   * @return DecimalTypeInfo The decimal type info object with proper precision and scale.
+   */
+  private DecimalTypeInfo getSchemaDecimalTypeInfo(Type type, HiveDecimalObjectInspector inspector) {
+    LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+    if (logicalType instanceof DecimalLogicalTypeAnnotation decimal) {
+      return new DecimalTypeInfo(decimal.getPrecision(), decimal.getScale());
+    }
+    // Fallback to the inspector's type info if the schema does not carry the logical annotation.
+    return (DecimalTypeInfo) inspector.getTypeInfo();
   }
 
   /**
@@ -536,7 +566,8 @@ public class DataWritableWriter {
         Long int64value = ParquetTimestampUtils.getInt64(ts, timeUnit);
         recordConsumer.addLong(int64value);
       } else {
-        recordConsumer.addBinary(NanoTimeUtils.getNanoTime(ts, false).toBinary());
+        recordConsumer.addBinary(
+            NanoTimeUtils.getNanoTime(ts, TimeZone.getDefault().toZoneId(), isLegacyZoneConversion).toBinary());
       }
     }
 
@@ -552,16 +583,23 @@ public class DataWritableWriter {
 
   private class DecimalDataWriter implements DataWriter {
     private HiveDecimalObjectInspector inspector;
+    private final DecimalTypeInfo schemaDecimalTypeInfo;
 
-    public DecimalDataWriter(HiveDecimalObjectInspector inspector) {
+    public DecimalDataWriter(HiveDecimalObjectInspector inspector, DecimalTypeInfo schemaDecimalTypeInfo) {
       this.inspector = inspector;
+      this.schemaDecimalTypeInfo = schemaDecimalTypeInfo;
     }
 
     @Override
     public void write(Object value) {
       HiveDecimal vDecimal = inspector.getPrimitiveJavaObject(value);
-      DecimalTypeInfo decTypeInfo = (DecimalTypeInfo)inspector.getTypeInfo();
-      recordConsumer.addBinary(decimalToBinary(vDecimal, decTypeInfo));
+      // Enforce the Parquet schema precision/scale before converting to binary to avoid size mismatches.
+      HiveDecimal enforcedDecimal = HiveDecimalUtils.enforcePrecisionScale(vDecimal, schemaDecimalTypeInfo);
+      if (enforcedDecimal == null) {
+        throw new RuntimeException(
+            "Decimal value " + vDecimal + " does not fit in declared type " + schemaDecimalTypeInfo.getQualifiedName());
+      }
+      recordConsumer.addBinary(decimalToBinary(vDecimal, schemaDecimalTypeInfo));
     }
 
     private Binary decimalToBinary(final HiveDecimal hiveDecimal, final DecimalTypeInfo decimalTypeInfo) {

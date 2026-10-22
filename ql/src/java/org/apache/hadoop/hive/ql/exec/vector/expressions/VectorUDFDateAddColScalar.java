@@ -9,16 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.expressions;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.common.type.Date;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
@@ -37,20 +39,17 @@ import java.util.Arrays;
 public class VectorUDFDateAddColScalar extends VectorExpression {
   private static final long serialVersionUID = 1L;
 
-  private final int colNum;
   private final int numDays;
 
   protected boolean isPositive = true;
 
   private transient final Text text = new Text();
-  private transient final DateParser dateParser = new DateParser();
 
   // Transient members initialized by transientInit method.
   private transient PrimitiveCategory primitiveCategory;
 
   public VectorUDFDateAddColScalar(int colNum, long numDays, int outputColumnNum) {
-    super(outputColumnNum);
-    this.colNum = colNum;
+    super(colNum, outputColumnNum);
     this.numDays = (int) numDays;
   }
 
@@ -58,7 +57,6 @@ public class VectorUDFDateAddColScalar extends VectorExpression {
     super();
 
     // Dummy final assignments.
-    colNum = -1;
     numDays = 0;
   }
 
@@ -78,7 +76,7 @@ public class VectorUDFDateAddColScalar extends VectorExpression {
     }
 
     LongColumnVector outputColVector = (LongColumnVector) batch.cols[outputColumnNum];
-    ColumnVector inputCol = batch.cols[this.colNum];
+    ColumnVector inputCol = batch.cols[this.inputColumnNum[0]];
     /* every line below this is identical for evaluateLong & evaluateString */
     final int n = inputCol.isRepeating ? 1 : batch.size;
     int[] sel = batch.selected;
@@ -327,9 +325,8 @@ public class VectorUDFDateAddColScalar extends VectorExpression {
   protected void evaluateString(ColumnVector columnVector, LongColumnVector outputVector, int i) {
     BytesColumnVector bcv = (BytesColumnVector) columnVector;
     text.set(bcv.vector[i], bcv.start[i], bcv.length[i]);
-    org.apache.hadoop.hive.common.type.Date hDate = new org.apache.hadoop.hive.common.type.Date();
-    boolean parsed = dateParser.parseDate(text.toString(), hDate);
-    if (!parsed) {
+    Date hDate = DateParser.parseDate(text.toString());
+    if (hDate == null) {
       outputVector.noNulls = false;
       outputVector.isNull[i] = true;
       return;
@@ -345,7 +342,7 @@ public class VectorUDFDateAddColScalar extends VectorExpression {
 
   @Override
   public String vectorExpressionParameters() {
-    return getColumnParamString(0, colNum) + ", val " + numDays;
+    return getColumnParamString(0, inputColumnNum[0]) + ", val " + numDays;
   }
 
   @Override

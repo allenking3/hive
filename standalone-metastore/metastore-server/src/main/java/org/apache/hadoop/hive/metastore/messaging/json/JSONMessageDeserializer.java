@@ -19,6 +19,8 @@
 
 package org.apache.hadoop.hive.metastore.messaging.json;
 
+import com.fasterxml.jackson.core.json.JsonReadFeature;
+
 import org.apache.hadoop.hive.metastore.messaging.AbortTxnMessage;
 import org.apache.hadoop.hive.metastore.messaging.AddCheckConstraintMessage;
 import org.apache.hadoop.hive.metastore.messaging.AddDefaultConstraintMessage;
@@ -30,7 +32,9 @@ import org.apache.hadoop.hive.metastore.messaging.AddUniqueConstraintMessage;
 import org.apache.hadoop.hive.metastore.messaging.AllocWriteIdMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterPartitionMessage;
+import org.apache.hadoop.hive.metastore.messaging.AlterPartitionsMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterTableMessage;
+import org.apache.hadoop.hive.metastore.messaging.CommitCompactionMessage;
 import org.apache.hadoop.hive.metastore.messaging.CommitTxnMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateFunctionMessage;
@@ -64,6 +68,7 @@ public class JSONMessageDeserializer extends MessageDeserializer {
     mapper.configure(MapperFeature.AUTO_DETECT_GETTERS, false);
     mapper.configure(MapperFeature.AUTO_DETECT_IS_GETTERS, false);
     mapper.configure(MapperFeature.AUTO_DETECT_FIELDS, false);
+    mapper.configure(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature(), true);
   }
 
   @Override
@@ -144,6 +149,15 @@ public class JSONMessageDeserializer extends MessageDeserializer {
       return mapper.readValue(messageBody, JSONAlterPartitionMessage.class);
     } catch (Exception e) {
       throw new IllegalArgumentException("Could not construct AlterPartitionMessage.", e);
+    }
+  }
+
+  @Override
+  public AlterPartitionsMessage getAlterPartitionsMessage(String messageBody) {
+    try {
+      return mapper.readValue(messageBody, JSONAlterPartitionsMessage.class);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Could not construct AlterPartitionsMessage.", e);
     }
   }
 
@@ -328,6 +342,14 @@ public class JSONMessageDeserializer extends MessageDeserializer {
       return mapper.readValue(messageBody, JSONDeletePartitionColumnStatMessage.class);
     } catch (Exception e) {
       throw new IllegalArgumentException("Could not construct UpdatePartitionColumnStatMessage", e);
+    }
+  }
+
+  public CommitCompactionMessage getCommitCompactionMessage(String messageBody) {
+    try {
+      return mapper.readValue(messageBody, JSONCommitCompactionMessage.class);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Could not construct CommitCompactionMessage", e);
     }
   }
 }

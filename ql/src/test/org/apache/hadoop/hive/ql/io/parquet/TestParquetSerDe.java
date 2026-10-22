@@ -1,15 +1,20 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.io.parquet;
 
@@ -22,7 +27,6 @@ import org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.io.ByteWritable;
 import org.apache.hadoop.hive.serde2.io.DoubleWritable;
 import org.apache.hadoop.hive.serde2.io.ParquetHiveRecord;
@@ -53,7 +57,7 @@ public class TestParquetSerDe {
       final ParquetHiveSerDe serDe = new ParquetHiveSerDe();
       final Configuration conf = new Configuration();
       final Properties tbl = createProperties();
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       final Writable[] arr = new Writable[9];
@@ -103,7 +107,7 @@ public class TestParquetSerDe {
     tblProperties.setProperty(serdeConstants.LIST_COLUMN_TYPES, "int,struct<a:int,b:string>");
     conf.set(ColumnProjectionUtils.READ_NESTED_COLUMN_PATH_CONF_STR, "s.b");
 
-    serDe.initialize(conf, tblProperties);
+    serDe.initialize(conf, tblProperties, null);
 
     // Generate test data
     Writable[] wb = new Writable[1];

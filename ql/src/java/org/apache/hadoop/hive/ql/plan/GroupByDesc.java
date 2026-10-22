@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.exec.vector.VectorAggregationDesc;
 import org.apache.hadoop.hive.ql.optimizer.signature.Signature;
@@ -74,6 +74,8 @@ public class GroupByDesc extends AbstractOperatorDesc {
   private float groupByMemoryUsage;
   private float memoryThreshold;
   private float minReductionHashAggr;
+  private float minReductionHashAggrLowerBound;
+  private float hashAggrFlushPercent;
   transient private boolean isDistinct;
   private boolean dontResetAggrsDistinct;
 
@@ -88,13 +90,15 @@ public class GroupByDesc extends AbstractOperatorDesc {
       final float groupByMemoryUsage,
       final float memoryThreshold,
       final float minReductionHashAggr,
+      final float minReductionHashAggrLowerBound,
+      final float hashAggrFlushPercent,
       final List<Long> listGroupingSets,
       final boolean groupingSetsPresent,
       final int groupingSetsPosition,
       final boolean isDistinct) {
     this(mode, outputColumnNames, keys, aggregators,
-        false, groupByMemoryUsage, memoryThreshold, minReductionHashAggr, listGroupingSets,
-        groupingSetsPresent, groupingSetsPosition, isDistinct);
+        false, groupByMemoryUsage, memoryThreshold, minReductionHashAggr, minReductionHashAggrLowerBound,
+            hashAggrFlushPercent, listGroupingSets, groupingSetsPresent, groupingSetsPosition, isDistinct);
   }
 
   public GroupByDesc(
@@ -106,6 +110,8 @@ public class GroupByDesc extends AbstractOperatorDesc {
       final float groupByMemoryUsage,
       final float memoryThreshold,
       final float minReductionHashAggr,
+      final float minReductionHashAggrLowerBound,
+      final float hashAggrFlushPercent,
       final List<Long> listGroupingSets,
       final boolean groupingSetsPresent,
       final int groupingSetsPosition,
@@ -118,6 +124,8 @@ public class GroupByDesc extends AbstractOperatorDesc {
     this.groupByMemoryUsage = groupByMemoryUsage;
     this.memoryThreshold = memoryThreshold;
     this.minReductionHashAggr = minReductionHashAggr;
+    this.minReductionHashAggrLowerBound = minReductionHashAggrLowerBound;
+    this.hashAggrFlushPercent = hashAggrFlushPercent;
     this.listGroupingSets = listGroupingSets;
     this.groupingSetsPresent = groupingSetsPresent;
     this.groupingSetPosition = groupingSetsPosition;
@@ -214,6 +222,10 @@ public class GroupByDesc extends AbstractOperatorDesc {
 
   public float getMinReductionHashAggr() {
     return minReductionHashAggr;
+  }
+
+  public float getMinReductionHashAggrLowerBound() {
+    return minReductionHashAggrLowerBound;
   }
 
   public void setMinReductionHashAggr(float minReductionHashAggr) {
@@ -329,6 +341,14 @@ public class GroupByDesc extends AbstractOperatorDesc {
     this.isDistinct = isDistinct;
   }
 
+  public float getHashAggrFlushPercent() {
+    return hashAggrFlushPercent;
+  }
+
+  public void setHashAggrFlushPercent(float hashAggrFlushPercent) {
+    this.hashAggrFlushPercent = hashAggrFlushPercent;
+  }
+
   @Override
   public Object clone() {
     List<String> outputColumnNames = new ArrayList<>();
@@ -340,8 +360,8 @@ public class GroupByDesc extends AbstractOperatorDesc {
     List<Long> listGroupingSets = new ArrayList<>();
     listGroupingSets.addAll(this.listGroupingSets);
     return new GroupByDesc(this.mode, outputColumnNames, keys, aggregators,
-        this.groupByMemoryUsage, this.memoryThreshold, this.minReductionHashAggr,
-        listGroupingSets, this.groupingSetsPresent,
+        this.groupByMemoryUsage, this.memoryThreshold, this.minReductionHashAggr, this.minReductionHashAggrLowerBound,
+        this.hashAggrFlushPercent, listGroupingSets, this.groupingSetsPresent,
         this.groupingSetPosition, this.isDistinct);
   }
 
@@ -446,6 +466,4 @@ public class GroupByDesc extends AbstractOperatorDesc {
     }
     return false;
   }
-
-
 }

@@ -9,31 +9,33 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClientWithLocalCache;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.messaging.EventMessage;
 import org.apache.hadoop.hive.metastore.messaging.json.gzip.GzipJSONMessageEncoder;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore.BehaviourInjection;
 import org.apache.hadoop.hive.metastore.InjectableBehaviourObjectStore.CallerArguments;
+import org.apache.hadoop.hive.ql.metadata.HiveMetaStoreClientWithLocalCache;
 import org.apache.hadoop.hive.shims.Utils;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
 import org.junit.After;
@@ -56,7 +58,7 @@ import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 
-import static org.apache.hadoop.hive.metastore.ReplChangeManager.SOURCE_OF_REPLICATION;
+import static org.apache.hadoop.hive.common.repl.ReplConst.SOURCE_OF_REPLICATION;
 
 /**
  * Tests for statistics replication.
@@ -92,15 +94,17 @@ public class TestStatsReplicationScenarios {
                                        Map<String, String> replicaOverrides, Class clazz,
                                        boolean autogather, AcidTableKind acidTableKind)
       throws Exception {
-    conf = new HiveConf(clazz);
+    conf = new HiveConfForTest(TestStatsReplicationScenarios.class);
     conf.set("dfs.client.use.datanode.hostname", "true");
     conf.set("hadoop.proxyuser." + Utils.getUGI().getShortUserName() + ".hosts", "*");
     MiniDFSCluster miniDFSCluster =
-        new MiniDFSCluster.Builder(conf).numDataNodes(1).format(true).build();
+        new MiniDFSCluster.Builder(conf).numDataNodes(2).format(true).build();
     Map<String, String> additionalOverrides = new HashMap<String, String>() {{
         put("fs.defaultFS", miniDFSCluster.getFileSystem().getUri().toString());
         put(HiveConf.ConfVars.HIVE_IN_TEST_REPL.varname, "true");
         put(HiveConf.ConfVars.REPL_RUN_DATA_COPY_TASKS_ON_TARGET.varname, "false");
+        put(HiveConf.ConfVars.REPL_RETAIN_CUSTOM_LOCATIONS_FOR_DB_ON_TARGET.varname, "false");
+        put(MetastoreConf.ConfVars.TXN_OPENTXN_TIMEOUT.getVarname(), "2000");
       }};
     Map<String, String> replicatedOverrides = new HashMap<>();
 
@@ -110,7 +114,7 @@ public class TestStatsReplicationScenarios {
     // Run with autogather false on primary if requested
     Map<String, String> sourceOverrides = new HashMap<>();
     hasAutogather = autogather;
-    additionalOverrides.put(HiveConf.ConfVars.HIVESTATSAUTOGATHER.varname,
+    additionalOverrides.put(HiveConf.ConfVars.HIVE_STATS_AUTOGATHER.varname,
             autogather ? "true" : "false");
     sourceOverrides.putAll(additionalOverrides);
     sourceOverrides.putAll(primaryOverrides);
@@ -333,7 +337,7 @@ public class TestStatsReplicationScenarios {
 
     // Load, if necessary changing configuration.
     if (parallelLoad) {
-      replica.hiveConf.setBoolVar(HiveConf.ConfVars.EXECPARALLEL, true);
+      replica.hiveConf.setBoolVar(HiveConf.ConfVars.EXEC_PARALLEL, true);
     }
 
     // Fail load if for testing failure and retry scenario. Fail the load while setting
@@ -346,7 +350,7 @@ public class TestStatsReplicationScenarios {
       }
     }
     
-    Path baseDumpDir = new Path(primary.hiveConf.getVar(HiveConf.ConfVars.REPLDIR));
+    Path baseDumpDir = new Path(primary.hiveConf.getVar(HiveConf.ConfVars.REPL_DIR));
     Path nonRecoverablePath = TestReplicationScenarios.getNonRecoverablePath(baseDumpDir, primaryDbName, primary.hiveConf);
     if(nonRecoverablePath != null){
       baseDumpDir.getFileSystem(primary.hiveConf).delete(nonRecoverablePath, true);
@@ -362,7 +366,7 @@ public class TestStatsReplicationScenarios {
     }
 
     if (parallelLoad) {
-      replica.hiveConf.setBoolVar(HiveConf.ConfVars.EXECPARALLEL, false);
+      replica.hiveConf.setBoolVar(HiveConf.ConfVars.EXEC_PARALLEL, false);
     }
 
     // Test statistics
@@ -442,31 +446,29 @@ public class TestStatsReplicationScenarios {
     }
     callerVerifier.assertInjectionsPerformed(true, false);
 
-    // fail add notification when second update partition stats event is encountered. Thus we test
+    // fail second call to update partition column stats. Thus we test
     // successful application as well as failed application of this event.
-    callerVerifier = new BehaviourInjection<NotificationEvent, Boolean>() {
+    BehaviourInjection<Table, Boolean> callerVerifier2 = new BehaviourInjection<Table, Boolean>() {
       int cntEvents = 0;
 
       @Override
-      public Boolean apply(NotificationEvent entry) {
+      public Boolean apply(Table entry) {
         cntEvents++;
-        if (entry.getEventType().equalsIgnoreCase(EventMessage.EventType.UPDATE_PARTITION_COLUMN_STAT.toString()) &&
-            cntEvents > 1) {
+        if (cntEvents > 1) {
           injectionPathCalled = true;
           LOG.warn("Verifier - DB: " + entry.getDbName()
-                  + " Table: " + entry.getTableName()
-                  + " Event: " + entry.getEventType());
+                  + " Table: " + entry.getTableName());
           return false;
         }
         return true;
       }
     };
 
-    InjectableBehaviourObjectStore.setAddNotificationModifier(callerVerifier);
+    InjectableBehaviourObjectStore.setUpdatePartColStatsBehaviour(callerVerifier2);
     try {
       replica.loadFailure(replicatedDbName, primaryDbName);
     } finally {
-      InjectableBehaviourObjectStore.resetAddNotificationModifier();
+      InjectableBehaviourObjectStore.setUpdatePartColStatsBehaviour(null);
     }
     callerVerifier.assertInjectionsPerformed(true, false);
   }

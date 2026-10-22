@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.mr;
@@ -30,6 +31,7 @@ import org.apache.hadoop.hive.ql.exec.mr.ExecMapper.ReportStats;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.plan.ReduceWork;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
+import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
@@ -68,7 +70,7 @@ public class ExecReducer extends MapReduceBase implements Reducer {
   private final Object[] valueObject = new Object[Byte.MAX_VALUE];
   private final List<Object> row = new ArrayList<Object>(Utilities.reduceFieldNameList.size());
 
-  private Deserializer inputKeyDeserializer;
+  private AbstractSerDe inputKeySerDe;
   private JobConf jc;
   private OutputCollector<?, ?> oc;
   private Operator<?> reducer;
@@ -100,20 +102,18 @@ public class ExecReducer extends MapReduceBase implements Reducer {
     isTagged = gWork.getNeedsTagging();
     try {
       keyTableDesc = gWork.getKeyDesc();
-      inputKeyDeserializer = ReflectionUtils.newInstance(keyTableDesc
-          .getDeserializerClass(), null);
-      SerDeUtils.initializeSerDe(inputKeyDeserializer, null, keyTableDesc.getProperties(), null);
-      keyObjectInspector = inputKeyDeserializer.getObjectInspector();
+      inputKeySerDe = ReflectionUtils.newInstance(keyTableDesc
+          .getSerDeClass(), null);
+      inputKeySerDe.initialize(null, keyTableDesc.getProperties(), null);
+      keyObjectInspector = inputKeySerDe.getObjectInspector();
       valueTableDesc = new TableDesc[gWork.getTagToValueDesc().size()];
       for (int tag = 0; tag < gWork.getTagToValueDesc().size(); tag++) {
         // We should initialize the SerDe with the TypeInfo when available.
         valueTableDesc[tag] = gWork.getTagToValueDesc().get(tag);
-        inputValueDeserializer[tag] = ReflectionUtils.newInstance(
-            valueTableDesc[tag].getDeserializerClass(), null);
-        SerDeUtils.initializeSerDe(inputValueDeserializer[tag], null,
-                                   valueTableDesc[tag].getProperties(), null);
-        valueObjectInspector[tag] = inputValueDeserializer[tag]
-            .getObjectInspector();
+        AbstractSerDe valueObjectSerDe = ReflectionUtils.newInstance(valueTableDesc[tag].getSerDeClass(), null);
+        valueObjectSerDe.initialize(null, valueTableDesc[tag].getProperties(), null);
+        inputValueDeserializer[tag] = valueObjectSerDe;
+        valueObjectInspector[tag] = inputValueDeserializer[tag].getObjectInspector();
 
         ArrayList<ObjectInspector> ois = new ArrayList<ObjectInspector>();
         ois.add(keyObjectInspector);
@@ -173,14 +173,12 @@ public class ExecReducer extends MapReduceBase implements Reducer {
           groupKey = new BytesWritable();
         } else {
           // If a operator wants to do some work at the end of a group
-          if (LOG.isTraceEnabled()) {
-            LOG.trace("End Group");
-          }
+          LOG.trace("End Group");
           reducer.endGroup();
         }
 
         try {
-          keyObject = inputKeyDeserializer.deserialize(keyWritable);
+          keyObject = inputKeySerDe.deserialize(keyWritable);
         } catch (Exception e) {
           throw new HiveException(
               "Hive Runtime Error: Unable to deserialize reduce input key from "
@@ -190,9 +188,7 @@ public class ExecReducer extends MapReduceBase implements Reducer {
         }
 
         groupKey.set(keyWritable.get(), 0, keyWritable.getSize());
-        if (LOG.isTraceEnabled()) {
-          LOG.trace("Start Group");
-        }
+        LOG.trace("Start Group");
         reducer.startGroup();
         reducer.setGroupKeyObject(keyObject);
       }
@@ -241,7 +237,7 @@ public class ExecReducer extends MapReduceBase implements Reducer {
         // Don't create a new object if we are already out of memory
         throw (OutOfMemoryError) e;
       } else {
-        LOG.error(StringUtils.stringifyException(e));
+        LOG.error("Reduce failed", e);
         throw new RuntimeException(e);
       }
     }
@@ -251,16 +247,14 @@ public class ExecReducer extends MapReduceBase implements Reducer {
   public void close() {
 
     // No row was processed
-    if (oc == null && LOG.isTraceEnabled()) {
+    if (oc == null) {
       LOG.trace("Close called without any rows processed");
     }
 
     try {
       if (groupKey != null) {
         // If a operator wants to do some work at the end of a group
-        if (LOG.isTraceEnabled()) {
-          LOG.trace("End Group");
-        }
+        LOG.trace("End Group");
         reducer.endGroup();
       }
 

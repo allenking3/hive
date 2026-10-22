@@ -9,21 +9,28 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.cli.control;
 
 import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.Map;
 
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.QTestMiniClusters;
 import org.apache.hadoop.hive.ql.QTestMiniClusters.MiniClusterType;
+import org.apache.hadoop.hive.ql.hooks.ExplainFormattedCBOHook;
 import org.apache.hadoop.hive.ql.parse.CoreParseNegative;
+import org.apache.hadoop.hive.ql.qoption.QTestDatabaseHandler;
 
 public class CliConfigs {
 
@@ -54,7 +61,7 @@ public class CliConfigs {
         setInitScript("q_test_init.sql");
         setCleanupScript("q_test_cleanup.sql");
 
-        setHiveConfDir("");
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -74,7 +81,8 @@ public class CliConfigs {
         setInitScript("q_test_init_parse.sql");
         setCleanupScript("q_test_cleanup.sql");
 
-        setHiveConfDir("data/conf/perf-reg/");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -96,7 +104,7 @@ public class CliConfigs {
         setInitScript("q_test_init_for_minimr.sql");
         setCleanupScript("q_test_cleanup.sql");
 
-        setHiveConfDir("");
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.MR);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -149,46 +157,6 @@ public class CliConfigs {
     }
   }
 
-  public static class MiniDruidCliConfig extends AbstractCliConfig {
-    public MiniDruidCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-
-        includesFrom(testConfigProps, "druid.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/druid");
-        setLogDir("itests/qtest/target/tmp/log");
-
-        setInitScript("q_test_druid_init.sql");
-        setCleanupScript("q_test_cleanup_druid.sql");
-        setHiveConfDir("data/conf/llap");
-        setClusterType(MiniClusterType.DRUID);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class MiniDruidKafkaCliConfig extends AbstractCliConfig {
-    public MiniDruidKafkaCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-        includesFrom(testConfigProps, "druid.kafka.query.files");
-        setResultsDir("ql/src/test/results/clientpositive/druid");
-        setLogDir("itests/qtest/target/tmp/log");
-
-        setInitScript("q_test_druid_init.sql");
-        setCleanupScript("q_test_cleanup_druid.sql");
-        setHiveConfDir("data/conf/llap");
-        setClusterType(MiniClusterType.DRUID_KAFKA);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
   public static class MiniKafkaCliConfig extends AbstractCliConfig {
     public MiniKafkaCliConfig() {
       super(CoreCliDriver.class);
@@ -217,15 +185,11 @@ public class CliConfigs {
         excludesFrom(testConfigProps, "minillap.query.files");
         excludesFrom(testConfigProps, "minitez.query.files");
         excludesFrom(testConfigProps, "encrypted.query.files");
-        excludesFrom(testConfigProps, "druid.query.files");
-        excludesFrom(testConfigProps, "druid.kafka.query.files");
         excludesFrom(testConfigProps, "hive.kafka.query.files");
         excludesFrom(testConfigProps, "erasurecoding.only.query.files");
         excludesFrom(testConfigProps, "beeline.positive.include");
-        excludesFrom(testConfigProps, "spark.only.query.files");
-        excludesFrom(testConfigProps, "localSpark.only.query.files");
-        excludesFrom(testConfigProps, "miniSparkOnYarn.only.query.files");
-
+        excludesFrom(testConfigProps, "compaction.query.files");
+        
         setResultsDir("ql/src/test/results/clientpositive/llap");
         setLogDir("itests/qtest/target/qfile-results/clientpositive");
 
@@ -240,6 +204,95 @@ public class CliConfigs {
     }
   }
 
+  public static class MiniLlapLocalPostgresJdbcCliConfig extends AbstractCliConfig {
+    private final QTestDatabaseHandler.DatabaseType databaseType;
+    private final String jdbcInitScript;
+    private final String externalTablesInitScript;
+
+    public MiniLlapLocalPostgresJdbcCliConfig() {
+      super(CoreJdbcCliDriver.class);
+      try {
+        databaseType = QTestDatabaseHandler.DatabaseType.POSTGRES;
+        jdbcInitScript = "q_test_tpcds_schema.postgres.sql";
+        externalTablesInitScript = "q_test_tpcds_external_tables_schema.postgres.sql";
+
+        setQueryDir("ql/src/test/queries/clientpositive/perf");
+        setLogDir("itests/qtest/target/qfile-results/clientpositive/jdbc/postgres");
+        setResultsDir("ql/src/test/results/clientpositive/jdbc/postgres");
+        setHiveConfDir("data/conf/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+        setCustomConfigValueMap(createConfVarsStringMap());
+        excludesFrom(testConfigProps, "jdbc.disabled.query.files");
+        // Run CBO plans only
+        includeCboQueryFiles();
+      } catch (Exception e) {
+        throw new RuntimeException("can't construct cliconfig", e);
+      }
+    }
+
+    private void includeCboQueryFiles() {
+      File[] cboQueryFiles = new File(getQueryDirectory())
+          .listFiles((dir, name) -> name.startsWith("cbo") && name.endsWith(".q"));
+      if (cboQueryFiles != null) {
+        for (File f : cboQueryFiles) {
+          includeQuery(f.getName());
+        }
+      }
+    }
+
+    private static Map<HiveConf.ConfVars, String> createConfVarsStringMap() {
+      Map<HiveConf.ConfVars, String> conf = new EnumMap<>(HiveConf.ConfVars.class);
+      conf.put(HiveConf.ConfVars.PRE_EXEC_HOOKS, "");
+      conf.put(HiveConf.ConfVars.POST_EXEC_HOOKS, "");
+      conf.put(HiveConf.ConfVars.HIVE_CTE_MATERIALIZE_THRESHOLD, "-1");
+      return conf;
+    }
+
+    public QTestDatabaseHandler.DatabaseType getDatabaseType() {
+      return databaseType;
+    }
+
+    public String getJdbcInitScript() {
+      return jdbcInitScript;
+    }
+
+    public String getExternalTablesInitScript() {
+      return externalTablesInitScript;
+    }
+  }
+
+  public static class MiniLlapLocalCompactorCliConfig extends AbstractCliConfig {
+
+    public MiniLlapLocalCompactorCliConfig() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("ql/src/test/queries/clientpositive");
+
+        includesFrom(testConfigProps, "compaction.query.files");
+        setResultsDir("ql/src/test/results/clientpositive/llap");
+        setLogDir("itests/qtest/target/qfile-results/clientpositive");
+
+        setInitScript("q_test_init.sql");
+        setCleanupScript("q_test_cleanup.sql");
+
+        setHiveConfDir("data/conf/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+        setCustomConfigValueMap(createConfVarsStringMap());
+      } catch (Exception e) {
+        throw new RuntimeException("can't construct cliconfig", e);
+      }
+    }
+
+    private static Map<HiveConf.ConfVars, String> createConfVarsStringMap() {
+      Map<HiveConf.ConfVars,String> customConfigValueMap = new HashMap<>();
+      customConfigValueMap.put(HiveConf.ConfVars.COMPACTOR_CRUD_QUERY_BASED, "true");
+      customConfigValueMap.put(HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY, "true");
+      customConfigValueMap.put(HiveConf.ConfVars.HIVE_TXN_MANAGER, "org.apache.hadoop.hive.ql.lockmgr.DbTxnManager");
+      customConfigValueMap.put(HiveConf.ConfVars.HIVE_COMPACTOR_GATHER_STATS, "false");
+      customConfigValueMap.put(HiveConf.ConfVars.HIVE_AUTHORIZATION_MANAGER, "org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactoryForTest");
+      return customConfigValueMap;
+    }
+  }
   public static class EncryptedHDFSCliConfig extends AbstractCliConfig {
     public EncryptedHDFSCliConfig() {
       super(CoreCliDriver.class);
@@ -256,13 +309,9 @@ public class CliConfigs {
 
 
         setClusterType(MiniClusterType.MR);
-        setFsType(QTestMiniClusters.FsType.ENCRYPTED_HDFS); // override default FsType.HDFS
-        if (getClusterType() == MiniClusterType.TEZ) {
-          setHiveConfDir("data/conf/tez");
-        } else {
-          setHiveConfDir("data/conf");
-        }
-
+        setFsType(QTestMiniClusters.FsType.ENCRYPTED_HDFS);
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
@@ -281,99 +330,84 @@ public class CliConfigs {
         setInitScript("q_test_init_contrib.sql");
         setCleanupScript("q_test_cleanup_contrib.sql");
 
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
     }
   }
 
-  public static class TezPerfCliConfig extends AbstractCliConfig {
-    public TezPerfCliConfig(boolean useConstraints) {
+  public static class TezTPCDS30TBCliConfig extends AbstractCliConfig {
+    public TezTPCDS30TBCliConfig() {
       super(CorePerfCliDriver.class);
       try {
         setQueryDir("ql/src/test/queries/clientpositive/perf");
-
-        if (useConstraints) {
-          excludesFrom(testConfigProps, "tez.perf.constraints.disabled.query.files");
-        } else {
-          excludesFrom(testConfigProps, "tez.perf.disabled.query.files");
-        }
-
-        excludesFrom(testConfigProps, "minimr.query.files");
-        excludesFrom(testConfigProps, "minitez.query.files");
-        excludesFrom(testConfigProps, "encrypted.query.files");
-        excludesFrom(testConfigProps, "erasurecoding.only.query.files");
-
-        setLogDir("itests/qtest/target/qfile-results/clientpositive/tez");
-
-        if (useConstraints) {
-          setInitScript("q_perf_test_init_constraints.sql");
-          setResultsDir("ql/src/test/results/clientpositive/perf/tez/constraints");
-        } else {
-          setInitScript("q_perf_test_init.sql");
-          setResultsDir("ql/src/test/results/clientpositive/perf/tez");
-        }
-        setCleanupScript("q_perf_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/perf-reg/tez");
-        setClusterType(MiniClusterType.TEZ);
+        setLogDir("itests/qtest/target/qfile-results/clientpositive/perf/tpcds30tb/tez");
+        setResultsDir("ql/src/test/results/clientpositive/perf/tpcds30tb/tez");
+        setHiveConfDir("data/conf/perf/tpcds30tb/tez");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+        setMetastoreType("postgres.tpcds");
+        // The metastore in this configuration can be used only for reading statistics.
+        // We cannot exploit the information for running queries so it is impossible to
+        // create views or perform other similar operations.
+        excludesFrom(testConfigProps, "tez.perf.disabled.query.files");
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
     }
   }
 
-  public static class SparkPerfCliConfig extends AbstractCliConfig {
-    public SparkPerfCliConfig() {
+  public static class TPCDSCteCliConfig extends AbstractCliConfig {
+    public TPCDSCteCliConfig() {
       super(CorePerfCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive/perf");
-
-        excludesFrom(testConfigProps, "spark.perf.disabled.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/perf/spark");
-        setLogDir("itests/qtest/target/qfile-results/clientpositive/spark");
-
-        setInitScript("q_perf_test_init.sql");
-        setCleanupScript("q_perf_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/perf-reg/spark");
-        setClusterType(MiniClusterType.SPARK);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
+      setQueryDir("ql/src/test/queries/clientpositive/perf");
+      setLogDir("itests/qtest/target/qfile-results/clientpositive/perf/tpcds30tb/cte");
+      setResultsDir("ql/src/test/results/clientpositive/perf/tpcds30tb/cte");
+      setHiveConfDir("data/conf/perf/tpcds30tb/tez");
+      Map<HiveConf.ConfVars, String> conf = new EnumMap<>(HiveConf.ConfVars.class);
+      conf.put(HiveConf.ConfVars.HIVE_CTE_SUGGESTER_TYPE, "CBO");
+      conf.put(
+          HiveConf.ConfVars.HIVE_CTE_SUGGESTER_CLASS,
+          "org.apache.hadoop.hive.ql.optimizer.calcite.CommonTableExpressionPrintSuggester");
+      conf.put(HiveConf.ConfVars.HIVE_CTE_MATERIALIZE_THRESHOLD, "1");
+      conf.put(HiveConf.ConfVars.HIVE_CTE_MATERIALIZE_FULL_AGGREGATE_ONLY, "false");
+      setCustomConfigValueMap(conf);
+      setClusterType(MiniClusterType.LLAP_LOCAL);
+      setMetastoreType("postgres.tpcds");
+      // At the moment only makes sense to check CBO plans
+      for (int i = 1; i < 100; i++) {
+        includeQuery("cbo_query" + i + ".q");
       }
     }
   }
 
-  public static class CompareCliConfig extends AbstractCliConfig {
-    public CompareCliConfig() {
-      super(CoreCompareCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientcompare");
-
-        setResultsDir("ql/src/test/results/clientcompare");
-        setLogDir("itests/qtest/target/qfile-results/clientcompare");
-
-        setInitScript("q_test_init_compare.sql");
-        setCleanupScript("q_test_cleanup_compare.sql");
-
-        setHiveConfDir("");
-        setClusterType(MiniClusterType.NONE);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
+  public static class TPCDSFormattedCBOConfig extends AbstractCliConfig {
+    public TPCDSFormattedCBOConfig() {
+      super(CorePerfCliDriver.class);
+      setQueryDir("ql/src/test/queries/clientpositive/perf");
+      setLogDir("itests/qtest/target/qfile-results/clientpositive/perf/tpcds30tb/json");
+      setResultsDir("ql/src/test/results/clientpositive/perf/tpcds30tb/json");
+      setHiveConfDir("data/conf/perf/tpcds30tb/tez");
+      Map<HiveConf.ConfVars, String> conf = new EnumMap<>(HiveConf.ConfVars.class);
+      conf.put(HiveConf.ConfVars.HIVE_EXPLAIN_FORMATTED_INDENT, "true");
+      conf.put(HiveConf.ConfVars.SEMANTIC_ANALYZER_HOOK, ExplainFormattedCBOHook.class.getCanonicalName());
+      setCustomConfigValueMap(conf);
+      setClusterType(MiniClusterType.LLAP_LOCAL);
+      setMetastoreType("postgres.tpcds");
+      for (int i = 1; i < 100; i++) {
+        includeQuery("query" + i + ".q");
       }
     }
   }
-
-  public static class NegativeCliConfig extends AbstractCliConfig {
-    public NegativeCliConfig() {
+  
+  public static class NegativeLlapLocalCliConfig extends AbstractCliConfig {
+    public NegativeLlapLocalCliConfig() {
       super(CoreNegativeCliDriver.class);
       try {
         setQueryDir("ql/src/test/queries/clientnegative");
 
-        excludesFrom(testConfigProps, "minimr.query.negative.files");
-        excludesFrom(testConfigProps, "spark.only.query.negative.files");
+        excludesFrom(testConfigProps, "llap.query.negative.files");
 
         setResultsDir("ql/src/test/results/clientnegative");
         setLogDir("itests/qtest/target/qfile-results/clientnegative");
@@ -381,21 +415,21 @@ public class CliConfigs {
         setInitScript("q_test_init.sql");
         setCleanupScript("q_test_cleanup.sql");
 
-        setHiveConfDir("");
-        setClusterType(MiniClusterType.NONE);
+        setHiveConfDir("data/conf/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
     }
   }
 
-  public static class NegativeMinimrCli extends AbstractCliConfig {
-    public NegativeMinimrCli() {
+  public static class NegativeLlapCliConfig extends AbstractCliConfig {
+    public NegativeLlapCliConfig() {
       super(CoreNegativeCliDriver.class);
       try {
         setQueryDir("ql/src/test/queries/clientnegative");
 
-        includesFrom(testConfigProps, "minimr.query.negative.files");
+        includesFrom(testConfigProps, "llap.query.negative.files");
 
         setResultsDir("ql/src/test/results/clientnegative");
         setLogDir("itests/qtest/target/qfile-results/clientnegative");
@@ -403,8 +437,8 @@ public class CliConfigs {
         setInitScript("q_test_init_src.sql");
         setCleanupScript("q_test_cleanup_src.sql");
 
-        setHiveConfDir("");
-        setClusterType(MiniClusterType.MR);
+        setHiveConfDir("data/conf/llap");
+        setClusterType(MiniClusterType.LLAP);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
@@ -423,27 +457,8 @@ public class CliConfigs {
         setInitScript("q_test_init_src_with_stats.sql");
         setCleanupScript("q_test_cleanup_src.sql");
 
-        setHiveConfDir("");
-        setClusterType(MiniClusterType.NONE);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class DummyConfig extends AbstractCliConfig {
-    public DummyConfig() {
-      super(CoreDummy.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientcompare");
-
-        setResultsDir("ql/src/test/results/clientcompare");
-        setLogDir("itests/qtest/target/qfile-results/clientcompare");
-
-        setInitScript("q_test_init_compare.sql");
-        setCleanupScript("q_test_cleanup_compare.sql");
-
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -463,7 +478,8 @@ public class CliConfigs {
         setInitScript("q_test_init_src.sql");
         setCleanupScript("q_test_cleanup_src.sql");
 
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -483,7 +499,8 @@ public class CliConfigs {
         setInitScript("q_test_init.sql");
         setCleanupScript("q_test_cleanup.sql");
 
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -506,7 +523,8 @@ public class CliConfigs {
         setInitScript("q_test_init_src.sql");
         setCleanupScript("q_test_cleanup_src.sql");
 
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
@@ -526,99 +544,9 @@ public class CliConfigs {
         setInitScript("q_test_init_src_with_stats.sql");
         setCleanupScript("q_test_cleanup_src.sql");
 
-        setHiveConfDir("");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         setClusterType(MiniClusterType.NONE);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class SparkCliConfig extends AbstractCliConfig {
-    public SparkCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-
-        includesFrom(testConfigProps, "spark.query.files");
-        includesFrom(testConfigProps, "spark.only.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/spark");
-        setLogDir("itests/qtest-spark/target/qfile-results/clientpositive/spark");
-
-        setInitScript("q_test_init.sql");
-        setCleanupScript("q_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/spark/standalone");
-        setClusterType(MiniClusterType.SPARK);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class LocalSparkCliConfig extends AbstractCliConfig {
-    public LocalSparkCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-
-        includesFrom(testConfigProps, "localSpark.only.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/spark");
-        setLogDir("itests/qtest-spark/target/qfile-results/clientpositive/spark");
-
-        setInitScript("q_test_init.sql");
-        setCleanupScript("q_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/spark/local");
-        setClusterType(MiniClusterType.SPARK);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class SparkOnYarnCliConfig extends AbstractCliConfig {
-    public SparkOnYarnCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-
-        includesFrom(testConfigProps, "miniSparkOnYarn.query.files");
-        includesFrom(testConfigProps, "miniSparkOnYarn.only.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/spark");
-        setLogDir("itests/qtest-spark/target/qfile-results/clientpositive/spark");
-
-        setInitScript("q_test_init.sql");
-        setCleanupScript("q_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/spark/yarn-cluster");
-        setClusterType(MiniClusterType.MINI_SPARK_ON_YARN);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
-      }
-    }
-  }
-
-  public static class SparkNegativeCliConfig extends AbstractCliConfig {
-    public SparkNegativeCliConfig() {
-      super(CoreNegativeCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientnegative");
-
-        includesFrom(testConfigProps, "spark.query.negative.files");
-        includesFrom(testConfigProps, "spark.only.query.negative.files");
-
-        setResultsDir("ql/src/test/results/clientnegative/spark");
-        setLogDir("itests/qtest-spark/target/qfile-results/clientnegative/spark");
-
-        setInitScript("q_test_init.sql");
-        setCleanupScript("q_test_cleanup.sql");
-
-        setHiveConfDir("data/conf/spark/standalone");
-        setClusterType(MiniClusterType.SPARK);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
       }
@@ -698,36 +626,10 @@ public class CliConfigs {
       case TEZ:
         setHiveConfDir("data/conf/tez");
         break;
-      case SPARK:
-        setHiveConfDir("data/conf/spark/standalone");
-        break;
-      case MINI_SPARK_ON_YARN:
-        setHiveConfDir("data/conf/spark/yarn-cluster");
-        break;
       default:
-        setHiveConfDir("data/conf");
+        // TODO: HIVE-28031: Adapt some cli driver tests to Tez where it's applicable
+        setHiveConfDir("data/conf/mr");
         break;
-      }
-    }
-  }
-
-  public static class MiniDruidLlapLocalCliConfig extends AbstractCliConfig {
-    public MiniDruidLlapLocalCliConfig() {
-      super(CoreCliDriver.class);
-      try {
-        setQueryDir("ql/src/test/queries/clientpositive");
-
-        includesFrom(testConfigProps, "druid.llap.local.query.files");
-
-        setResultsDir("ql/src/test/results/clientpositive/druid");
-        setLogDir("itests/qtest/target/tmp/log");
-
-        setInitScript("q_test_druid_init.sql");
-        setCleanupScript("q_test_cleanup_druid.sql");
-        setHiveConfDir("data/conf/llap");
-        setClusterType(MiniClusterType.DRUID_LOCAL);
-      } catch (Exception e) {
-        throw new RuntimeException("can't construct cliconfig", e);
       }
     }
   }
@@ -771,6 +673,180 @@ public class CliConfigs {
         setClusterType(MiniClusterType.TEZ_LOCAL);
       } catch (Exception e) {
         throw new RuntimeException("can't construct cliconfig", e);
+      }
+    }
+  }
+
+  public static class IcebergCliConfig extends AbstractCliConfig {
+
+    public IcebergCliConfig() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        excludesFrom(testConfigProps, "iceberg.llap.only.query.files");
+        excludesFrom(testConfigProps, "iceberg.llap.query.compactor.files");
+        excludesFrom(testConfigProps, "iceberg.llap.query.rest.hms.files");
+        excludesFrom(testConfigProps, "iceberg.llap.query.rest.gravitino.s3.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+        setHiveConfDir("data/conf/iceberg/tez");
+        setClusterType(MiniClusterType.TEZ);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class IcebergNegativeCliConfig extends AbstractCliConfig {
+
+    public IcebergNegativeCliConfig() {
+      super(CoreNegativeCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/negative");
+        setResultsDir("iceberg/iceberg-handler/src/test/results/negative");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/negative");
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+        setHiveConfDir("data/conf/iceberg/tez");
+        setClusterType(MiniClusterType.TEZ);
+      } catch (Exception e) {
+        throw new RuntimeException("can't construct cliconfig", e);
+      }
+    }
+  }
+
+  public static class IcebergLlapLocalCliConfig extends AbstractCliConfig {
+
+    public IcebergLlapLocalCliConfig() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        includesFrom(testConfigProps, "iceberg.llap.query.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class TestIcebergRESTCatalogHMSLlapLocalCliDriver extends AbstractCliConfig {
+
+    public TestIcebergRESTCatalogHMSLlapLocalCliDriver() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        includesFrom(testConfigProps, "iceberg.llap.query.rest.hms.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class TestIcebergRESTCatalogGravitinoS3LlapLocalCliDriver extends AbstractCliConfig {
+
+    public TestIcebergRESTCatalogGravitinoS3LlapLocalCliDriver() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        includesFrom(testConfigProps, "iceberg.llap.query.rest.gravitino.s3.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class TestIcebergRESTCatalogGravitinoAdlsLlapLocalCliDriver extends AbstractCliConfig {
+
+    public TestIcebergRESTCatalogGravitinoAdlsLlapLocalCliDriver() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        includesFrom(testConfigProps, "iceberg.llap.query.rest.gravitino.adls.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class TestIcebergRESTCatalogGravitinoGcsLlapLocalCliDriver extends AbstractCliConfig {
+
+    public TestIcebergRESTCatalogGravitinoGcsLlapLocalCliDriver() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+        includesFrom(testConfigProps, "iceberg.llap.query.rest.gravitino.gcs.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
+      }
+    }
+  }
+
+  public static class IcebergLlapLocalCompactorCliConfig extends AbstractCliConfig {
+
+    public IcebergLlapLocalCompactorCliConfig() {
+      super(CoreCliDriver.class);
+      try {
+        setQueryDir("iceberg/iceberg-handler/src/test/queries/positive");
+
+        includesFrom(testConfigProps, "iceberg.llap.query.compactor.files");
+
+        setResultsDir("iceberg/iceberg-handler/src/test/results/positive/llap");
+        setLogDir("itests/qtest/target/qfile-results/iceberg-handler/positive");
+
+        setInitScript("q_test_init_tez.sql");
+        setCleanupScript("q_test_cleanup_tez.sql");
+
+        setHiveConfDir("data/conf/iceberg/llap");
+        setClusterType(MiniClusterType.LLAP_LOCAL);
+      } catch (Exception e) {
+        throw new RuntimeException("can't contruct cliconfig", e);
       }
     }
   }

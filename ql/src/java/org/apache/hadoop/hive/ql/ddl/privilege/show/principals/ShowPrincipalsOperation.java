@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.privilege.show.principals;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
 import org.apache.hadoop.hive.ql.ddl.privilege.PrivilegeUtils;
 
 import java.io.IOException;
@@ -45,7 +46,7 @@ public class ShowPrincipalsOperation extends DDLOperation<ShowPrincipalsDesc> {
     HiveAuthorizer authorizer = PrivilegeUtils.getSessionAuthorizer(context.getConf());
     boolean testMode = context.getConf().getBoolVar(HiveConf.ConfVars.HIVE_IN_TEST);
     List<HiveRoleGrant> roleGrants = authorizer.getPrincipalGrantInfoForRole(desc.getName());
-    DDLUtils.writeToFile(writeHiveRoleGrantInfo(roleGrants, testMode), desc.getResFile(), context);
+    ShowUtils.writeToFile(writeHiveRoleGrantInfo(roleGrants, testMode), desc.getResFile(), context);
 
     return 0;
   }
@@ -59,12 +60,12 @@ public class ShowPrincipalsOperation extends DDLOperation<ShowPrincipalsDesc> {
     Collections.sort(roleGrants);
     for (HiveRoleGrant roleGrant : roleGrants) {
       // schema: principal_name,principal_type,grant_option,grantor,grantor_type,grant_time
-      DDLUtils.appendNonNull(builder, roleGrant.getPrincipalName(), true);
-      DDLUtils.appendNonNull(builder, roleGrant.getPrincipalType());
-      DDLUtils.appendNonNull(builder, roleGrant.isGrantOption());
-      DDLUtils.appendNonNull(builder, roleGrant.getGrantor());
-      DDLUtils.appendNonNull(builder, roleGrant.getGrantorType());
-      DDLUtils.appendNonNull(builder, testMode ? -1 : roleGrant.getGrantTime() * 1000L);
+      ShowUtils.appendNonNull(builder, roleGrant.getPrincipalName(), true);
+      ShowUtils.appendNonNull(builder, roleGrant.getPrincipalType());
+      ShowUtils.appendNonNull(builder, roleGrant.isGrantOption());
+      ShowUtils.appendNonNull(builder, roleGrant.getGrantor());
+      ShowUtils.appendNonNull(builder, roleGrant.getGrantorType());
+      ShowUtils.appendNonNull(builder, testMode ? -1 : roleGrant.getGrantTime() * 1000L);
     }
     return builder.toString();
   }

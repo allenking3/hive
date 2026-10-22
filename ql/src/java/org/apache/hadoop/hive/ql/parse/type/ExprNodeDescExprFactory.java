@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.type;
 
@@ -45,6 +46,7 @@ import org.apache.hadoop.hive.ql.optimizer.ConstantPropagateProcFactory;
 import org.apache.hadoop.hive.ql.optimizer.calcite.CalciteSubquerySemanticException;
 import org.apache.hadoop.hive.ql.optimizer.calcite.translator.TypeConverter;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
+import org.apache.hadoop.hive.ql.parse.QBSubQueryParseInfo;
 import org.apache.hadoop.hive.ql.parse.RowResolver;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.plan.ExprDynamicParamDesc;
@@ -60,12 +62,11 @@ import org.apache.hadoop.hive.ql.plan.SubqueryType;
 import org.apache.hadoop.hive.ql.udf.SettableUDF;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDF;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFBaseCompare;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDFCoalesce;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFIn;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPAnd;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPEqual;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPEqualNS;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPNot;
+import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPNotEqualNS;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFOPOr;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFStruct;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFWhen;
@@ -113,36 +114,53 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
   protected ExprNodeDesc toExpr(ColumnInfo colInfo, RowResolver rowResolver, int offset)
       throws SemanticException {
     ObjectInspector inspector = colInfo.getObjectInspector();
-    if (inspector instanceof ConstantObjectInspector && inspector instanceof PrimitiveObjectInspector) {
-      return toPrimitiveConstDesc(colInfo, inspector);
-    }
-    if (inspector instanceof ConstantObjectInspector && inspector instanceof ListObjectInspector) {
-      ObjectInspector listElementOI = ((ListObjectInspector)inspector).getListElementObjectInspector();
-      if (listElementOI instanceof PrimitiveObjectInspector) {
-        return toListConstDesc(colInfo, inspector, listElementOI);
+    if (inspector instanceof ConstantObjectInspector) {
+      if (inspector instanceof PrimitiveObjectInspector) {
+        return toPrimitiveConstDesc(colInfo, inspector);
       }
-    }
-    if (inspector instanceof ConstantObjectInspector && inspector instanceof MapObjectInspector) {
-      ObjectInspector keyOI = ((MapObjectInspector)inspector).getMapKeyObjectInspector();
-      ObjectInspector valueOI = ((MapObjectInspector)inspector).getMapValueObjectInspector();
-      if (keyOI instanceof PrimitiveObjectInspector && valueOI instanceof PrimitiveObjectInspector) {
-        return toMapConstDesc(colInfo, inspector, keyOI, valueOI);
+
+      Object inputConstantValue = ((ConstantObjectInspector) inspector).getWritableConstantValue();
+      if (inputConstantValue == null) {
+        return createExprNodeConstantDesc(colInfo, null);
       }
-    }
-    if (inspector instanceof ConstantObjectInspector && inspector instanceof StructObjectInspector) {
-      boolean allPrimitive = true;
-      List<? extends StructField> fields = ((StructObjectInspector)inspector).getAllStructFieldRefs();
-      for (StructField field : fields) {
-        allPrimitive &= field.getFieldObjectInspector() instanceof PrimitiveObjectInspector;
+
+      if (inspector instanceof ListObjectInspector) {
+        ObjectInspector listElementOI = ((ListObjectInspector) inspector).getListElementObjectInspector();
+        if (listElementOI instanceof PrimitiveObjectInspector) {
+          PrimitiveObjectInspector poi = (PrimitiveObjectInspector) listElementOI;
+          return createExprNodeConstantDesc(colInfo, toListConstant((List<?>) inputConstantValue, poi));
+        }
       }
-      if (allPrimitive) {
-        return toStructConstDesc(colInfo, inspector, fields);
+      if (inspector instanceof MapObjectInspector) {
+        ObjectInspector keyOI = ((MapObjectInspector)inspector).getMapKeyObjectInspector();
+        ObjectInspector valueOI = ((MapObjectInspector)inspector).getMapValueObjectInspector();
+        if (keyOI instanceof PrimitiveObjectInspector && valueOI instanceof PrimitiveObjectInspector) {
+          return createExprNodeConstantDesc(colInfo, toMapConstant((Map<?, ?>) inputConstantValue, keyOI, valueOI));
+        }
+      }
+      if (inspector instanceof StructObjectInspector) {
+        boolean allPrimitive = true;
+        List<? extends StructField> fields = ((StructObjectInspector)inspector).getAllStructFieldRefs();
+        for (StructField field : fields) {
+          allPrimitive &= field.getFieldObjectInspector() instanceof PrimitiveObjectInspector;
+        }
+        if (allPrimitive) {
+          return createExprNodeConstantDesc(colInfo, toStructConstDesc(
+              (List<?>) ((ConstantObjectInspector) inspector).getWritableConstantValue(), fields));
+        }
       }
     }
     // non-constant or non-primitive constants
     ExprNodeColumnDesc column = new ExprNodeColumnDesc(colInfo);
     column.setSkewedCol(colInfo.isSkewedCol());
     return column;
+  }
+
+  private static ExprNodeConstantDesc createExprNodeConstantDesc(ColumnInfo colInfo, Object constantValue) {
+    ExprNodeConstantDesc constantExpr = new ExprNodeConstantDesc(colInfo.getType(), constantValue);
+    constantExpr.setFoldedFromCol(colInfo.getInternalName());
+    constantExpr.setFoldedFromTab(colInfo.getTabAlias());
+    return constantExpr;
   }
 
   private static ExprNodeConstantDesc toPrimitiveConstDesc(ColumnInfo colInfo, ObjectInspector inspector) {
@@ -155,50 +173,33 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
     return constantExpr;
   }
 
-  private static ExprNodeConstantDesc toListConstDesc(ColumnInfo colInfo, ObjectInspector inspector,
-                                                      ObjectInspector listElementOI) {
-    PrimitiveObjectInspector poi = (PrimitiveObjectInspector)listElementOI;
-    List<?> values = (List<?>)((ConstantObjectInspector) inspector).getWritableConstantValue();
-    List<Object> constant = new ArrayList<Object>();
-    for (Object o : values) {
+  private static List<Object> toListConstant(List<?> constantValue, PrimitiveObjectInspector poi) {
+    List<Object> constant = new ArrayList<>(constantValue.size());
+    for (Object o : constantValue) {
       constant.add(poi.getPrimitiveJavaObject(o));
     }
-
-    ExprNodeConstantDesc constantExpr = new ExprNodeConstantDesc(colInfo.getType(), constant);
-    constantExpr.setFoldedFromCol(colInfo.getInternalName());
-    constantExpr.setFoldedFromTab(colInfo.getTabAlias());
-    return constantExpr;
+    return constant;
   }
 
-  private static ExprNodeConstantDesc toMapConstDesc(ColumnInfo colInfo, ObjectInspector inspector,
-                                                     ObjectInspector keyOI, ObjectInspector valueOI) {
-    PrimitiveObjectInspector keyPoi = (PrimitiveObjectInspector)keyOI;
-    PrimitiveObjectInspector valuePoi = (PrimitiveObjectInspector)valueOI;
-    Map<?, ?> values = (Map<?, ?>)((ConstantObjectInspector) inspector).getWritableConstantValue();
-    Map<Object, Object> constant = new LinkedHashMap<Object, Object>();
-    for (Map.Entry<?, ?> e : values.entrySet()) {
+  private static Map<Object, Object> toMapConstant(
+      Map<?, ?> constantValue, ObjectInspector keyOI, ObjectInspector valueOI) {
+    PrimitiveObjectInspector keyPoi = (PrimitiveObjectInspector) keyOI;
+    PrimitiveObjectInspector valuePoi = (PrimitiveObjectInspector) valueOI;
+    Map<Object, Object> constant = new LinkedHashMap<>(constantValue.size());
+    for (Map.Entry<?, ?> e : constantValue.entrySet()) {
       constant.put(keyPoi.getPrimitiveJavaObject(e.getKey()), valuePoi.getPrimitiveJavaObject(e.getValue()));
     }
-
-    ExprNodeConstantDesc constantExpr = new ExprNodeConstantDesc(colInfo.getType(), constant);
-    constantExpr.setFoldedFromCol(colInfo.getInternalName());
-    constantExpr.setFoldedFromTab(colInfo.getTabAlias());
-    return constantExpr;
+    return constant;
   }
 
-  private static ExprNodeConstantDesc toStructConstDesc(ColumnInfo colInfo, ObjectInspector inspector,
-                                                        List<? extends StructField> fields) {
-    List<?> values = (List<?>)((ConstantObjectInspector) inspector).getWritableConstantValue();
-    List<Object> constant =  new ArrayList<Object>();
-    for (int i = 0; i < values.size(); i++) {
-      Object value = values.get(i);
+  private static List<Object> toStructConstDesc(List<?> constantValue, List<? extends StructField> fields) {
+    List<Object> constant = new ArrayList<>(constantValue.size());
+    for (int i = 0; i < constantValue.size(); i++) {
+      Object value = constantValue.get(i);
       PrimitiveObjectInspector fieldPoi = (PrimitiveObjectInspector) fields.get(i).getFieldObjectInspector();
       constant.add(fieldPoi.getPrimitiveJavaObject(value));
     }
-    ExprNodeConstantDesc constantExpr = new ExprNodeConstantDesc(colInfo.getType(), constant);
-    constantExpr.setFoldedFromCol(colInfo.getInternalName());
-    constantExpr.setFoldedFromTab(colInfo.getTabAlias());
-    return constantExpr;
+    return constant;
   }
 
   /**
@@ -338,7 +339,7 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
    */
   @Override
   protected Object interpretConstantAsPrimitive(PrimitiveTypeInfo targetType, Object constantValue,
-      PrimitiveTypeInfo sourceType) {
+      PrimitiveTypeInfo sourceType, boolean isEqual) {
     if (constantValue instanceof Number || constantValue instanceof String) {
       try {
         PrimitiveTypeEntry primitiveTypeEntry = targetType.getPrimitiveTypeEntry();
@@ -358,6 +359,13 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
           return HiveDecimal.create(constantValue.toString());
         }
       } catch (NumberFormatException | ArithmeticException nfe) {
+        if (!isEqual && (constantValue instanceof Number ||
+            NumberUtils.isNumber(constantValue.toString()))) {
+          // The target is a number, if constantToInterpret can be interpreted as a number,
+          // return the constantToInterpret directly, GenericUDFBaseCompare will do
+          // type conversion for us.
+          return constantValue;
+        }
         LOG.trace("Failed to narrow type of constant", nfe);
         return null;
       }
@@ -757,6 +765,12 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
         && !(fi.getGenericUDF() instanceof GenericUDFOPEqualNS);
   }
 
+  @Override
+  protected boolean isNSCompareFunction(FunctionInfo fi) {
+    return fi.getGenericUDF() instanceof GenericUDFOPEqualNS ||
+        fi.getGenericUDF() instanceof GenericUDFOPNotEqualNS;
+  }
+
   /**
    * {@inheritDoc}
    */
@@ -796,10 +810,18 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
       Object thenVal = constThen.getValue();
       Object elseVal = constElse.getValue();
       if (thenVal instanceof Boolean && elseVal instanceof Boolean) {
-        return true;
+        //only convert to COALESCE when both branches are valid
+        return !thenVal.equals(elseVal);
       }
     }
     return false;
+  }
+
+  @Override
+  protected boolean convertCASEIntoIFFuncCallExpr(FunctionInfo fi, List<ExprNodeDesc> inputs) {
+    GenericUDF genericUDF = fi.getGenericUDF();
+    return genericUDF instanceof GenericUDFWhen && inputs.size() == 3
+        && TypeInfoFactory.booleanTypeInfo.equals(inputs.get(0).getTypeInfo());
   }
 
   /**
@@ -838,7 +860,7 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
     // subqueryToRelNode might be null if subquery expression anywhere other than
     //  as expected in filter (where/having). We should throw an appropriate error
     // message
-    Map<ASTNode, RelNode> subqueryToRelNode = ctx.getSubqueryToRelNode();
+    Map<ASTNode, QBSubQueryParseInfo> subqueryToRelNode = ctx.getSubqueryToRelNode();
     if (subqueryToRelNode == null) {
       throw new CalciteSubquerySemanticException(ErrorMsg.UNSUPPORTED_SUBQUERY_EXPRESSION.getMsg(
           " Currently SubQuery expressions are only allowed as " +
@@ -846,11 +868,14 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
     }
 
     ASTNode subqueryOp = (ASTNode) expr.getChild(0);
-    RelNode subqueryRel = subqueryToRelNode.get(expr);
+    RelNode subqueryRel = subqueryToRelNode.get(expr).getSubQueryRelNode();
     // For now because subquery is only supported in filter
     // we will create subquery expression of boolean type
     switch (subqueryType) {
       case EXISTS: {
+        if (subqueryToRelNode.get(expr).hasFullAggregate()) {
+          return createConstantExpr(TypeInfoFactory.booleanTypeInfo, true);
+        }
         return new ExprNodeSubQueryDesc(TypeInfoFactory.booleanTypeInfo, subqueryRel,
             SubqueryType.EXISTS);
       }
@@ -896,5 +921,16 @@ public class ExprNodeDescExprFactory extends ExprFactory<ExprNodeDesc> {
     return FunctionRegistry.getFunctionInfo(funcName);
   }
 
+  @Override
+  protected ExprNodeDesc replaceFieldNamesInStruct(ExprNodeDesc expr, List<String> newFieldNames) {
+    if (newFieldNames.isEmpty()) {
+      return expr;
+    }
 
+    ExprNodeGenericFuncDesc structCall = (ExprNodeGenericFuncDesc) expr;
+    List<TypeInfo> newTypes = structCall.getChildren().stream().map(ExprNodeDesc::getTypeInfo).collect(Collectors.toList());
+    TypeInfo newType = TypeInfoFactory.getStructTypeInfo(newFieldNames, newTypes);
+
+    return new ExprNodeGenericFuncDesc(newType, structCall.getGenericUDF(), structCall.getChildren());
+  }
 }

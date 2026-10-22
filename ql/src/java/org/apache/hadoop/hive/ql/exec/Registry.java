@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec;
@@ -146,16 +147,37 @@ public class Registry {
 
   }
 
+  /**
+   * @deprecated From next release, replaced by {@link #registerUDF(String, Class, boolean)}
+   * Deprecated because method unnecessarily accepts and passes FunctionResource vararg param
+   */
+  @Deprecated
   public FunctionInfo registerUDF(String functionName,
       Class<? extends UDF> UDFClass, boolean isOperator, FunctionResource... resources) {
     return registerUDF(functionName, UDFClass, isOperator, functionName.toLowerCase(), resources);
   }
 
+  /**
+   * @deprecated From next release, replaced by {@link #registerUDF(String, Class, boolean, String)}
+   * Deprecated because method unnecessarily accepts FunctionResource vararg param
+   */
+  @Deprecated
   public FunctionInfo registerUDF(String functionName,
       Class<? extends UDF> UDFClass, boolean isOperator, String displayName,
       FunctionResource... resources) {
     FunctionType functionType = isNative ? FunctionType.BUILTIN : FunctionType.TEMPORARY;
     return registerUDF(functionName, functionType, UDFClass, isOperator, displayName);
+  }
+
+  public FunctionInfo registerUDF(String functionName,
+                                  Class<? extends UDF> UDFClass, boolean isOperator) {
+    return registerUDF(functionName, UDFClass, isOperator, functionName.toLowerCase());
+  }
+
+  public FunctionInfo registerUDF(String functionName,
+                                  Class<? extends UDF> UDFClass, boolean isOperator, String displayName) {
+      FunctionType functionType = isNative ? FunctionType.BUILTIN : FunctionType.TEMPORARY;
+      return registerUDF(functionName, functionType, UDFClass, isOperator, displayName);
   }
 
   private FunctionInfo registerUDF(String functionName, FunctionType functionType,
@@ -291,8 +313,7 @@ public class Registry {
     FunctionInfo function = new FunctionInfo(functionName, className, resources);
     // register to session first for backward compatibility
     if (registerToSession) {
-      String qualifiedName = FunctionUtils.qualifyFunctionName(
-          functionName, SessionState.get().getCurrentDatabase().toLowerCase());
+      String qualifiedName = FunctionUtils.qualifyFunctionName(functionName);
       FunctionInfo newFunction = registerToSessionRegistry(qualifiedName, function);
       if (newFunction != null) {
         addFunction(functionName, function);
@@ -346,8 +367,7 @@ public class Registry {
         throw new SemanticException ("UDF " + functionName + " is not allowed");
       }
       if (functionInfo == null) {
-        functionName = FunctionUtils.qualifyFunctionName(
-            functionName, SessionState.get().getCurrentDatabase().toLowerCase());
+        functionName = FunctionUtils.qualifyFunctionName(functionName);
         functionInfo = getQualifiedFunctionInfo(functionName);
       }
       addToCurrentFunctions(functionName, functionInfo);
@@ -363,10 +383,9 @@ public class Registry {
   public WindowFunctionInfo getWindowFunctionInfo(String functionName) throws SemanticException {
     // First try without qualifiers - would resolve builtin/temp functions
     FunctionInfo info = getFunctionInfo(WINDOW_FUNC_PREFIX + functionName);
-    // Try qualifying with current db name for permanent functions
-    if (info == null) {
-      String qualifiedName = FunctionUtils.qualifyFunctionName(
-              functionName, SessionState.get().getCurrentDatabase().toLowerCase());
+    // Try qualifying with current db name for permanent functions and try register function to session
+    if (info == null && FunctionRegistry.getFunctionInfo(functionName) != null) {
+      String qualifiedName = FunctionUtils.qualifyFunctionName(functionName);
       info = getFunctionInfo(WINDOW_FUNC_PREFIX + qualifiedName);
     }
     if (info instanceof WindowFunctionInfo) {
@@ -477,7 +496,7 @@ public class Registry {
   @SuppressWarnings("deprecation")
   public GenericUDAFEvaluator getGenericUDAFEvaluator(String name,
       List<ObjectInspector> argumentOIs, boolean isWindowing, boolean isDistinct,
-      boolean isAllColumns) throws SemanticException {
+      boolean isAllColumns, boolean respectNulls) throws SemanticException {
 
     GenericUDAFResolver udafResolver = getGenericUDAFResolver(name);
     if (udafResolver == null) {
@@ -494,7 +513,7 @@ public class Registry {
 
     GenericUDAFParameterInfo paramInfo =
         new SimpleGenericUDAFParameterInfo(
-            args, isWindowing, isDistinct, isAllColumns);
+            args, isWindowing, isDistinct, isAllColumns, respectNulls);
     if (udafResolver instanceof GenericUDAFResolver2) {
       udafEvaluator =
           ((GenericUDAFResolver2) udafResolver).getEvaluator(paramInfo);
@@ -505,7 +524,7 @@ public class Registry {
   }
 
   public GenericUDAFEvaluator getGenericWindowingEvaluator(String functionName,
-      List<ObjectInspector> argumentOIs, boolean isDistinct, boolean isAllColumns)
+      List<ObjectInspector> argumentOIs, boolean isDistinct, boolean isAllColumns, boolean respectNulls)
       throws SemanticException {
     functionName = functionName.toLowerCase();
     WindowFunctionInfo info = getWindowFunctionInfo(functionName);
@@ -514,7 +533,7 @@ public class Registry {
     }
     if (!functionName.equals(FunctionRegistry.LEAD_FUNC_NAME) &&
         !functionName.equals(FunctionRegistry.LAG_FUNC_NAME)) {
-      return getGenericUDAFEvaluator(functionName, argumentOIs, true, isDistinct, isAllColumns);
+      return getGenericUDAFEvaluator(functionName, argumentOIs, true, isDistinct, isAllColumns, respectNulls);
     }
 
     // this must be lead/lag UDAF
@@ -553,21 +572,19 @@ public class Registry {
         Integer refCount = persistent.get(functionClass);
         persistent.put(functionClass, Integer.valueOf(refCount == null ? 1 : refCount + 1));
       }
+    } catch (ClassNotFoundException e) {
+      throw new RuntimeException(e);
     } finally {
       lock.unlock();
     }
   }
 
-  private Class<?> getPermanentUdfClass(FunctionInfo function) {
+  private Class<?> getPermanentUdfClass(FunctionInfo function) throws ClassNotFoundException {
     Class<?> functionClass = function.getFunctionClass();
     if (functionClass == null) {
       // Expected for permanent UDFs at this point.
       ClassLoader loader = Utilities.getSessionSpecifiedClassLoader();
-      try {
-        functionClass = Class.forName(function.getClassName(), true, loader);
-      } catch (ClassNotFoundException ex) {
-        throw new RuntimeException(ex);
-      }
+      functionClass = Class.forName(function.getClassName(), true, loader);
     }
     return functionClass;
   }
@@ -593,14 +610,19 @@ public class Registry {
   }
 
   private void removePersistentFunctionUnderLock(FunctionInfo fi) {
-    Class<?> functionClass = getPermanentUdfClass(fi);
-    Integer refCount = persistent.get(functionClass);
-    if (refCount != null) {
-      if (refCount == 1) {
-        persistent.remove(functionClass);
-      } else {
-        persistent.put(functionClass, Integer.valueOf(refCount - 1));
+    try {
+      Class<?> functionClass = getPermanentUdfClass(fi);
+      Integer refCount = persistent.get(functionClass);
+      if (refCount != null) {
+        if (refCount == 1) {
+          persistent.remove(functionClass);
+        } else {
+          persistent.put(functionClass, Integer.valueOf(refCount - 1));
+        }
       }
+    } catch (ClassNotFoundException e) {
+      LOG.debug("Associated class could not be found when dropping a custom UDF {}." +
+          "This may happen if this UDF was never used in this session.", fi.getDisplayName());
     }
   }
 

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.rules.jdbc;
 
@@ -35,7 +36,7 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
-import org.apache.hadoop.hive.ql.optimizer.calcite.HiveCalciteUtil;
+import org.apache.hadoop.hive.ql.optimizer.calcite.reloperators.HiveIn;
 import org.apache.hadoop.hive.ql.optimizer.calcite.translator.RexNodeConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,15 +57,15 @@ public abstract class JDBCExpandExpressionsRule extends RelOptRule {
       new JDBCExpandExpressionsRule.ProjectionExpressions();
 
 
-  private JDBCExpandExpressionsRule(RelOptRuleOperand operand) {
-    super(operand);
+  private JDBCExpandExpressionsRule(RelOptRuleOperand operand, String description) {
+    super(operand, description);
   }
 
   /** Rule adapter to apply the transformation to Filter conditions. */
   private static class FilterCondition extends JDBCExpandExpressionsRule {
 
     private FilterCondition() {
-      super(operand(JdbcFilter.class, any()));
+      super(operand(JdbcFilter.class, any()), "JDBCExpandExpressionsRule(FilterCondition)");
     }
 
     @Override
@@ -91,7 +92,7 @@ public abstract class JDBCExpandExpressionsRule extends RelOptRule {
   private static class JoinCondition extends JDBCExpandExpressionsRule {
 
     private JoinCondition () {
-      super(operand(JdbcJoin.class, any()));
+      super(operand(JdbcJoin.class, any()), "JDBCExpandExpressionsRule(JoinCondition)");
     }
 
     @Override
@@ -124,7 +125,7 @@ public abstract class JDBCExpandExpressionsRule extends RelOptRule {
   private static class ProjectionExpressions extends JDBCExpandExpressionsRule {
 
     private ProjectionExpressions() {
-      super(operand(JdbcProject.class, any()));
+      super(operand(JdbcProject.class, any()), "JDBCExpandExpressionsRule(ProjectionExpressions)");
     }
 
     @Override
@@ -180,18 +181,15 @@ public abstract class JDBCExpandExpressionsRule extends RelOptRule {
       RexNode node = super.visitCall(inputCall);
       if (node instanceof RexCall) {
         RexCall call = (RexCall) node;
-        switch (call.getKind()) {
-          case IN:
-            return transformIntoOrAndClause(rexBuilder, call);
-          default:
-            break;
+        if (HiveIn.INSTANCE.equals(call.op)) {
+          return transformIntoOrAndClause(rexBuilder, call);
         }
       }
-      return node;
+      return RexUtil.isFlat(node) ? node : RexUtil.flatten(rexBuilder, node);
     }
 
     private RexNode transformIntoOrAndClause(RexBuilder rexBuilder, RexCall expression) {
-      assert expression.getKind() == SqlKind.IN;
+      assert HiveIn.INSTANCE.equals(expression.op);
 
       if (expression.getOperands().get(0).getKind() != SqlKind.ROW) {
         // Nothing to do, return expression

@@ -20,6 +20,8 @@ POSTHOOK: type: CREATETABLE_AS_SELECT
 POSTHOOK: Input: default@src
 POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_temp
+POSTHOOK: Lineage: src_temp.key SIMPLE [(src)src.FieldSchema(name:key, type:string, comment:default), ]
+POSTHOOK: Lineage: src_temp.value SIMPLE [(src)src.FieldSchema(name:value, type:string, comment:default), ]
 PREHOOK: query: EXPLAIN
 FROM src_nontemp src1 JOIN src_nontemp src2 ON (src1.key = src2.key)
 SELECT src1.key, src2.value
@@ -375,16 +377,20 @@ POSTHOOK: Input: default@src_temp
 PREHOOK: query: DROP TABLE src_nontemp
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_nontemp
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_nontemp
 POSTHOOK: query: DROP TABLE src_nontemp
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_nontemp
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_nontemp
 PREHOOK: query: DROP TABLE src_temp
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_temp
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_temp
 POSTHOOK: query: DROP TABLE src_temp
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_temp
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_temp

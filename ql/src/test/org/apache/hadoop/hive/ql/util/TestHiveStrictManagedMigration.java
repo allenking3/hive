@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.util;
 
@@ -37,6 +38,7 @@ import java.util.Set;
 
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.EnvironmentContext;
 import org.apache.hadoop.hive.ql.TxnCommandsBaseForTests;
@@ -45,6 +47,7 @@ import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.Partition;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -82,7 +85,7 @@ public class TestHiveStrictManagedMigration extends TxnCommandsBaseForTests {
       "--oldWarehouseRoot", oldWarehouse};
     HiveConf newConf = new HiveConf(hiveConf);
     File newWarehouseDir = new File(getTestDataDir(), "newWarehouse");
-    newConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, newWarehouseDir.getAbsolutePath());
+    newConf.set(HiveConf.ConfVars.METASTORE_WAREHOUSE.varname, newWarehouseDir.getAbsolutePath());
     newConf.set("strict.managed.tables.migration.owner", System.getProperty("user.name"));
     runMigrationTool(newConf, args);
 
@@ -122,7 +125,7 @@ public class TestHiveStrictManagedMigration extends TxnCommandsBaseForTests {
     HiveConf newConf = new HiveConf(hiveConf);
     File newManagedWarehouseDir = new File(getTestDataDir(), "newManaged");
     File newExtWarehouseDir = new File(getTestDataDir(), "newExternal");
-    newConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, newManagedWarehouseDir.getAbsolutePath());
+    newConf.set(HiveConf.ConfVars.METASTORE_WAREHOUSE.varname, newManagedWarehouseDir.getAbsolutePath());
     newConf.set(HiveConf.ConfVars.HIVE_METASTORE_WAREHOUSE_EXTERNAL.varname, newExtWarehouseDir.getAbsolutePath());
     runMigrationTool(newConf, args);
     Assert.assertTrue(newExtWarehouseDir.exists());
@@ -140,6 +143,61 @@ public class TestHiveStrictManagedMigration extends TxnCommandsBaseForTests {
       // Exceptions are re-packaged by the migration tool...
       throw e.getCause();
     }
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testExceptionForDbRegexPlusControlFile() throws Throwable {
+    try {
+      String[] args = {"-m", "automatic", "--dbRegex", "db0", "--controlFileUrl", "file:/tmp/file"};
+      runMigrationTool(new HiveConf(hiveConf), args);
+    } catch (Exception e) {
+      // Exceptions are re-packaged by the migration tool...
+      throw e.getCause();
+    }
+  }
+
+  @Test
+  public void testUsingControlFileUrl() throws Throwable {
+    setupExternalTableTest();
+    String oldWarehouse = getWarehouseDir();
+    String[] args = {"-m",  "external", "--oldWarehouseRoot", oldWarehouse, "--controlFileUrl",
+        "src/test/resources/hsmm/hsmm_cfg_01.yaml"};
+    HiveConf newConf = new HiveConf(hiveConf);
+
+    runMigrationTool(newConf, args);
+
+    verifySubsetOfTablesBecameExternal(
+        Sets.newHashSet("manwhwh", "manwhnone")
+    );
+  }
+
+  @Test
+  public void testUsingControlDirUrl() throws Throwable {
+    setupExternalTableTest();
+    String oldWarehouse = getWarehouseDir();
+    String[] args = {"-m",  "external", "--oldWarehouseRoot", oldWarehouse, "--controlFileUrl",
+        "src/test/resources/hsmm"};
+    HiveConf newConf = new HiveConf(hiveConf);
+
+    runMigrationTool(newConf, args);
+
+    verifySubsetOfTablesBecameExternal(
+        Sets.newHashSet("manwhwh", "manwhnone", "custdb.custmanwhwh")
+    );
+  }
+
+  private void verifySubsetOfTablesBecameExternal(Set<String> expectedExternals) throws Throwable {
+    Set<String> allTables = Sets.newHashSet("manwhnone", "manoutnone", "manwhwh", "manwhout", "manwhmixed",
+        "manoutout", "custdb.custmanwhwh");
+
+    for (String expectedExternalTableName : expectedExternals) {
+      assertEquals(TableType.EXTERNAL_TABLE, Hive.get().getTable(expectedExternalTableName).getTableType());
+    }
+
+    for (String expectedLeftAsManagedTableName : Sets.difference(allTables, expectedExternals)) {
+      assertEquals(TableType.MANAGED_TABLE, Hive.get().getTable(expectedLeftAsManagedTableName).getTableType());
+    }
+
   }
 
   /**

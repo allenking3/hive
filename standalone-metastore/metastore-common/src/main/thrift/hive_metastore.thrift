@@ -45,6 +45,14 @@ struct FieldSchema {
   3: string comment
 }
 
+// Key-value store to be used with selected
+// Metastore APIs (create, alter methods).
+// The client can pass environment properties / configs that can be
+// accessed in hooks.
+struct EnvironmentContext {
+  1: map<string, string> properties
+}
+
 struct SQLPrimaryKey {
   1: string table_db,    // table schema
   2: string table_name,  // table name
@@ -144,6 +152,7 @@ enum HiveObjectType {
   TABLE = 3,
   PARTITION = 4,
   COLUMN = 5,
+  DATACONNECTOR = 6,
 }
 
 enum PrincipalType {
@@ -155,12 +164,30 @@ enum PrincipalType {
 const string HIVE_FILTER_FIELD_OWNER = "hive_filter_field_owner__"
 const string HIVE_FILTER_FIELD_PARAMS = "hive_filter_field_params__"
 const string HIVE_FILTER_FIELD_LAST_ACCESS = "hive_filter_field_last_access__"
+const string HIVE_FILTER_FIELD_TABLE_NAME = "hive_filter_field_tableName__"
+const string HIVE_FILTER_FIELD_TABLE_TYPE = "hive_filter_field_tableType__"
+
+struct PropertySetRequest {
+    1: required string nameSpace;
+    2: map<string, string> propertyMap;
+}
+
+struct PropertyGetRequest {
+    1: required string nameSpace;
+    2: string mapPrefix;
+    3: optional string mapPredicate;
+    4: optional list<string> mapSelection;
+}
+
+struct PropertyGetResponse {
+    1: map<string, map<string , string>> properties;
+}
 
 enum PartitionEventType {
   LOAD_DONE = 1,
 }
 
-// Enums for transaction and lock management 
+// Enums for transaction and lock management
 enum TxnState {
     COMMITTED = 1,
     ABORTED = 2,
@@ -190,6 +217,10 @@ enum LockType {
 enum CompactionType {
     MINOR = 1,
     MAJOR = 2,
+    REBALANCE = 3,
+    ABORT_TXN_CLEANUP = 4,
+    SMART_OPTIMIZE = 5,
+    DEFERRED_CLEANUP = 6,
 }
 
 enum GrantRevokeType {
@@ -247,6 +278,11 @@ enum SchemaVersionState {
   DELETED = 8
 }
 
+enum DatabaseType {
+  NATIVE = 1,
+  REMOTE = 2
+}
+
 struct HiveObjectRef{
   1: HiveObjectType objectType,
   2: string dbName,
@@ -297,7 +333,8 @@ struct TruncateTableRequest {
   2: required string tableName,
   3: optional list<string> partNames,
   4: optional i64 writeId=-1,
-  5: optional string validWriteIdList
+  5: optional string validWriteIdList,
+  6: optional EnvironmentContext environmentContext
 }
 
 struct TruncateTableResponse {
@@ -357,7 +394,8 @@ struct Catalog {
   3: string locationUri,              // default storage location.  When databases are created in
                                       // this catalog, if they do not specify a location, they will
                                       // be placed in this location.
-  4: optional i32 createTime          // creation time of catalog in seconds since epoch
+  4: optional i32 createTime,          // creation time of catalog in seconds since epoch
+  5: optional map<string, string> parameters
 }
 
 struct CreateCatalogRequest {
@@ -382,7 +420,8 @@ struct GetCatalogsResponse {
 }
 
 struct DropCatalogRequest {
-  1: string name
+  1: string name,
+  2: optional bool ifExists = true
 }
 
 // namespace for tables
@@ -395,8 +434,20 @@ struct Database {
   6: optional string ownerName,
   7: optional PrincipalType ownerType,
   8: optional string catalogName,
-  9: optional i32 createTime               // creation time of database in seconds since epoch
-  10: optional string managedLocationUri // directory for managed tables
+  9: optional i32 createTime,             // creation time of database in seconds since epoch
+  10: optional string managedLocationUri, // directory for managed tables
+  11: optional DatabaseType type,
+  12: optional string connector_name,
+  13: optional string remote_dbname
+}
+
+struct GetDatabaseObjectsRequest {
+  1: optional string catalogName,
+  2: optional string pattern
+}
+
+struct GetDatabaseObjectsResponse {
+  1: required list<Database> databases
 }
 
 // This object holds the information needed by SerDes
@@ -440,12 +491,13 @@ struct StorageDescriptor {
 }
 
 struct CreationMetadata {
-    1: required string catName
+    1: required string catName,
     2: required string dbName,
     3: required string tblName,
     4: required set<string> tablesUsed,
     5: optional string validTxnList,
-    6: optional i64 materializationTime
+    6: optional i64 materializationTime,
+    7: optional list<SourceTable> sourceTables
 }
 
 // column statistics
@@ -461,7 +513,8 @@ struct DoubleColumnStatsData {
 2: optional double highValue,
 3: required i64 numNulls,
 4: required i64 numDVs,
-5: optional binary bitVectors
+5: optional binary bitVectors,
+6: optional binary histogram
 }
 
 struct LongColumnStatsData {
@@ -469,7 +522,8 @@ struct LongColumnStatsData {
 2: optional i64 highValue,
 3: required i64 numNulls,
 4: required i64 numDVs,
-5: optional binary bitVectors
+5: optional binary bitVectors,
+6: optional binary histogram
 }
 
 struct StringColumnStatsData {
@@ -498,7 +552,8 @@ struct DecimalColumnStatsData {
 2: optional Decimal highValue,
 3: required i64 numNulls,
 4: required i64 numDVs,
-5: optional binary bitVectors
+5: optional binary bitVectors,
+6: optional binary histogram
 }
 
 struct Date {
@@ -510,7 +565,8 @@ struct DateColumnStatsData {
 2: optional Date highValue,
 3: required i64 numNulls,
 4: required i64 numDVs,
-5: optional binary bitVectors
+5: optional binary bitVectors,
+6: optional binary histogram
 }
 
 struct Timestamp {
@@ -522,7 +578,8 @@ struct TimestampColumnStatsData {
 2: optional Timestamp highValue,
 3: required i64 numNulls,
 4: required i64 numDVs,
-5: optional binary bitVectors
+5: optional binary bitVectors,
+6: optional binary histogram
 }
 
 union ColumnStatisticsData {
@@ -556,7 +613,31 @@ struct ColumnStatistics {
 2: required list<ColumnStatisticsObj> statsObj,
 3: optional bool isStatsCompliant, // Are the stats isolation-level-compliant with the
                                                       // the calling query?
-4: optional string engine
+4: optional string engine = "hive"
+}
+
+// FileMetadata represents the table-level (in case of unpartitioned) or partition-level
+// file metadata. Each partition could have more than 1 files and hence the list of
+// binary data field. Each value in data field corresponds to metadata for one file.
+struct FileMetadata {
+  // current supported type mappings are
+  // 1 -> IMPALA
+  1: byte type = 1
+  2: byte version = 1
+  3: list<binary> data
+}
+
+// this field can be used to store repeatitive information
+// (like network addresses in filemetadata). Instead of
+// sending the same object repeatedly, we can send the indices
+// corresponding to the object in this list.
+struct ObjectDictionary {
+  // the key can be used to determine the object type
+  // the value is the list of the objects which can be accessed
+  // using their indices. These indices can be used to send instead of
+  // full object which can reduce the payload significantly in case of
+  // repetitive objects.
+  1: required map<string, list<binary>> values
 }
 
 // table information
@@ -586,7 +667,18 @@ struct Table {
   23: optional list<string> requiredReadCapabilities,
   24: optional list<string> requiredWriteCapabilities
   25: optional i64 id,                 // id of the table. It will be ignored if set. It's only for
-                                        // read purposed
+                                       // read purposes
+  26: optional FileMetadata fileMetadata, // optional serialized file-metadata for this table
+					  // for certain execution engines
+  27: optional ObjectDictionary dictionary,
+  28: optional i64 txnId,              // txnId associated with the table creation
+}
+
+struct SourceTable {
+  1: required Table table,
+  2: required i64 insertedCount,
+  3: required i64 updatedCount,
+  4: required i64 deletedCount
 }
 
 struct Partition {
@@ -601,7 +693,8 @@ struct Partition {
   9: optional string catName,
   10: optional i64 writeId=-1,
   11: optional bool isStatsCompliant,
-  12: optional ColumnStatistics colStats // column statistics for partition
+  12: optional ColumnStatistics colStats, // column statistics for partition
+  13: optional FileMetadata fileMetadata  // optional serialized file-metadata useful for certain execution engines
 }
 
 struct PartitionWithoutSD {
@@ -645,7 +738,7 @@ struct SetPartitionsStatsRequest {
 2: optional bool needMerge, //stats need to be merged with the existing stats
 3: optional i64 writeId=-1,         // writeId for the current query that updates the stats
 4: optional string validWriteIdList, // valid write id list for the table for which this struct is being sent
-5: required string engine //engine creating the current request
+5: optional string engine = "hive" //engine creating the current request
 }
 
 struct SetPartitionsStatsResponse {
@@ -657,14 +750,6 @@ struct Schema {
  // column names, types, comments
  1: list<FieldSchema> fieldSchemas,  // delimiters etc
  2: map<string, string> properties
-}
-
-// Key-value store to be used with selected
-// Metastore APIs (create, alter methods).
-// The client can pass environment properties / configs that can be
-// accessed in hooks.
-struct EnvironmentContext {
-  1: map<string, string> properties
 }
 
 struct PrimaryKeysRequest {
@@ -740,7 +825,7 @@ struct AllTableConstraintsResponse {
 }
 
 struct DropConstraintRequest {
-  1: required string dbname, 
+  1: required string dbname,
   2: required string tablename,
   3: required string constraintname,
   4: optional string catName
@@ -793,7 +878,10 @@ struct PartitionsByExprRequest {
   6: optional string catName,
   7: optional string order
   8: optional string validWriteIdList,
-  9: optional i64 id=-1 // table id
+  9: optional i64 id=-1, // table id
+  10: optional bool skipColumnSchemaForPartition,
+  11: optional string includeParamKeyPattern,
+  12: optional string excludeParamKeyPattern
 }
 
 struct TableStatsResult {
@@ -812,7 +900,7 @@ struct TableStatsRequest {
  3: required list<string> colNames
  4: optional string catName,
  5: optional string validWriteIdList,  // valid write id list for the table for which this struct is being sent
- 6: required string engine, //engine creating the current request
+ 6: optional string engine = "hive", //engine creating the current request
  7: optional i64 id=-1 // table id
 }
 
@@ -823,13 +911,14 @@ struct PartitionsStatsRequest {
  4: required list<string> partNames,
  5: optional string catName,
  6: optional string validWriteIdList, // valid write id list for the table for which this struct is being sent
- 7: required string engine //engine creating the current request
+ 7: optional string engine = "hive" //engine creating the current request
 }
 
 // Return type for add_partitions_req
 struct AddPartitionsResult {
   1: optional list<Partition> partitions,
-  2: optional bool isStatsCompliant
+  2: optional bool isStatsCompliant,
+  3: optional list<FieldSchema> partitionColSchema
 }
 
 // Request type for add_partitions_req
@@ -840,7 +929,10 @@ struct AddPartitionsRequest {
   4: required bool ifNotExists,
   5: optional bool needResult=true,
   6: optional string catName,
-  7: optional string validWriteIdList
+  7: optional string validWriteIdList,
+  8: optional bool skipColumnSchemaForPartition,
+  9: optional list<FieldSchema> partitionColSchema,
+  10: optional EnvironmentContext environmentContext
 }
 
 // Return type for drop_partitions_req
@@ -869,7 +961,18 @@ struct DropPartitionsRequest {
   6: optional bool ignoreProtection,
   7: optional EnvironmentContext environmentContext,
   8: optional bool needResult=true,
-  9: optional string catName
+  9: optional string catName,
+  10: optional bool skipColumnSchemaForPartition
+}
+
+struct DropPartitionRequest {
+  1: optional string catName,
+  2: required string dbName,
+  3: required string tblName,
+  4: optional string partName,
+  5: optional list<string> partVals,
+  6: optional bool deleteData,
+  7: optional EnvironmentContext environmentContext
 }
 
 struct PartitionValuesRequest {
@@ -900,12 +1003,29 @@ struct GetPartitionsByNamesRequest {
   4: optional bool get_col_stats,
   5: optional list<string> processorCapabilities,
   6: optional string processorIdentifier,
-  7: optional string engine,
-  8: optional string validWriteIdList
+  7: optional string engine = "hive",
+  8: optional string validWriteIdList,
+  9: optional bool getFileMetadata,
+  10: optional i64 id=-1,  // table id
+  11: optional bool skipColumnSchemaForPartition,
+  12: optional string includeParamKeyPattern,
+  13: optional string excludeParamKeyPattern
 }
 
 struct GetPartitionsByNamesResult {
   1: required list<Partition> partitions
+  2: optional ObjectDictionary dictionary
+}
+
+struct DataConnector {
+  1: string name,
+  2: string type,
+  3: string url,
+  4: optional string description,
+  5: optional map<string,string> parameters,
+  6: optional string ownerName,
+  7: optional PrincipalType ownerType,
+  8: optional i32 createTime
 }
 
 enum FunctionType {
@@ -923,7 +1043,9 @@ enum TxnType {
     REPL_CREATED = 1,
     READ_ONLY    = 2,
     COMPACTION   = 3,
-    MATER_VIEW_REBUILD = 4
+    MATER_VIEW_REBUILD = 4,
+    SOFT_DELETE  = 5,
+    REBALANCE_COMPACTION = 6
 }
 
 // specifies which info to return with GetTablesExtRequest
@@ -993,10 +1115,13 @@ struct OpenTxnsResponse {
 struct AbortTxnRequest {
     1: required i64 txnid,
     2: optional string replPolicy,
+    3: optional TxnType txn_type,
+    4: optional i64 errorCode,
 }
 
 struct AbortTxnsRequest {
     1: required list<i64> txn_ids,
+    2: optional i64 errorCode,
 }
 
 struct CommitTxnKeyValue {
@@ -1023,6 +1148,13 @@ struct ReplLastIdInfo {
     5: optional list<string> partitionList,
 }
 
+struct UpdateTransactionalStatsRequest {
+    1: required i64 tableId,
+    2: required i64 insertCount,
+    3: required i64 updatedCount,
+    4: required i64 deletedCount,
+}
+
 struct CommitTxnRequest {
     1: required i64 txnid,
     2: optional string replPolicy,
@@ -1032,7 +1164,8 @@ struct CommitTxnRequest {
     4: optional ReplLastIdInfo replLastIdInfo,
     // An optional key/value to store atomically with the transaction
     5: optional CommitTxnKeyValue keyValue,
-    6: optional bool exclWriteEnabled = true
+    6: optional bool exclWriteEnabled = true,
+    7: optional TxnType txn_type,
 }
 
 struct ReplTblWriteIdStateRequest {
@@ -1081,6 +1214,9 @@ struct AllocateTableWriteIdsRequest {
     4: optional string replPolicy,
     // The list is assumed to be sorted by both txnids and write ids. The write id list is assumed to be contiguous.
     5: optional list<TxnToWriteId> srcTxnToWriteIdList,
+    // If false, reuse previously allocate writeIds for txnIds. If true, remove older txnId to writeIds mappings
+    // and regenerate (this is useful during re-compilation when we need to ensure writeIds are regenerated)
+    6: optional bool reallocate = false;
 }
 
 struct AllocateTableWriteIdsResponse {
@@ -1111,7 +1247,8 @@ struct LockComponent {
     5: optional string partitionname,
     6: optional DataOperationType operationType = DataOperationType.UNSET,
     7: optional bool isTransactional = false,
-    8: optional bool isDynamicPartitionWrite = false
+    8: optional bool isDynamicPartitionWrite = false,
+    9: optional string catName = "hive"
 }
 
 struct LockRequest {
@@ -1120,7 +1257,9 @@ struct LockRequest {
     3: required string user,     // used in 'show locks' to help admins find who has open locks
     4: required string hostname, // used in 'show locks' to help admins find who has open locks
     5: optional string agentInfo = "Unknown",
-    6: optional bool zeroWaitReadEnabled = false
+    6: optional bool zeroWaitReadEnabled = false,
+    7: optional bool exclusiveCTAS = false,
+    8: optional bool locklessReadsEnabled = false
 }
 
 struct LockResponse {
@@ -1145,6 +1284,7 @@ struct ShowLocksRequest {
     3: optional string partname,
     4: optional bool isExtended=false,
     5: optional i64 txnid,
+    6: optional string catname="hive",
 }
 
 struct ShowLocksResponseElement {
@@ -1164,6 +1304,14 @@ struct ShowLocksResponseElement {
     14: optional i64 blockedByExtId,
     15: optional i64 blockedByIntId,
     16: optional i64 lockIdInternal,
+    17: required string catname,
+}
+
+struct LockMaterializationRebuildRequest {
+    1: required string catName,
+    2: required string dbName,
+    3: required string tableName,
+    4: required i64 txnId,
 }
 
 struct ShowLocksResponse {
@@ -1186,12 +1334,17 @@ struct HeartbeatTxnRangeResponse {
 }
 
 struct CompactionRequest {
-    1: required string dbname,
-    2: required string tablename,
-    3: optional string partitionname,
-    4: required CompactionType type,
-    5: optional string runas,
+    1: required string dbname
+    2: required string tablename
+    3: optional string partitionname
+    4: required CompactionType type
+    5: optional string runas
     6: optional map<string, string> properties
+    7: optional string initiatorId
+    8: optional string initiatorVersion
+    9: optional string poolName
+    10: optional i32 numberOfBuckets
+    11: optional string orderByClause;
 }
 
 struct CompactionInfoStruct {
@@ -1201,28 +1354,69 @@ struct CompactionInfoStruct {
     4: optional string partitionname,
     5: required CompactionType type,
     6: optional string runas,
-    7: optional string properties
-    8: optional bool toomanyaborts
-    9: optional string state
-    10: optional string workerId
-    11: optional i64 start
-    12: optional i64 highestWriteId
-    13: optional string errorMessage
-    14: optional bool hasoldabort
-    15: optional i64 enqueueTime
+    7: optional string properties,
+    8: optional bool toomanyaborts,
+    9: optional string state,
+    10: optional string workerId,
+    11: optional i64 start,
+    12: optional i64 highestWriteId,
+    13: optional string errorMessage,
+    14: optional bool hasoldabort,
+    15: optional i64 enqueueTime,
+    16: optional i64 retryRetention,
+    17: optional string poolname
+    18: optional i32 numberOfBuckets
+    19: optional string orderByClause;
 }
 
 struct OptionalCompactionInfoStruct {
     1: optional CompactionInfoStruct ci,
 }
 
+enum CompactionMetricsMetricType {
+  NUM_OBSOLETE_DELTAS,
+  NUM_DELTAS,
+  NUM_SMALL_DELTAS,
+}
+
+struct CompactionMetricsDataStruct {
+    1: required string dbname
+    2: required string tblname
+    3: optional string partitionname
+    4: required CompactionMetricsMetricType type
+    5: required i32 metricvalue
+    6: required i32 version
+    7: required i32 threshold
+}
+
+struct CompactionMetricsDataResponse {
+    1: optional CompactionMetricsDataStruct data
+}
+
+struct CompactionMetricsDataRequest {
+    1: required string dbName,
+    2: required string tblName,
+    3: optional string partitionName
+    4: required CompactionMetricsMetricType type
+}
+
 struct CompactionResponse {
     1: required i64 id,
     2: required string state,
-    3: required bool accepted
+    3: required bool accepted,
+    4: optional string errormessage
 }
 
 struct ShowCompactRequest {
+    1: optional i64 id,
+    2: optional string poolName,
+    3: optional string dbName,
+    4: optional string tbName,
+    5: optional string partName,
+    6: optional CompactionType type,
+    7: optional string state,
+    8: optional i64 limit,
+    9: optional string order
 }
 
 struct ShowCompactResponseElement {
@@ -1241,10 +1435,53 @@ struct ShowCompactResponseElement {
     13: optional i64 id,
     14: optional string errorMessage,
     15: optional i64 enqueueTime,
+    16: optional string workerVersion,
+    17: optional string initiatorId,
+    18: optional string initiatorVersion,
+    19: optional i64 cleanerStart,
+    20: optional string poolName,
+    21: optional i64 nextTxnId,
+    22: optional i64 txnId,
+    23: optional i64 commitTime,
+    24: optional i64 hightestWriteId
+
 }
 
 struct ShowCompactResponse {
     1: required list<ShowCompactResponseElement> compacts,
+}
+
+struct AbortCompactionRequest {
+    1: required list<i64> compactionIds,
+    2: optional string type,
+    3: optional string poolName
+}
+
+struct AbortCompactionResponseElement {
+    1: required i64 compactionId,
+    2: optional string status,
+    3: optional string message
+}
+
+struct AbortCompactResponse {
+    1: required map<i64, AbortCompactionResponseElement> abortedcompacts,
+}
+
+struct GetLatestCommittedCompactionInfoRequest {
+    1: required string dbname,
+    2: required string tablename,
+    3: optional list<string> partitionnames,
+    4: optional i64 lastCompactionId,
+}
+
+struct GetLatestCommittedCompactionInfoResponse {
+    1: required list<CompactionInfoStruct> compactions,
+}
+
+struct FindNextCompactRequest {
+    1: optional string workerId,
+    2: optional string workerVersion,
+    3: optional string poolName
 }
 
 struct AddDynamicPartitions {
@@ -1270,6 +1507,10 @@ struct NotificationEventRequest {
     1: required i64 lastEvent,
     2: optional i32 maxEvents,
     3: optional list<string> eventTypeSkipList,
+    4: optional string catName,
+    5: optional string dbName,
+    6: optional list<string> tableNames,
+    7: optional list<string> eventTypeList
 }
 
 struct NotificationEvent {
@@ -1296,7 +1537,8 @@ struct NotificationEventsCountRequest {
     2: required string dbName,
     3: optional string catName,
     4: optional i64 toEventId,
-    5: optional i64 limit
+    5: optional i64 limit,
+    6: optional list<string> tableNames
 }
 
 struct NotificationEventsCountResponse {
@@ -1315,9 +1557,11 @@ struct InsertEventRequestData {
 }
 
 union FireEventRequestData {
-    1: InsertEventRequestData insertData
+    1: optional InsertEventRequestData insertData,
     // used to fire insert events on multiple partitions
-    2: list<InsertEventRequestData> insertDatas
+    2: optional list<InsertEventRequestData> insertDatas,
+    // Identify if it is a refresh or invalidate event
+    3: optional bool refreshEvent
 }
 
 struct FireEventRequest {
@@ -1330,6 +1574,9 @@ struct FireEventRequest {
     // ignored if event request data contains multiple insert event datas
     5: optional list<string> partitionVals,
     6: optional string catName,
+    7: optional map<string, string> tblParams,
+    // To keep the backward compatibility, batch partition vals for reload event is used
+    8: optional list<list<string>> batchPartitionValsForRefresh
 }
 
 struct FireEventResponse {
@@ -1346,6 +1593,17 @@ struct WriteNotificationLogRequest {
 }
 
 struct WriteNotificationLogResponse {
+    // NOP for now, this is just a place holder for future responses
+}
+
+struct WriteNotificationLogBatchRequest {
+    1: required string catalog,
+    2: required string db,
+    3: required string table,
+    4: required list<WriteNotificationLogRequest> requestList,
+}
+
+struct WriteNotificationLogBatchResponse {
     // NOP for now, this is just a place holder for future responses
 }
 
@@ -1430,6 +1688,42 @@ struct ClientCapabilities {
   1: required list<ClientCapability> values
 }
 
+/*
+ * Generic request API, providing different kinds of filtering and controlling output.
+ *
+ * The API entry point is get_partitions_with_specs() and getTables, which is based on a single
+ * request/response object model.
+ *
+ * The request defines any filtering that should be done for partitions as well as the list of fields that should be
+ * returned (this is called ProjectionSpec). Projection is simply a list of dot separated strings which represent
+ * the fields which that be returned. Projection may also include whitelist or blacklist of parameters to include in
+ * the partition. When both blacklist and whitelist are present, the blacklist supersedes the
+ * whitelist in case of conflicts.
+ *
+ * Filter spec is the generalization of various types of partition and table filtering. Partitions and tables can be
+ * filtered by names, by values or by partition expressions.
+ */
+
+struct GetProjectionsSpec {
+   // fieldList is a list of dot separated strings which represent the fields which must be returned.
+   // Any other field which is not in the fieldList may be unset in the returned partitions (it
+   //   is up to the implementation to decide whether it chooses to include or exclude such fields).
+   // E.g. setting the field list to sd.location, serdeInfo.name, sd.cols.name, sd.cols.type will
+   // return partitions which will have location field set in the storage descriptor. Also the serdeInfo
+   // in the returned storage descriptor will only have name field set. This applies to multi-valued
+   // fields as well like sd.cols, so in the example above only name and type fields will be set for sd.cols.
+   // If the fieldList is empty or not present, all the fields will be set
+   1: list<string> fieldList;
+   // SQL-92 compliant regex pattern for param keys to be included
+   // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
+   // Currently this is unsupported when fetching tables.
+   2: string includeParamKeyPattern;
+   // SQL-92 compliant regex pattern for param keys to be excluded
+   // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
+   // Current this is unsupported  when fetching tables.
+   3: string excludeParamKeyPattern;
+}
+
 struct GetTableRequest {
   1: required string dbName,
   2: required string tblName,
@@ -1439,7 +1733,7 @@ struct GetTableRequest {
   7: optional bool getColumnStats,
   8: optional list<string> processorCapabilities,
   9: optional string processorIdentifier,
-  10: optional string engine,
+  10: optional string engine = "hive",
   11: optional i64 id=-1 // table id
 }
 
@@ -1454,7 +1748,9 @@ struct GetTablesRequest {
   3: optional ClientCapabilities capabilities,
   4: optional string catName,
   5: optional list<string> processorCapabilities,
-  6: optional string processorIdentifier
+  6: optional string processorIdentifier,
+  7: optional GetProjectionsSpec projectionSpec,
+  8: optional string tablesPattern
 }
 
 struct GetTablesResult {
@@ -1479,11 +1775,60 @@ struct ExtendedTableInfo {
  4: optional list<string> requiredWriteCapabilities // capabilities required for write access
 }
 
+struct DropTableRequest {
+ 1: optional string catalogName,
+ 2: required string dbName,
+ 3: required string tableName,
+ 4: optional bool deleteData,
+ 5: optional EnvironmentContext envContext,
+ 6: optional bool dropPartitions,
+ 7: optional string id,
+ 8: optional bool asyncDrop,
+ 9: optional bool cancel
+}
+
+struct AsyncOperationResp {
+ 1: required string id,
+ 2: optional string message,
+ 3: optional bool finished
+}
+
 struct GetDatabaseRequest {
  1: optional string name,
  2: optional string catalogName,
  3: optional list<string> processorCapabilities,
  4: optional string processorIdentifier
+}
+
+struct AlterDatabaseRequest {
+ 1: required string oldDbName,
+ 2: required Database newDb
+}
+
+struct DropDatabaseRequest {
+  1: required string name,
+  2: optional string catalogName,
+  3: required bool ignoreUnknownDb,
+  4: required bool deleteData,
+  5: required bool cascade,
+  6: optional bool softDelete=false,
+  7: optional i64 txnId=0,
+  8: optional bool deleteManagedDir=true,
+  9: optional string id,
+  10: optional bool asyncDrop,
+  11: optional bool cancel
+}
+
+struct GetFunctionsRequest {
+  1: required string dbName,
+  2: optional string catalogName,
+  3: optional string pattern,
+  4: optional bool returnNames=true
+}
+
+struct GetFunctionsResponse {
+  1: optional list<string> function_names,
+  2: optional list<Function> functions
 }
 
 // Request type for cm_recycle
@@ -1502,10 +1847,13 @@ struct TableMeta {
   3: required string tableType;
   4: optional string comments;
   5: optional string catName;
+  6: optional string ownerName;
+  7: optional PrincipalType ownerType;
 }
 
 struct Materialization {
   1: required bool sourceTablesUpdateDeleteModified;
+  2: required bool sourceTablesCompacted;
 }
 
 // Data types for workload management.
@@ -1830,6 +2178,41 @@ struct CreateTableRequest {
    10: optional string processorIdentifier
 }
 
+struct CreateDatabaseRequest {
+  1: required string databaseName,
+  2: optional string description,
+  3: optional string locationUri,
+  4: optional map<string, string> parameters,
+  5: optional PrincipalPrivilegeSet privileges,
+  6: optional string ownerName,
+  7: optional PrincipalType ownerType,
+  8: optional string catalogName,
+  9: optional i32 createTime,
+  10: optional string managedLocationUri,
+  11: optional DatabaseType type,
+  12: optional string dataConnectorName,
+  13: optional string remote_dbname
+}
+
+struct CreateDataConnectorRequest {
+  1: required DataConnector connector
+}
+
+struct GetDataConnectorRequest {
+  1: required string connectorName
+}
+
+struct AlterDataConnectorRequest {
+  1: required string connectorName,
+  2: required DataConnector newConnector
+}
+
+struct DropDataConnectorRequest {
+  1: required string connectorName,
+  2: optional bool ifNotExists,
+  3: optional bool checkReferences
+}
+
 struct ScheduledQueryPollRequest {
   1: required string clusterNamespace
 }
@@ -1872,6 +2255,7 @@ enum QueryState {
    FAILED,
    FINISHED,
    TIMED_OUT,
+   AUTO_DISABLED,
 }
 
 struct ScheduledQueryProgressInfo{
@@ -1888,7 +2272,18 @@ struct AlterPartitionsRequest {
   4: required list<Partition> partitions,
   5: optional EnvironmentContext environmentContext,
   6: optional i64 writeId=-1,
-  7: optional string validWriteIdList
+  7: optional string validWriteIdList,
+  8: optional bool skipColumnSchemaForPartition,
+  9: optional list<FieldSchema> partitionColSchema
+}
+
+struct AppendPartitionsRequest {
+  1: optional string catalogName,
+  2: required string dbName,
+  3: required string tableName,
+  4: optional string name,
+  5: optional list<string> partVals,
+  6: optional EnvironmentContext environmentContext
 }
 
 struct AlterPartitionsResponse {
@@ -1900,7 +2295,9 @@ struct RenamePartitionRequest {
   3: required string tableName,
   4: required list<string> partVals,
   5: required Partition newPart,
-  6: optional string validWriteIdList
+  6: optional string validWriteIdList,
+  7: optional i64 txnId,              // txnId associated with the rename operation
+  8: optional bool clonePart          // non-blocking rename
 }
 
 struct RenamePartitionResponse {
@@ -1915,46 +2312,20 @@ struct AlterTableRequest {
   6: optional i64 writeId=-1,
   7: optional string validWriteIdList
   8: optional list<string> processorCapabilities,
-  9: optional string processorIdentifier
+  9: optional string processorIdentifier,
+  10: optional string expectedParameterKey,
+  11: optional string expectedParameterValue
 // TODO: also add cascade here, out of envCtx
 }
 
 struct AlterTableResponse {
 }
 
-/*
- * Generic Partition request API, providing different kinds of filtering and controlling output.
- *
- * The API entry point is get_partitions_with_specs(), which is based on a single
- * request/response object model.
- *
- * The request (GetPartitionsRequest) defines any filtering that should be done for partitions
- * as well as the list of fields that should be returned (this is called ProjectionSpec).
- * Projection is simply a list of dot separated strings which represent the fields which should
- * be returned. Projection may also include whitelist or blacklist of parameters to include in
- * the partition. When both blacklist and whitelist are present, the blacklist supersedes the
- * whitelist in case of conflicts.
- *
- * Partition filter spec is the generalization of various types of partition filtering.
- * Partitions can be filtered by names, by values or by partition expressions.
- */
-
-struct GetPartitionsProjectionSpec {
-   // fieldList is a list of dot separated strings which represent the fields which must be returned.
-   // Any other field which is not in the fieldList may be unset in the returned partitions (it
-   //   is up to the implementation to decide whether it chooses to include or exclude such fields).
-   // E.g. setting the field list to sd.location, serdeInfo.name, sd.cols.name, sd.cols.type will
-   // return partitions which will have location field set in the storage descriptor. Also the serdeInfo
-   // in the returned storage descriptor will only have name field set. This applies to multi-valued
-   // fields as well like sd.cols, so in the example above only name and type fields will be set for sd.cols.
-   // If the fieldList is empty or not present, all the fields will be set
-   1: list<string> fieldList;
-   // SQL-92 compliant regex pattern for param keys to be included
-   // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
-   2: string includeParamKeyPattern;
-   // SQL-92 compliant regex pattern for param keys to be excluded
-   // _ or % wildcards are supported. '_' represent one character and '%' represents 0 or more characters
-   3: string excludeParamKeyPattern;
+struct TableParamsUpdate {
+    1: required TableName table_name,
+    4: required map<string, string> params
+    5: optional string expected_param_key
+    6: optional string expected_param_value
 }
 
 enum PartitionFilterMode {
@@ -1979,8 +2350,8 @@ struct GetPartitionsRequest {
    4: optional bool withAuth,
    5: optional string user,
    6: optional list<string> groupNames,
-   7: GetPartitionsProjectionSpec projectionSpec
-   8: GetPartitionsFilterSpec filterSpec, // TODO not yet implemented. Must be present but ignored
+   7: GetProjectionsSpec projectionSpec
+   8: GetPartitionsFilterSpec filterSpec, // if unset, no filtering is applied and all partitions are returned
    9: optional list<string> processorCapabilities,
    10: optional string processorIdentifier,
    11: optional string validWriteIdList
@@ -2031,11 +2402,25 @@ struct PartitionsRequest { // Not using Get prefix as that name is already used 
    3: required string tblName,
    4: optional i16 maxParts=-1,
    5: optional string validWriteIdList,
-   6: optional i64 id=-1 // table id
+   6: optional i64 id=-1, // table id
+   7: optional bool skipColumnSchemaForPartition,
+   8: optional string includeParamKeyPattern,
+   9: optional string excludeParamKeyPattern
 }
 
 struct PartitionsResponse { // Not using Get prefix as that name is already used for a different method
    1: required list<Partition> partitions
+}
+
+struct GetPartitionsByFilterRequest {
+   1: optional string catName,
+   2: string dbName,
+   3: string tblName,
+   4: string filter,
+   5: optional i16 maxParts=-1,
+   6: optional bool skipColumnSchemaForPartition,
+   7: optional string includeParamKeyPattern,
+   8: optional string excludeParamKeyPattern
 }
 
 struct GetPartitionNamesPsRequest {
@@ -2062,6 +2447,10 @@ struct GetPartitionsPsWithAuthRequest {
    7: optional list<string> groupNames,
    8: optional string validWriteIdList,
    9: optional i64 id=-1 // table id
+   10: optional bool skipColumnSchemaForPartition,
+   11: optional string includeParamKeyPattern,
+   12: optional string excludeParamKeyPattern,
+   13: optional list<string> partNames;
 }
 
 struct GetPartitionsPsWithAuthResponse {
@@ -2073,7 +2462,8 @@ struct ReplicationMetrics{
   2: required string policy,
   3: required i64 dumpExecutionId,
   4: optional string metadata,
-  5: optional string progress
+  5: optional string progress,
+  6: optional string messageFormat
 }
 
 struct ReplicationMetricList{
@@ -2107,6 +2497,73 @@ struct StoredProcedure {
   3: string           catName,
   4: string           ownerName,
   5: string           source
+}
+
+struct AddPackageRequest {
+  1: string catName,
+  2: string dbName,
+  3: string packageName
+  4: string ownerName,
+  5: string header,
+  6: string body
+}
+
+struct GetPackageRequest {
+  1: required string catName,
+  2: required string dbName,
+  3: required string packageName
+}
+
+struct DropPackageRequest {
+  1: required string catName,
+  2: required string dbName,
+  3: required string packageName
+}
+
+struct ListPackageRequest {
+  1: required string catName
+  2: optional string dbName
+}
+
+struct Package {
+  1: string catName,
+  2: string dbName,
+  3: string packageName
+  4: string ownerName,
+  5: string header,
+  6: string body
+}
+
+struct GetAllWriteEventInfoRequest {
+  1: required i64 txnId,
+  2: optional string dbName,
+  3: optional string tableName
+}
+
+struct DeleteColumnStatisticsRequest {
+  1: optional string cat_name,
+  2: required string db_name,
+  3: required string tbl_name,
+  4: optional list<string> part_names,
+  5: optional list<string> col_names,
+  6: optional string engine = "hive",
+  7: optional bool tableLevel = false
+}
+
+struct ReplayedTxnsForPolicyResult {
+  1: map<string, string> replTxnMapEntry
+}
+
+struct ExchangePartitionsRequest {
+  1: required map<string, string> partitionSpecs,
+  2: required TableName sourceTable,
+  3: required TableName targetTable,
+}
+
+struct TableName {
+  1: optional string cat_name,
+  2: required string db_name,
+  3: required string tbl_name
 }
 
 // Exceptions.
@@ -2172,11 +2629,19 @@ exception NoSuchLockException {
     1: string message
 }
 
+exception CompactionAbortedException {
+    1: string message
+}
+
+exception NoSuchCompactionException {
+    1: string message
+}
 /**
 * This interface is live.
 */
 service ThriftHiveMetastore extends fb303.FacebookService
 {
+  AbortCompactResponse abort_Compactions(1: AbortCompactionRequest rqst)
   string getMetaConf(1:string key) throws(1:MetaException o1)
   void setMetaConf(1:string key, 2:string value) throws(1:MetaException o1)
 
@@ -2187,14 +2652,24 @@ service ThriftHiveMetastore extends fb303.FacebookService
   void drop_catalog(1: DropCatalogRequest catName) throws (1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
 
   void create_database(1:Database database) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3)
+  void create_database_req(1:CreateDatabaseRequest createDatabaseRequest) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3)
   Database get_database(1:string name) throws(1:NoSuchObjectException o1, 2:MetaException o2)
   Database get_database_req(1:GetDatabaseRequest request) throws(1:NoSuchObjectException o1, 2:MetaException o2)
   void drop_database(1:string name, 2:bool deleteData, 3:bool cascade) throws(1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
+  AsyncOperationResp drop_database_req(1:DropDatabaseRequest req) throws(1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
   list<string> get_databases(1:string pattern) throws(1:MetaException o1)
   list<string> get_all_databases() throws(1:MetaException o1)
+  GetDatabaseObjectsResponse get_databases_req (1:GetDatabaseObjectsRequest request) throws(1:MetaException o1)
   void alter_database(1:string dbname, 2:Database db) throws(1:MetaException o1, 2:NoSuchObjectException o2)
+  void alter_database_req(1:AlterDatabaseRequest alterDbReq) throws(1:MetaException o1, 2:NoSuchObjectException o2)
 
-  // returns the type with given name (make seperate calls for the dependent types if needed)
+  void create_dataconnector_req(1:CreateDataConnectorRequest connectorReq) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3)
+  DataConnector get_dataconnector_req(1:GetDataConnectorRequest request) throws(1:NoSuchObjectException o1, 2:MetaException o2)
+  void drop_dataconnector_req(1:DropDataConnectorRequest dropDcReq) throws(1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
+  list<string> get_dataconnectors() throws(1:MetaException o1)
+  void alter_dataconnector_req(1:AlterDataConnectorRequest alterReq) throws(1:MetaException o1, 2:NoSuchObjectException o2)
+
+    // returns the type with given name (make seperate calls for the dependent types if needed)
   Type get_type(1:string name)  throws(1:MetaException o1, 2:NoSuchObjectException o2)
   bool create_type(1:Type type) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3)
   bool drop_type(1:string type) throws(1:MetaException o1, 2:NoSuchObjectException o2)
@@ -2244,7 +2719,7 @@ service ThriftHiveMetastore extends fb303.FacebookService
   void add_primary_key(1:AddPrimaryKeyRequest req)
       throws(1:NoSuchObjectException o1, 2:MetaException o2)
   void add_foreign_key(1:AddForeignKeyRequest req)
-      throws(1:NoSuchObjectException o1, 2:MetaException o2)  
+      throws(1:NoSuchObjectException o1, 2:MetaException o2)
   void add_unique_constraint(1:AddUniqueConstraintRequest req)
       throws(1:NoSuchObjectException o1, 2:MetaException o2)
   void add_not_null_constraint(1:AddNotNullConstraintRequest req)
@@ -2253,7 +2728,8 @@ service ThriftHiveMetastore extends fb303.FacebookService
       throws(1:NoSuchObjectException o1, 2:MetaException o2)
   void add_check_constraint(1:AddCheckConstraintRequest req)
       throws(1:NoSuchObjectException o1, 2:MetaException o2)
-
+  Table translate_table_dryrun(1:CreateTableRequest request)
+        throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3, 4:NoSuchObjectException o4)
   // drops the table and all the partitions associated with it if the table has partitions
   // delete data (including partitions) if deleteData is set to true
   void drop_table(1:string dbname, 2:string name, 3:bool deleteData)
@@ -2261,6 +2737,8 @@ service ThriftHiveMetastore extends fb303.FacebookService
   void drop_table_with_environment_context(1:string dbname, 2:string name, 3:bool deleteData,
       4:EnvironmentContext environment_context)
                        throws(1:NoSuchObjectException o1, 2:MetaException o3)
+  AsyncOperationResp drop_table_req(1:DropTableRequest dropTableReq)
+        throws(1:NoSuchObjectException o1, 2:MetaException o3)
   void truncate_table(1:string dbName, 2:string tableName, 3:list<string> partNames)
                           throws(1:MetaException o1)
   TruncateTableResponse truncate_table_req(1:TruncateTableRequest req) throws(1:MetaException o1)
@@ -2272,9 +2750,6 @@ service ThriftHiveMetastore extends fb303.FacebookService
                        throws (1: MetaException o1)
   list<string> get_all_tables(1: string db_name) throws (1: MetaException o1)
 
-  Table get_table(1:string dbname, 2:string tbl_name)
-                       throws (1:MetaException o1, 2:NoSuchObjectException o2)
-  list<Table> get_table_objects_by_name(1:string dbname, 2:list<string> tbl_names)
   list<ExtendedTableInfo> get_tables_ext(1: GetTablesExtRequest req) throws (1: MetaException o1)
   GetTableResult get_table_req(1:GetTableRequest req) throws (1:MetaException o1, 2:NoSuchObjectException o2)
   GetTablesResult get_table_objects_by_name_req(1:GetTablesRequest req)
@@ -2334,6 +2809,9 @@ service ThriftHiveMetastore extends fb303.FacebookService
   AlterTableResponse alter_table_req(1:AlterTableRequest req)
       throws (1:InvalidOperationException o1, 2:MetaException o2)
 
+  // multi-table table-parameter update
+  void update_table_params(1:list<TableParamsUpdate> updates) throws (1:MetaException o1)
+
 
 
   // the following applies to only tables that have partitions
@@ -2355,6 +2833,8 @@ service ThriftHiveMetastore extends fb303.FacebookService
   Partition append_partition_with_environment_context(1:string db_name, 2:string tbl_name,
       3:list<string> part_vals, 4:EnvironmentContext environment_context)
                        throws (1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
+  Partition append_partition_req(1:AppendPartitionsRequest appendPartitionsReq)
+                       throws (1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
   Partition append_partition_by_name(1:string db_name, 2:string tbl_name, 3:string part_name)
                        throws (1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
   Partition append_partition_by_name_with_environment_context(1:string db_name, 2:string tbl_name,
@@ -2364,6 +2844,8 @@ service ThriftHiveMetastore extends fb303.FacebookService
                        throws(1:NoSuchObjectException o1, 2:MetaException o2)
   bool drop_partition_with_environment_context(1:string db_name, 2:string tbl_name,
       3:list<string> part_vals, 4:bool deleteData, 5:EnvironmentContext environment_context)
+                       throws(1:NoSuchObjectException o1, 2:MetaException o2)
+  bool drop_partition_req(1:DropPartitionRequest dropPartitionReq)
                        throws(1:NoSuchObjectException o1, 2:MetaException o2)
   bool drop_partition_by_name(1:string db_name, 2:string tbl_name, 3:string part_name, 4:bool deleteData)
                        throws(1:NoSuchObjectException o1, 2:MetaException o2)
@@ -2407,7 +2889,8 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
 
   list<string> get_partition_names(1:string db_name, 2:string tbl_name, 3:i16 max_parts=-1)
                        throws(1:NoSuchObjectException o1, 2:MetaException o2)
-
+  list<string> fetch_partition_names_req(1:PartitionsRequest partitionReq)
+                       throws(1:NoSuchObjectException o1, 2:MetaException o2)
   PartitionValuesResponse get_partition_values(1:PartitionValuesRequest request)
     throws(1:MetaException o1, 2:NoSuchObjectException o2);
 
@@ -2440,6 +2923,9 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
     3:string filter, 4:i16 max_parts=-1)
                        throws(1:MetaException o1, 2:NoSuchObjectException o2)
 
+  list<Partition> get_partitions_by_filter_req(1:GetPartitionsByFilterRequest req)
+    throws(1:MetaException o1, 2:NoSuchObjectException o2)
+
   // List partitions as PartitionSpec instances.
   list<PartitionSpec> get_part_specs_by_filter(1:string db_name 2:string tbl_name
     3:string filter, 4:i32 max_parts=-1)
@@ -2463,9 +2949,14 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
 
   // get partitions give a list of partition names
   list<Partition> get_partitions_by_names(1:string db_name 2:string tbl_name 3:list<string> names)
-                       throws(1:MetaException o1, 2:NoSuchObjectException o2)
+      throws(1:MetaException o1, 2:NoSuchObjectException o2, 3:InvalidObjectException o3)
   GetPartitionsByNamesResult get_partitions_by_names_req(1:GetPartitionsByNamesRequest req)
-                        throws(1:MetaException o1, 2:NoSuchObjectException o2)
+      throws(1:MetaException o1, 2:NoSuchObjectException o2, 3:InvalidObjectException o3)
+
+    // retrieve properties
+    PropertyGetResponse get_properties(1:PropertyGetRequest req) throws(1:MetaException e1, 2:NoSuchObjectException e2);
+    // set properties
+    bool set_properties(1:PropertySetRequest req) throws(1:MetaException e1, 2:NoSuchObjectException e2);
 
   // changes the partition to the new partition object. partition is identified from the part values
   // in the new_part
@@ -2493,7 +2984,7 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   // partition keys in new_part should be the same as those in old partition.
   void rename_partition(1:string db_name, 2:string tbl_name, 3:list<string> part_vals, 4:Partition new_part)
                        throws (1:InvalidOperationException o1, 2:MetaException o2)
-  
+
   RenamePartitionResponse rename_partition_req(1:RenamePartitionRequest req)
                        throws (1:InvalidOperationException o1, 2:MetaException o2)
 
@@ -2560,6 +3051,8 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   SetPartitionsStatsResponse update_partition_column_statistics_req(1:SetPartitionsStatsRequest req) throws (1:NoSuchObjectException o1,
               2:InvalidObjectException o2, 3:MetaException o3, 4:InvalidInputException o4)
 
+  void update_transaction_statistics(1:UpdateTransactionalStatsRequest req) throws (1:MetaException o1)
+
 
   // get APIs return the column statistics corresponding to db_name, tbl_name, [part_name], col_name if
   // such statistics exists. If the required statistics doesn't exist, get APIs throw NoSuchObjectException
@@ -2589,6 +3082,9 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   bool delete_table_column_statistics(1:string db_name, 2:string tbl_name, 3:string col_name, 4:string engine) throws
               (1:NoSuchObjectException o1, 2:MetaException o2, 3:InvalidObjectException o3,
                4:InvalidInputException o4)
+  bool delete_column_statistics_req(1: DeleteColumnStatisticsRequest req) throws
+              (1:NoSuchObjectException o1, 2:MetaException o2, 3:InvalidObjectException o3,
+              4:InvalidInputException o4)
 
   //
   // user-defined functions
@@ -2607,6 +3103,8 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
       throws (1:InvalidOperationException o1, 2:MetaException o2)
 
   list<string> get_functions(1:string dbName, 2:string pattern)
+      throws (1:MetaException o1)
+  GetFunctionsResponse get_functions_req(1:GetFunctionsRequest request)
       throws (1:MetaException o1)
   Function get_function(1:string dbName, 2:string funcName)
       throws (1:MetaException o1, 2:NoSuchObjectException o2)
@@ -2705,6 +3203,7 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   void repl_tbl_writeid_state(1: ReplTblWriteIdStateRequest rqst)
   GetValidWriteIdsResponse get_valid_write_ids(1:GetValidWriteIdsRequest rqst)
       throws (1:NoSuchTxnException o1, 2:MetaException o2)
+  void add_write_ids_to_min_history(1:i64 txnId, 2: map<string, i64> writeIds) throws (1:MetaException o2)
   AllocateTableWriteIdsResponse allocate_table_write_ids(1:AllocateTableWriteIdsRequest rqst)
     throws (1:NoSuchTxnException o1, 2:TxnAbortedException o2, 3:MetaException o3)
   MaxAllocatedTableWriteIdResponse get_max_allocated_table_write_id(1:MaxAllocatedTableWriteIdRequest rqst)
@@ -2719,25 +3218,33 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   ShowLocksResponse show_locks(1:ShowLocksRequest rqst)
   void heartbeat(1:HeartbeatRequest ids) throws (1:NoSuchLockException o1, 2:NoSuchTxnException o2, 3:TxnAbortedException o3)
   HeartbeatTxnRangeResponse heartbeat_txn_range(1:HeartbeatTxnRangeRequest txns)
-  void compact(1:CompactionRequest rqst) 
-  CompactionResponse compact2(1:CompactionRequest rqst) 
+  void compact(1:CompactionRequest rqst)
+  CompactionResponse compact2(1:CompactionRequest rqst)
   ShowCompactResponse show_compact(1:ShowCompactRequest rqst)
+  bool submit_for_cleanup(1:CompactionRequest o1, 2:i64 o2, 3:i64 o3) throws (1:MetaException o1)
   void add_dynamic_partitions(1:AddDynamicPartitions rqst) throws (1:NoSuchTxnException o1, 2:TxnAbortedException o2)
+  // Deprecated, use find_next_compact2()
   OptionalCompactionInfoStruct find_next_compact(1: string workerId) throws(1:MetaException o1)
+  OptionalCompactionInfoStruct find_next_compact2(1: FindNextCompactRequest rqst) throws(1:MetaException o1)
   void update_compactor_state(1: CompactionInfoStruct cr, 2: i64 txn_id)
   list<string> find_columns_with_stats(1: CompactionInfoStruct cr)
   void mark_cleaned(1:CompactionInfoStruct cr) throws(1:MetaException o1)
   void mark_compacted(1: CompactionInfoStruct cr) throws(1:MetaException o1)
   void mark_failed(1: CompactionInfoStruct cr) throws(1:MetaException o1)
+  void mark_refused(1: CompactionInfoStruct cr) throws(1:MetaException o1)
+  bool update_compaction_metrics_data(1: CompactionMetricsDataStruct data) throws(1:MetaException o1)
+  void remove_compaction_metrics_data(1: CompactionMetricsDataRequest request) throws(1:MetaException o1)
   void set_hadoop_jobid(1: string jobId, 2: i64 cq_id)
+  GetLatestCommittedCompactionInfoResponse get_latest_committed_compaction_info(1:GetLatestCommittedCompactionInfoRequest rqst)
 
   // Notification logging calls
-  NotificationEventResponse get_next_notification(1:NotificationEventRequest rqst) 
+  NotificationEventResponse get_next_notification(1:NotificationEventRequest rqst)
   CurrentNotificationEventId get_current_notificationEventId()
   NotificationEventsCountResponse get_notification_events_count(1:NotificationEventsCountRequest rqst)
   FireEventResponse fire_listener_event(1:FireEventRequest rqst)
   void flushCache()
   WriteNotificationLogResponse add_write_notification_log(1:WriteNotificationLogRequest rqst)
+  WriteNotificationLogBatchResponse add_write_notification_log_in_batch(1:WriteNotificationLogBatchRequest rqst)
 
   // Repl Change Management api
   CmRecycleResponse cm_recycle(1:CmRecycleRequest request) throws(1:MetaException o1)
@@ -2834,9 +3341,14 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
   void add_serde(1: SerDeInfo serde) throws(1:AlreadyExistsException o1, 2:MetaException o2)
   SerDeInfo get_serde(1: GetSerdeRequest rqst) throws(1:NoSuchObjectException o1, 2:MetaException o2)
 
+  // @deprecated, use get_lock_materialization_rebuild_req(rqst)
   LockResponse get_lock_materialization_rebuild(1: string dbName, 2: string tableName, 3: i64 txnId)
+  // @deprecated, use heartbeat_lock_materialization_rebuild_req(rqst)
   bool heartbeat_lock_materialization_rebuild(1: string dbName, 2: string tableName, 3: i64 txnId)
-  
+
+  LockResponse get_lock_materialization_rebuild_req(1: LockMaterializationRebuildRequest req)
+  bool heartbeat_lock_materialization_rebuild_req(1: LockMaterializationRebuildRequest req)
+
   void add_runtime_stats(1: RuntimeStat stat) throws(1:MetaException o1)
   list<RuntimeStat> get_runtime_stats(1: GetRuntimeStatsRequest rqst) throws(1:MetaException o1)
 
@@ -2854,8 +3366,15 @@ PartitionsResponse get_partitions_req(1:PartitionsRequest req)
 
   void create_stored_procedure(1: StoredProcedure proc) throws(1:NoSuchObjectException o1, 2:MetaException o2)
   StoredProcedure get_stored_procedure(1: StoredProcedureRequest request) throws (1:MetaException o1, 2:NoSuchObjectException o2)
-  void drop_stored_procedure(1: StoredProcedureRequest request) throws (1:MetaException o1, 2:NoSuchObjectException o2)
+  void drop_stored_procedure(1: StoredProcedureRequest request) throws (1:MetaException o1)
   list<string> get_all_stored_procedures(1: ListStoredProcedureRequest request) throws (1:MetaException o1)
+
+  Package find_package(1: GetPackageRequest request) throws (1:MetaException o1, 2:NoSuchObjectException o2)
+  void add_package(1: AddPackageRequest request) throws (1:MetaException o1)
+  list<string> get_all_packages(1: ListPackageRequest request) throws (1:MetaException o1)
+  void drop_package(1: DropPackageRequest request) throws (1:MetaException o1)
+  list<WriteEventInfo> get_all_write_event_info(1: GetAllWriteEventInfoRequest request) throws (1:MetaException o1)
+  ReplayedTxnsForPolicyResult get_replayed_txns_for_policy(1: string policyName) throws (1: MetaException o1)
 }
 
 // * Note about the DDL_TIME: When creating or altering a table or a partition,
@@ -2882,6 +3401,7 @@ const string META_TABLE_COLUMN_TYPES   = "columns.types",
 const string BUCKET_FIELD_NAME    = "bucket_field_name",
 const string BUCKET_COUNT         = "bucket_count",
 const string FIELD_TO_DIMENSION   = "field_to_dimension",
+const string IF_PURGE             = "ifPurge",
 const string META_TABLE_NAME      = "name",
 const string META_TABLE_DB        = "db",
 const string META_TABLE_LOCATION  = "location",
@@ -2892,9 +3412,21 @@ const string FILE_INPUT_FORMAT    = "file.inputformat",
 const string FILE_OUTPUT_FORMAT   = "file.outputformat",
 const string META_TABLE_STORAGE   = "storage_handler",
 const string TABLE_IS_TRANSACTIONAL = "transactional",
-const string TABLE_NO_AUTO_COMPACT = "no_auto_compaction",
+const string NO_AUTO_COMPACT = "no_auto_compaction",
 const string TABLE_TRANSACTIONAL_PROPERTIES = "transactional_properties",
 const string TABLE_BUCKETING_VERSION = "bucketing_version",
-const string DRUID_CONFIG_PREFIX = "druid.",
 const string JDBC_CONFIG_PREFIX = "hive.sql.",
+const string TABLE_IS_CTAS = "created_with_ctas",
+const string TABLE_IS_CTLT = "created_with_ctlt",
+const string PARTITION_TRANSFORM_SPEC = "partition_transform_spec",
+const string NO_CLEANUP = "no_cleanup",
+const string CTAS_LEGACY_CONFIG = "create_table_as_external",
+const string DEFAULT_TABLE_TYPE = "defaultTableType",
 
+// ACID
+const string TXN_ID = "txnId",
+const string WRITE_ID = "writeId",
+
+// Keys for alter table environment context parameters
+const string EXPECTED_PARAMETER_KEY = "expected_parameter_key",
+const string EXPECTED_PARAMETER_VALUE = "expected_parameter_value",

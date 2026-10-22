@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.orc.encoded;
@@ -27,6 +28,7 @@ import org.apache.orc.CompressionKind;
 import org.apache.orc.FileMetadata;
 import org.apache.orc.OrcProto;
 import org.apache.orc.OrcProto.Footer;
+import org.apache.orc.impl.BufferChunk;
 import org.apache.orc.impl.OrcTail;
 import org.junit.Test;
 
@@ -60,7 +62,7 @@ public class TestEncodedOrcFile {
         .filesystem(() -> {
           throw new RuntimeException("Filesystem should not have been initialized");
         })
-        .orcTail(new OrcTail(tail, null));
+        .orcTail(new OrcTail(tail, new BufferChunk(0, 0), -1));
 
     // an orc reader is created, this should not cause filesystem initialization
     // because orc tail is already provided and we are not making any real reads.

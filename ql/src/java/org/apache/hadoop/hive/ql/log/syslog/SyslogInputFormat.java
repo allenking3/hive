@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.log.syslog;
@@ -83,7 +84,7 @@ import com.google.common.annotations.VisibleForTesting;
  *   If a filename is 2019-04-02-21-00_0.log.gz and timeslice is 300s then the file 2019-04-02-21-00_0.log.gz is
  *   expected to have log lines from timestamp 2019:04:02 21:00:00 to 2019:04:02 21:05:00 timestamp.
  * - Logs table should have 'ts' as timestamp column.
- * - Only simple BETWEEN filter predicate is supported for 'ts' column. There cannot be >1 predicates on 'ts' column.
+ * - Only simple BETWEEN filter predicate is supported for 'ts' column. There cannot be &gt;1 predicates on 'ts' column.
  */
 public class SyslogInputFormat extends TextInputFormat {
   private static final Logger LOG = LoggerFactory.getLogger(SyslogInputFormat.class);
@@ -273,7 +274,7 @@ public class SyslogInputFormat extends TextInputFormat {
       jobConf = projectionPusher.pushProjectionsAndFilters(job, finalPath.getParent());
     }
     // textIF considers '\r' or '\n' as line ending but syslog uses '\r' for escaping new lines. So to read multi-line
-    // exceptions correctly we explictly use only '\n'
+    // exceptions correctly we explicitly use only '\n'
     jobConf.set("textinputformat.record.delimiter", "\n");
     return super.getRecordReader(genericSplit, jobConf, reporter);
   }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.repl.ranger;
@@ -29,19 +30,16 @@ import com.sun.jersey.api.client.config.DefaultClientConfig;
 import com.sun.jersey.multipart.FormDataMultiPart;
 import com.sun.jersey.multipart.MultiPart;
 import com.sun.jersey.multipart.file.StreamDataBodyPart;
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.utils.Retry;
-import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils;
 import org.apache.hadoop.hive.ql.exec.util.Retryable;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
-import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.http.client.utils.URIBuilder;
 import org.eclipse.jetty.util.MultiPartWriter;
 import org.slf4j.Logger;
@@ -60,15 +58,13 @@ import java.io.FileNotFoundException;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.security.PrivilegedAction;
-import java.security.PrivilegedExceptionAction;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Arrays;
-import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 /**
  * RangerRestClientImpl to connect to Ranger and export policies.
@@ -78,34 +74,35 @@ public class RangerRestClientImpl implements RangerRestClient {
   private static final String RANGER_REST_URL_EXPORTJSONFILE = "service/plugins/policies/exportJson";
   private static final String RANGER_REST_URL_IMPORTJSONFILE =
       "service/plugins/policies/importPoliciesFromFile";
+  private static final String RANGER_REST_URL_DELETEPOLICY = "service/public/v2/api/policy";
 
   public RangerExportPolicyList exportRangerPolicies(String sourceRangerEndpoint,
                                                      String dbName,
                                                      String rangerHiveServiceName,
-                                                     HiveConf hiveConf)throws SemanticException {
+                                                     HiveConf hiveConf)throws Exception {
     LOG.info("Ranger endpoint for cluster " + sourceRangerEndpoint);
     if (StringUtils.isEmpty(rangerHiveServiceName)) {
       throw new SemanticException(ErrorMsg.REPL_INVALID_CONFIG_FOR_SERVICE.format("Ranger Service Name " +
         "cannot be empty", ReplUtils.REPL_RANGER_SERVICE));
     }
+    String finalUrl = getRangerExportUrl(sourceRangerEndpoint, rangerHiveServiceName, dbName);
+    LOG.debug("Url to export policies from source Ranger: {}", finalUrl);
     Retryable retryable = Retryable.builder()
-      .withHiveConf(hiveConf)
+      .withHiveConf(hiveConf).withFailOnException(RuntimeException.class)
       .withRetryOnException(Exception.class).build();
     try {
-      return retryable.executeCallable(() -> exportRangerPoliciesPlain(sourceRangerEndpoint, rangerHiveServiceName,
-        dbName));
+      return retryable.executeCallable(() -> exportRangerPoliciesPlain(finalUrl, hiveConf));
+    } catch (RuntimeException e) {
+      throw e;
     } catch (Exception e) {
       throw new SemanticException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()), e);
     }
   }
 
   @VisibleForTesting
-  RangerExportPolicyList exportRangerPoliciesPlain(String sourceRangerEndpoint,
-                                                           String rangerHiveServiceName,
-                                                           String dbName) throws SemanticException, URISyntaxException {
-    String finalUrl = getRangerExportUrl(sourceRangerEndpoint, rangerHiveServiceName, dbName);
-    LOG.debug("Url to export policies from source Ranger: {}", finalUrl);
-    WebResource.Builder builder = getRangerResourceBuilder(finalUrl);
+  RangerExportPolicyList exportRangerPoliciesPlain(String finalUrl, HiveConf hiveConf) throws Exception {
+
+    WebResource.Builder builder = getRangerResourceBuilder(finalUrl, hiveConf);
     RangerExportPolicyList rangerExportPolicyList = new RangerExportPolicyList();
     ClientResponse clientResp = builder.get(ClientResponse.class);
     String response = null;
@@ -122,9 +119,9 @@ public class RangerRestClientImpl implements RangerRestClient {
         LOG.debug("Ranger policy export request returned empty list");
         return rangerExportPolicyList;
       } else if (clientResp.getStatus() == HttpServletResponse.SC_UNAUTHORIZED) {
-        throw new SemanticException("Authentication Failure while communicating to Ranger admin");
+        throw new RuntimeException(ErrorMsg.RANGER_AUTHENTICATION_FAILED.getMsg());
       } else if (clientResp.getStatus() == HttpServletResponse.SC_FORBIDDEN) {
-        throw new SemanticException("Authorization Failure while communicating to Ranger admin");
+        throw new RuntimeException(ErrorMsg.RANGER_AUTHORIZATION_FAILED.getMsg());
       }
     }
     if (StringUtils.isEmpty(response)) {
@@ -171,6 +168,44 @@ public class RangerRestClientImpl implements RangerRestClient {
   }
 
   @Override
+  public void deleteRangerPolicy(String policyName, String baseUrl, String rangerHiveServiceName,
+                                 HiveConf hiveConf) throws Exception {
+    String finalUrl = getRangerDeleteUrl(baseUrl, policyName, rangerHiveServiceName);
+    LOG.debug("URL to delete policy on target Ranger: {}", finalUrl);
+    Retryable retryable = Retryable.builder()
+            .withHiveConf(hiveConf).withFailOnException(RuntimeException.class)
+            .withRetryOnException(Exception.class).build();
+    try {
+      retryable.executeCallable(() -> {
+        ClientResponse clientResp = null;
+        WebResource.Builder builder = getRangerResourceBuilder(finalUrl, hiveConf);
+        clientResp = builder.delete(ClientResponse.class);
+        if (clientResp != null) {
+          switch (clientResp.getStatus()) {
+            case HttpServletResponse.SC_NO_CONTENT:
+              LOG.debug("Ranger policy: {} deleted successfully", policyName);
+              break;
+            case HttpServletResponse.SC_NOT_FOUND:
+              LOG.debug("Ranger policy: {} not found.", policyName);
+              break;
+            case HttpServletResponse.SC_FORBIDDEN:
+              throw new RuntimeException(ErrorMsg.RANGER_AUTHORIZATION_FAILED.getMsg());
+            case HttpServletResponse.SC_UNAUTHORIZED:
+              throw new RuntimeException(ErrorMsg.RANGER_AUTHENTICATION_FAILED.getMsg());
+            default:
+              throw new SemanticException("Ranger policy deletion failed, Please refer target Ranger admin logs.");
+          }
+        }
+        return null;
+      });
+    } catch (RuntimeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new SemanticException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()), e);
+    }
+  }
+
+  @Override
   public RangerExportPolicyList importRangerPolicies(RangerExportPolicyList rangerExportPolicyList, String dbName,
                                                      String baseUrl,
                                                      String rangerHiveServiceName,
@@ -200,12 +235,14 @@ public class RangerRestClientImpl implements RangerRestClient {
     String finalUrl = getRangerImportUrl(baseUrl, dbName);
     LOG.debug("URL to import policies on target Ranger: {}", finalUrl);
     Retryable retryable = Retryable.builder()
-      .withHiveConf(hiveConf)
+      .withHiveConf(hiveConf).withFailOnException(RuntimeException.class)
       .withRetryOnException(Exception.class).build();
     try {
       return retryable.executeCallable(() -> importRangerPoliciesPlain(jsonRangerExportPolicyList,
               rangerPoliciesJsonFileName,
-              serviceMapJsonFileName, jsonServiceMap, finalUrl, rangerExportPolicyList));
+              serviceMapJsonFileName, jsonServiceMap, finalUrl, rangerExportPolicyList, hiveConf));
+    } catch (RuntimeException e) {
+      throw e;
     } catch (Exception e) {
       throw new SemanticException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()), e);
     }
@@ -215,7 +252,7 @@ public class RangerRestClientImpl implements RangerRestClient {
                                                            String rangerPoliciesJsonFileName,
                                                            String serviceMapJsonFileName, String jsonServiceMap,
                                                            String finalUrl, RangerExportPolicyList
-                                                             rangerExportPolicyList) throws Exception {
+                                                           rangerExportPolicyList, HiveConf hiveConf) throws Exception {
     ClientResponse clientResp = null;
     StreamDataBodyPart filePartPolicies = new StreamDataBodyPart("file",
       new ByteArrayInputStream(jsonRangerExportPolicyList.getBytes(StandardCharsets.UTF_8)),
@@ -227,7 +264,7 @@ public class RangerRestClientImpl implements RangerRestClient {
     MultiPart multipartEntity = null;
     try {
       multipartEntity = formDataMultiPart.bodyPart(filePartPolicies).bodyPart(filePartServiceMap);
-      WebResource.Builder builder = getRangerResourceBuilder(finalUrl);
+      WebResource.Builder builder = getRangerResourceBuilder(finalUrl, hiveConf);
       clientResp = builder.accept(MediaType.APPLICATION_JSON).type(MediaType.MULTIPART_FORM_DATA)
         .post(ClientResponse.class, multipartEntity);
       if (clientResp != null) {
@@ -235,7 +272,7 @@ public class RangerRestClientImpl implements RangerRestClient {
           LOG.debug("Ranger policy import finished successfully");
 
         } else if (clientResp.getStatus() == HttpServletResponse.SC_UNAUTHORIZED) {
-          throw new Exception("Authentication Failure while communicating to Ranger admin");
+          throw new RuntimeException(ErrorMsg.RANGER_AUTHENTICATION_FAILED.getMsg());
         } else {
           throw new Exception("Ranger policy import failed, Please refer target Ranger admin logs.");
         }
@@ -270,11 +307,24 @@ public class RangerRestClientImpl implements RangerRestClient {
     return uriBuilder.build().toString();
   }
 
-  private synchronized Client getRangerClient() {
+  public String getRangerDeleteUrl(String rangerUrl, String policyName, String serviceName) throws URISyntaxException {
+    URIBuilder uriBuilder = new URIBuilder(rangerUrl);
+    uriBuilder.setPath(RANGER_REST_URL_DELETEPOLICY);
+    uriBuilder.addParameter("servicename", serviceName);
+    uriBuilder.addParameter("policyname", policyName);
+    return uriBuilder.build().toString();
+  }
+
+  @VisibleForTesting
+  synchronized Client getRangerClient(HiveConf hiveConf) {
     Client ret = null;
     ClientConfig config = new DefaultClientConfig();
     config.getClasses().add(MultiPartWriter.class);
     config.getProperties().put(ClientConfig.PROPERTY_FOLLOW_REDIRECTS, true);
+    config.getProperties().put(ClientConfig.PROPERTY_CONNECT_TIMEOUT,
+            (int) hiveConf.getTimeVar(HiveConf.ConfVars.REPL_EXTERNAL_CLIENT_CONNECT_TIMEOUT, TimeUnit.MILLISECONDS));
+    config.getProperties().put(ClientConfig.PROPERTY_READ_TIMEOUT,
+            (int) hiveConf.getTimeVar(HiveConf.ConfVars.REPL_RANGER_CLIENT_READ_TIMEOUT, TimeUnit.MILLISECONDS));
     ret = Client.create(config);
     return ret;
   }
@@ -398,23 +448,23 @@ public class RangerRestClientImpl implements RangerRestClient {
       .withHiveConf(hiveConf)
       .withRetryOnException(Exception.class).build();
     try {
-      return retryable.executeCallable(() -> checkConnectionPlain(url));
+      return retryable.executeCallable(() -> checkConnectionPlain(url, hiveConf));
     } catch (Exception e) {
       throw new SemanticException(ErrorMsg.REPL_RETRY_EXHAUSTED.format(e.getMessage()), e);
     }
   }
 
   @VisibleForTesting
-  boolean checkConnectionPlain(String url) {
+  boolean checkConnectionPlain(String url, HiveConf hiveConf) {
     WebResource.Builder builder;
-    builder = getRangerResourceBuilder(url);
+    builder = getRangerResourceBuilder(url, hiveConf);
     ClientResponse clientResp = builder.get(ClientResponse.class);
     return (clientResp.getStatus() < HttpServletResponse.SC_UNAUTHORIZED);
   }
 
   @Override
-  public List<RangerPolicy> addDenyPolicies(List<RangerPolicy> rangerPolicies, String rangerServiceName,
-                                            String sourceDb, String targetDb) throws SemanticException {
+  public RangerPolicy getDenyPolicyForReplicatedDb(String rangerServiceName,
+                                                   String sourceDb, String targetDb) throws SemanticException {
     if (StringUtils.isEmpty(rangerServiceName)) {
       throw new SemanticException(ErrorMsg.REPL_INVALID_CONFIG_FOR_SERVICE.format("Ranger Service " +
         "Name cannot be empty", ReplUtils.REPL_RANGER_SERVICE));
@@ -437,7 +487,7 @@ public class RangerRestClientImpl implements RangerRestClient {
     List<RangerPolicy.RangerPolicyItemAccess> denyExceptionsPolicyItemAccesses = new ArrayList<RangerPolicy.
         RangerPolicyItemAccess>();
 
-    resourceNameList.add(sourceDb);
+    resourceNameList.add(targetDb);
     resourceNameList.add("dummy");
     rangerPolicyResource.setValues(resourceNameList);
     RangerPolicy.RangerPolicyResource rangerPolicyResourceColumn =new RangerPolicy.RangerPolicyResource();
@@ -473,13 +523,11 @@ public class RangerRestClientImpl implements RangerRestClient {
     denyExceptionsPolicyItem.setUsers(denyExceptionsPolicyItemsUsers);
     denyRangerPolicy.setDenyExceptions(denyExceptionsItemsForBeaconUser);
 
-    rangerPolicies.add(denyRangerPolicy);
-    return rangerPolicies;
+    return denyRangerPolicy;
   }
 
-
-  private WebResource.Builder getRangerResourceBuilder(String url) {
-    Client client = getRangerClient();
+  private WebResource.Builder getRangerResourceBuilder(String url, HiveConf hiveConf) {
+    Client client = getRangerClient(hiveConf);
     WebResource webResource = client.resource(url);
     WebResource.Builder builder = webResource.getRequestBuilder();
     return builder;

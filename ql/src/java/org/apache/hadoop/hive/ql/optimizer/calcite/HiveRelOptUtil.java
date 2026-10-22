@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite;
 
@@ -21,18 +22,22 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+
+
+import com.google.common.collect.ImmutableList;
+
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-
-import com.google.common.collect.ImmutableList;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelOptUtil;
@@ -491,7 +496,7 @@ public class HiveRelOptUtil extends RelOptUtil {
               ImmutableList.of(i), -1, 0, rel, null, null));
     }
 
-    return aggregateFactory.createAggregate(rel, false, ImmutableBitSet.of(), null, aggCalls);
+    return aggregateFactory.createAggregate(rel, Collections.emptyList(), ImmutableBitSet.of(), null, aggCalls);
   }
 
   /**
@@ -1089,7 +1094,12 @@ public class HiveRelOptUtil extends RelOptUtil {
     Set<Integer> needed = new HashSet<>();
     for (RelFieldCollation fc : sortCollation.getFieldCollations()) {
       needed.add(fc.getFieldIndex());
-      final RexNode node = project.getProjects().get(map.getTarget(fc.getFieldIndex()));
+      int target = map.getTargetOpt(fc.getFieldIndex());
+      if (target == -1) {
+        // If there is no mapping for this field, we return null early.
+        return null;
+      }
+      final RexNode node = project.getProjects().get(target);
       if (node.isA(SqlKind.CAST)) {
         // Check whether it is a monotonic preserving cast, otherwise we cannot push
         final RexCall cast = (RexCall) node;
@@ -1102,8 +1112,8 @@ public class HiveRelOptUtil extends RelOptUtil {
       }
     }
     Map<Integer, Integer> m = new HashMap<>();
-    for (int projPos = 0; projPos < project.getChildExps().size(); projPos++) {
-      RexNode expr = project.getChildExps().get(projPos);
+    for (int projPos = 0; projPos < project.getProjects().size(); projPos++) {
+      RexNode expr = project.getProjects().get(projPos);
       if (expr instanceof RexInputRef) {
         Set<Integer> positions = HiveCalciteUtil.getInputRefs(expr);
         if (positions.size() <= 1) {
@@ -1136,8 +1146,8 @@ public class HiveRelOptUtil extends RelOptUtil {
           HiveProject project, RelDistribution distribution) {
     Set<Integer> needed = new HashSet<>(distribution.getKeys());
     Map<Integer, Integer> m = new HashMap<>();
-    for (int projPos = 0; projPos < project.getChildExps().size(); projPos++) {
-      RexNode expr = project.getChildExps().get(projPos);
+    for (int projPos = 0; projPos < project.getProjects().size(); projPos++) {
+      RexNode expr = project.getProjects().get(projPos);
       if (expr instanceof RexInputRef) {
         Set<Integer> positions = HiveCalciteUtil.getInputRefs(expr);
         if (positions.size() <= 1) {

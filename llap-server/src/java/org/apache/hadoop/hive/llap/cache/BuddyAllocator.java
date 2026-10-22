@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.llap.cache;
 
@@ -853,6 +854,22 @@ public final class BuddyAllocator
     // Note: for deallocateEvicted, we do not release the memory to memManager; it may
     // happen that the evictor tries to use the allowance before the move finishes.
     // Retrying/more defrag should take care of that.
+  }
+
+  /**
+   * Quite similar as deallocateEvicted, however since this request was not originated from a reserveMemory call,
+   * MM state has to be maintained here.
+   * @param buffer
+   */
+  @Override
+  public void deallocateProactivelyEvicted(MemoryBuffer buffer) {
+    LlapAllocatorBuffer buf = (LlapAllocatorBuffer)buffer;
+    assert buf.isInvalid();
+    int arenaToRelease = buf.releaseInvalidated();
+    if (arenaToRelease < 0) return; // The block is being moved; the move will release memory.
+    long memUsage = buf.getMemoryUsage();
+    arenas[arenaToRelease].deallocate(buf, false);
+    memoryManager.releaseMemory(memUsage);
   }
 
   @Override

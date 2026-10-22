@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.optimizer;
@@ -27,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.apache.hadoop.hive.ql.exec.FilterOperator;
 import org.apache.hadoop.hive.ql.exec.JoinOperator;
@@ -73,6 +76,10 @@ public class NonBlockingOpDeDupProc extends Transform {
     return pctx;
   }
 
+  public static <K, V> Map<K, V> zipToMap(List<K> keys, List<V> values) {
+    return IntStream.range(0, keys.size()).boxed().collect(Collectors.toMap(keys::get, values::get));
+  }
+
   private class SelectDedup implements SemanticNodeProcessor {
 
     private ParseContext pctx;
@@ -110,6 +117,8 @@ public class NonBlockingOpDeDupProc extends Transform {
           // we do not need to update the ColumnExprMap in the parent SelectOperator.
           pSEL.getConf().setColList(ExprNodeDescUtils.backtrack(cSELColList, cSEL, pSEL, true));
           pSEL.getConf().setOutputColumnNames(cSELOutputColumnNames);
+
+          pSEL.setColumnExprMap(zipToMap(cSELOutputColumnNames, pSEL.getConf().getColList()));
         } else {
           // If the child SelectOperator has the ColumnExprMap,
           // we need to update the ColumnExprMap in the parent SelectOperator.

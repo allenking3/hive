@@ -36,14 +36,13 @@ POSTHOOK: Input: default@src1
 POSTHOOK: Input: default@srcpart
 POSTHOOK: Input: default@srcpart@ds=2008-04-08/hr=11
 POSTHOOK: Output: default@dest_j1_n21
-OPTIMIZED SQL: SELECT `t4`.`key`, `t0`.`value`, `t2`.`value` AS `value1`
+OPTIMIZED SQL: SELECT `t4`.`key` AS `x.key`, `t0`.`value` AS `z.value`, `t2`.`value` AS `y.value`
 FROM (SELECT `value`
 FROM `default`.`srcpart`
-WHERE `ds` = '2008-04-08' AND `hr` = 11 AND `value` IS NOT NULL) AS `t0`
+WHERE `ds` = '2008-04-08' AND `hr` = 1.10E1 AND `value` IS NOT NULL) AS `t0`
 INNER JOIN ((SELECT `key`, `value`
 FROM `default`.`src`
-WHERE `key` IS NOT NULL) AS `t2`
-INNER JOIN (SELECT `key`, `value`
+WHERE `key` IS NOT NULL) AS `t2` INNER JOIN (SELECT `key`, `value`
 FROM `default`.`src1`
 WHERE `key` IS NOT NULL AND `value` IS NOT NULL) AS `t4` ON `t2`.`key` = `t4`.`key`) ON `t0`.`value` = `t4`.`value`
 STAGE DEPENDENCIES:
@@ -67,6 +66,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: key is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_52_container, bigKeyColName:key, smallTablePos:1, keyRatio:0.078
                   Statistics: Num rows: 500 Data size: 89000 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -209,6 +209,7 @@ STAGE PLANS:
                 TableScan
                   alias: z
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_53_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.126
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -266,7 +267,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 63 Data size: 16884 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.984127
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -280,7 +281,7 @@ STAGE PLANS:
                                 tag: -1
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
                                 auto parallelism: false
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
             Path -> Alias:
 #### A masked pattern was here ####
@@ -325,11 +326,11 @@ STAGE PLANS:
             Truncated Path -> Alias:
               /srcpart/ds=2008-04-08/hr=11 [z]
         Reducer 4 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Needs Tagging: false
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE
@@ -532,17 +533,15 @@ POSTHOOK: type: QUERY
 POSTHOOK: Input: default@src
 POSTHOOK: Input: default@src1
 POSTHOOK: Output: default@dest_j1_n21
-OPTIMIZED SQL: SELECT `t4`.`key`, `t6`.`value`, `t2`.`value` AS `value1`
+OPTIMIZED SQL: SELECT `t4`.`key` AS `x.key`, `t6`.`value` AS `z.value`, `t2`.`value` AS `y.value`
 FROM (SELECT `value`
 FROM `default`.`src`
 WHERE `value` IS NOT NULL) AS `t0`
 INNER JOIN ((SELECT `key`, `value`
 FROM `default`.`src`
-WHERE `key` IS NOT NULL) AS `t2`
-INNER JOIN ((SELECT `key`, `value`
+WHERE `key` IS NOT NULL) AS `t2` INNER JOIN ((SELECT `key`, `value`
 FROM `default`.`src1`
-WHERE `value` IS NOT NULL AND `key` IS NOT NULL) AS `t4`
-INNER JOIN (SELECT `key`, `value`
+WHERE `value` IS NOT NULL AND `key` IS NOT NULL) AS `t4` INNER JOIN (SELECT `key`, `value`
 FROM `default`.`src1`
 WHERE `key` IS NOT NULL) AS `t6` ON `t4`.`key` = `t6`.`key`) ON `t2`.`key` = `t4`.`key`) ON `t0`.`value` = `t4`.`value`
 STAGE DEPENDENCIES:
@@ -567,6 +566,7 @@ STAGE PLANS:
                 TableScan
                   alias: x
                   filterExpr: (value is not null and key is not null) (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_76_container, bigKeyColName:key, smallTablePos:1, keyRatio:0.64
                   Statistics: Num rows: 25 Data size: 4375 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -709,6 +709,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: key is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_77_container, bigKeyColName:key, smallTablePos:0, keyRatio:0.032
                   Statistics: Num rows: 500 Data size: 89000 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -786,6 +787,7 @@ STAGE PLANS:
                 TableScan
                   alias: w
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_78_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.198
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -843,7 +845,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 99 Data size: 26334 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.989899
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -857,7 +859,7 @@ STAGE PLANS:
                                 tag: -1
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
                                 auto parallelism: false
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
             Path -> Alias:
 #### A masked pattern was here ####
@@ -897,11 +899,11 @@ STAGE PLANS:
             Truncated Path -> Alias:
               /src [w]
         Reducer 5 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Needs Tagging: false
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE
@@ -1104,14 +1106,13 @@ POSTHOOK: Input: default@src1
 POSTHOOK: Input: default@srcpart
 POSTHOOK: Input: default@srcpart@ds=2008-04-08/hr=11
 POSTHOOK: Output: default@dest_j2_n1
-OPTIMIZED SQL: SELECT `t4`.`key`, `t0`.`value`, `t4`.`value` AS `value1`
+OPTIMIZED SQL: SELECT `t4`.`key` AS `res.key`, `t0`.`value` AS `z.value`, `t4`.`value` AS `res.value`
 FROM (SELECT `value`
 FROM `default`.`srcpart`
-WHERE `ds` = '2008-04-08' AND `hr` = 11 AND `value` IS NOT NULL) AS `t0`
+WHERE `ds` = '2008-04-08' AND `hr` = 1.10E1 AND `value` IS NOT NULL) AS `t0`
 INNER JOIN ((SELECT `key`
 FROM `default`.`src`
-WHERE `key` IS NOT NULL) AS `t2`
-INNER JOIN (SELECT `key`, `value`
+WHERE `key` IS NOT NULL) AS `t2` INNER JOIN (SELECT `key`, `value`
 FROM `default`.`src1`
 WHERE `key` IS NOT NULL AND `value` IS NOT NULL) AS `t4` ON `t2`.`key` = `t4`.`key`) ON `t0`.`value` = `t4`.`value`
 STAGE DEPENDENCIES:
@@ -1135,6 +1136,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: key is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_52_container, bigKeyColName:key, smallTablePos:1, keyRatio:0.078
                   Statistics: Num rows: 500 Data size: 43500 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -1277,6 +1279,7 @@ STAGE PLANS:
                 TableScan
                   alias: z
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_53_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.038
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -1334,7 +1337,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 63 Data size: 16758 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.984127
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -1348,7 +1351,7 @@ STAGE PLANS:
                                 tag: -1
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
                                 auto parallelism: false
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
             Path -> Alias:
 #### A masked pattern was here ####
@@ -1393,11 +1396,11 @@ STAGE PLANS:
             Truncated Path -> Alias:
               /srcpart/ds=2008-04-08/hr=11 [z]
         Reducer 4 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Needs Tagging: false
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE
@@ -1602,14 +1605,13 @@ POSTHOOK: Input: default@src1
 POSTHOOK: Input: default@srcpart
 POSTHOOK: Input: default@srcpart@ds=2008-04-08/hr=11
 POSTHOOK: Output: default@dest_j2_n1
-OPTIMIZED SQL: SELECT `t2`.`key`, `t0`.`value`, `t2`.`value` AS `value1`
+OPTIMIZED SQL: SELECT `t2`.`key` AS `res.key`, `t0`.`value` AS `z.value`, `t2`.`value` AS `res.value`
 FROM (SELECT `value`
 FROM `default`.`srcpart`
-WHERE `ds` = '2008-04-08' AND `hr` = 11 AND `value` IS NOT NULL) AS `t0`
+WHERE `ds` = '2008-04-08' AND `hr` = 1.10E1 AND `value` IS NOT NULL) AS `t0`
 INNER JOIN ((SELECT `key`, `value`
 FROM `default`.`src1`
-WHERE `value` IS NOT NULL) AS `t2`
-LEFT JOIN (SELECT `key`
+WHERE `value` IS NOT NULL) AS `t2` LEFT JOIN (SELECT `key`
 FROM `default`.`src`
 WHERE `key` IS NOT NULL) AS `t4` ON `t2`.`key` = `t4`.`key`) ON `t0`.`value` = `t2`.`value`
 STAGE DEPENDENCIES:
@@ -1762,6 +1764,7 @@ STAGE PLANS:
                 TableScan
                   alias: z
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_47_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.038
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   GatherStats: false
                   Filter Operator
@@ -1819,7 +1822,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 104 Data size: 27664 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.99
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -1833,7 +1836,7 @@ STAGE PLANS:
                                 tag: -1
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
                                 auto parallelism: false
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
             Path -> Alias:
 #### A masked pattern was here ####
@@ -1902,11 +1905,11 @@ STAGE PLANS:
                   value expressions: _col0 (type: string)
                   auto parallelism: true
         Reducer 5 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Needs Tagging: false
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE
@@ -2144,6 +2147,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: key is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_52_container, bigKeyColName:key, smallTablePos:1, keyRatio:0.078
                   Statistics: Num rows: 500 Data size: 43500 Basic stats: COMPLETE Column stats: COMPLETE
                   Filter Operator
                     predicate: key is not null (type: boolean)
@@ -2198,6 +2202,7 @@ STAGE PLANS:
                 TableScan
                   alias: x
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_53_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.038
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   Filter Operator
                     predicate: value is not null (type: boolean)
@@ -2233,7 +2238,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 63 Data size: 16758 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.984127
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -2243,13 +2248,13 @@ STAGE PLANS:
                                 sort order: 
                                 Statistics: Num rows: 1 Data size: 704 Basic stats: COMPLETE Column stats: COMPLETE
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
         Reducer 4 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE
@@ -2445,6 +2450,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: key is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_52_container, bigKeyColName:key, smallTablePos:1, keyRatio:0.078
                   Statistics: Num rows: 500 Data size: 43500 Basic stats: COMPLETE Column stats: COMPLETE
                   Filter Operator
                     predicate: key is not null (type: boolean)
@@ -2499,6 +2505,7 @@ STAGE PLANS:
                 TableScan
                   alias: y
                   filterExpr: value is not null (type: boolean)
+                  probeDecodeDetails: cacheKey:HASH_MAP_MAPJOIN_53_container, bigKeyColName:value, smallTablePos:0, keyRatio:0.038
                   Statistics: Num rows: 500 Data size: 45500 Basic stats: COMPLETE Column stats: COMPLETE
                   Filter Operator
                     predicate: value is not null (type: boolean)
@@ -2534,7 +2541,7 @@ STAGE PLANS:
                             outputColumnNames: key, value, val2
                             Statistics: Num rows: 63 Data size: 16758 Basic stats: COMPLETE Column stats: COMPLETE
                             Group By Operator
-                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector(key, 'hll'), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector(value, 'hll'), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector(val2, 'hll')
+                              aggregations: max(length(key)), avg(COALESCE(length(key),0)), count(1), count(key), compute_bit_vector_hll(key), max(length(value)), avg(COALESCE(length(value),0)), count(value), compute_bit_vector_hll(value), max(length(val2)), avg(COALESCE(length(val2),0)), count(val2), compute_bit_vector_hll(val2)
                               minReductionHashAggr: 0.984127
                               mode: hash
                               outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
@@ -2544,13 +2551,13 @@ STAGE PLANS:
                                 sort order: 
                                 Statistics: Num rows: 1 Data size: 704 Basic stats: COMPLETE Column stats: COMPLETE
                                 value expressions: _col0 (type: int), _col1 (type: struct<count:bigint,sum:double,input:int>), _col2 (type: bigint), _col3 (type: bigint), _col4 (type: binary), _col5 (type: int), _col6 (type: struct<count:bigint,sum:double,input:int>), _col7 (type: bigint), _col8 (type: binary), _col9 (type: int), _col10 (type: struct<count:bigint,sum:double,input:int>), _col11 (type: bigint), _col12 (type: binary)
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
         Reducer 4 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Reduce Operator Tree:
               Group By Operator
-                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector(VALUE._col12)
+                aggregations: max(VALUE._col0), avg(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4), max(VALUE._col5), avg(VALUE._col6), count(VALUE._col7), compute_bit_vector_hll(VALUE._col8), max(VALUE._col9), avg(VALUE._col10), count(VALUE._col11), compute_bit_vector_hll(VALUE._col12)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6, _col7, _col8, _col9, _col10, _col11, _col12
                 Statistics: Num rows: 1 Data size: 500 Basic stats: COMPLETE Column stats: COMPLETE

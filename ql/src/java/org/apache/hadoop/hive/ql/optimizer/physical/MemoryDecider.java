@@ -7,13 +7,14 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.physical;
 
@@ -62,7 +63,7 @@ import org.slf4j.LoggerFactory;
  */
 public class MemoryDecider implements PhysicalPlanResolver {
 
-  protected static transient final Logger LOG = LoggerFactory.getLogger(MemoryDecider.class);
+  protected static final Logger LOG = LoggerFactory.getLogger(MemoryDecider.class);
 
   public class MemoryCalculator implements SemanticDispatcher {
 
@@ -73,9 +74,9 @@ public class MemoryDecider implements PhysicalPlanResolver {
 
     public MemoryCalculator(PhysicalContext pctx) {
       this.pctx = pctx;
-      this.totalAvailableMemory = HiveConf.getLongVar(pctx.conf, HiveConf.ConfVars.HIVECONVERTJOINNOCONDITIONALTASKTHRESHOLD);
-      this.minimumHashTableSize = HiveConf.getIntVar(pctx.conf, HiveConf.ConfVars.HIVEHYBRIDGRACEHASHJOINMINNUMPARTITIONS)
-        * HiveConf.getIntVar(pctx.conf, HiveConf.ConfVars.HIVEHYBRIDGRACEHASHJOINMINWBSIZE);
+      this.totalAvailableMemory = HiveConf.getLongVar(pctx.conf, HiveConf.ConfVars.HIVE_CONVERT_JOIN_NOCONDITIONAL_TASK_THRESHOLD);
+      this.minimumHashTableSize = HiveConf.getIntVar(pctx.conf, HiveConf.ConfVars.HIVE_HYBRIDGRACE_HASHJOIN_MIN_NUM_PARTITIONS)
+        * HiveConf.getIntVar(pctx.conf, HiveConf.ConfVars.HIVE_HYBRIDGRACE_HASHJOIN_MIN_WB_SIZE);
       this.inflationFactor = HiveConf.getFloatVar(pctx.conf, HiveConf.ConfVars.HIVE_HASH_TABLE_INFLATION_FACTOR);
     }
 
@@ -197,9 +198,7 @@ public class MemoryDecider implements PhysicalPlanResolver {
           }
 
           if (size < remainingSize) {
-            if (LOG.isInfoEnabled()) {
-              LOG.info("Setting " + size + " bytes needed for " + mj + " (in-mem)");
-            }
+            LOG.info("Setting " + size + " bytes needed for " + mj + " (in-mem)");
 
             mj.getConf().setMemoryNeeded(size);
             remainingSize -= size;
@@ -226,23 +225,17 @@ public class MemoryDecider implements PhysicalPlanResolver {
 
         for (MapJoinOperator mj : sortedMapJoins) {
           long size = (long)(weight * sizes.get(mj));
-          if (LOG.isInfoEnabled()) {
-            LOG.info("Setting " + size + " bytes needed for " + mj + " (spills)");
-          }
+          LOG.info("Setting " + size + " bytes needed for " + mj + " (spills)");
 
           mj.getConf().setMemoryNeeded(size);
         }
       } catch (HiveException e) {
         // if we have issues with stats, just scale linearily
         long size = totalAvailableMemory / mapJoins.size();
-        if (LOG.isInfoEnabled()) {
-          LOG.info("Scaling mapjoin memory w/o stats");
-        }
+        LOG.info("Scaling mapjoin memory w/o stats");
 
         for (MapJoinOperator mj : mapJoins) {
-          if (LOG.isInfoEnabled()) {
-            LOG.info("Setting " + size + " bytes needed for " + mj + " (fallback)");
-          }
+          LOG.info("Setting " + size + " bytes needed for " + mj + " (fallback)");
           mj.getConf().setMemoryNeeded(size);
         }
       }

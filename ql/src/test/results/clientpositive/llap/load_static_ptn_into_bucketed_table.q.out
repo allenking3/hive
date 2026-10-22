@@ -32,17 +32,17 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: src_bucket_tbl__temp_table_for_load_data__
-                  Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                   Select Operator
                     expressions: key (type: int), value (type: string)
                     outputColumnNames: _col0, _col1
-                    Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                    Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                     Reduce Output Operator
                       key expressions: _col0 (type: int)
                       null sort order: a
                       sort order: +
                       Map-reduce partition columns: _col0 (type: int)
-                      Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                      Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                       value expressions: _col1 (type: string)
             Execution mode: vectorized, llap
             LLAP IO: all inputs
@@ -52,10 +52,10 @@ STAGE PLANS:
               Select Operator
                 expressions: KEY.reducesinkkey0 (type: int), VALUE._col0 (type: string)
                 outputColumnNames: _col0, _col1
-                Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                 File Output Operator
                   compressed: false
-                  Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                   table:
                       input format: org.apache.hadoop.mapred.TextInputFormat
                       output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
@@ -222,10 +222,12 @@ POSTHOOK: Input: default@src_bucket_tbl@ds=2008-04-08
 PREHOOK: query: drop table src_bucket_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_bucket_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_bucket_tbl
 POSTHOOK: query: drop table src_bucket_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_bucket_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_bucket_tbl
 PREHOOK: query: CREATE TABLE src_bucket_tbl(key int, value string) partitioned by (hr int, ds string) clustered by (key) into 1 buckets STORED AS TEXTFILE
 PREHOOK: type: CREATETABLE
@@ -260,17 +262,17 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: src_bucket_tbl__temp_table_for_load_data__
-                  Statistics: Num rows: 35 Data size: 13020 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 34 Data size: 12648 Basic stats: COMPLETE Column stats: NONE
                   Select Operator
                     expressions: key (type: int), value (type: string), ds (type: string)
                     outputColumnNames: _col0, _col1, _col2
-                    Statistics: Num rows: 35 Data size: 13020 Basic stats: COMPLETE Column stats: NONE
+                    Statistics: Num rows: 34 Data size: 12648 Basic stats: COMPLETE Column stats: NONE
                     Reduce Output Operator
                       key expressions: _col2 (type: string), _bucket_number (type: string), _col0 (type: int)
-                      null sort order: aaa
+                      null sort order: zzz
                       sort order: +++
                       Map-reduce partition columns: _col2 (type: string)
-                      Statistics: Num rows: 35 Data size: 13020 Basic stats: COMPLETE Column stats: NONE
+                      Statistics: Num rows: 34 Data size: 12648 Basic stats: COMPLETE Column stats: NONE
                       value expressions: _col1 (type: string)
             Execution mode: vectorized, llap
             LLAP IO: all inputs
@@ -283,7 +285,7 @@ STAGE PLANS:
                 File Output Operator
                   compressed: false
                   Dp Sort State: PARTITION_BUCKET_SORTED
-                  Statistics: Num rows: 35 Data size: 13020 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 34 Data size: 12648 Basic stats: COMPLETE Column stats: NONE
                   table:
                       input format: org.apache.hadoop.mapred.TextInputFormat
                       output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
@@ -451,10 +453,12 @@ POSTHOOK: Input: default@src_bucket_tbl@hr=10/ds=__HIVE_DEFAULT_PARTITION__
 PREHOOK: query: drop table src_bucket_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_bucket_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_bucket_tbl
 POSTHOOK: query: drop table src_bucket_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_bucket_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_bucket_tbl
 PREHOOK: query: CREATE TABLE src_bucket_tbl(key int, value string) partitioned by (hr int, ds string) clustered by (key) into 1 buckets STORED AS TEXTFILE
 PREHOOK: type: CREATETABLE
@@ -489,17 +493,17 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: src_bucket_tbl__temp_table_for_load_data__
-                  Statistics: Num rows: 68 Data size: 24552 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 67 Data size: 24180 Basic stats: COMPLETE Column stats: NONE
                   Select Operator
                     expressions: key (type: int), value (type: string), ds (type: string)
                     outputColumnNames: _col0, _col1, _col2
-                    Statistics: Num rows: 68 Data size: 24552 Basic stats: COMPLETE Column stats: NONE
+                    Statistics: Num rows: 67 Data size: 24180 Basic stats: COMPLETE Column stats: NONE
                     Reduce Output Operator
                       key expressions: _col2 (type: string), _bucket_number (type: string), _col0 (type: int)
-                      null sort order: aaa
+                      null sort order: zzz
                       sort order: +++
                       Map-reduce partition columns: _col2 (type: string)
-                      Statistics: Num rows: 68 Data size: 24552 Basic stats: COMPLETE Column stats: NONE
+                      Statistics: Num rows: 67 Data size: 24180 Basic stats: COMPLETE Column stats: NONE
                       value expressions: _col1 (type: string)
             Execution mode: vectorized, llap
             LLAP IO: all inputs
@@ -512,7 +516,7 @@ STAGE PLANS:
                 File Output Operator
                   compressed: false
                   Dp Sort State: PARTITION_BUCKET_SORTED
-                  Statistics: Num rows: 68 Data size: 24552 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 67 Data size: 24180 Basic stats: COMPLETE Column stats: NONE
                   table:
                       input format: org.apache.hadoop.mapred.TextInputFormat
                       output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
@@ -680,10 +684,12 @@ POSTHOOK: Input: default@src_bucket_tbl@hr=20/ds=2008-04-08
 PREHOOK: query: drop table src_bucket_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_bucket_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_bucket_tbl
 POSTHOOK: query: drop table src_bucket_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_bucket_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_bucket_tbl
 PREHOOK: query: CREATE TABLE src_bucket_tbl(key int, value string) partitioned by (hr int, ds string) clustered by (key) into 1 buckets STORED AS TEXTFILE
 PREHOOK: type: CREATETABLE
@@ -719,17 +725,17 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: src_bucket_tbl__temp_table_for_load_data__
-                  Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                   Select Operator
                     expressions: key (type: int), value (type: string)
                     outputColumnNames: _col0, _col1
-                    Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                    Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                     Reduce Output Operator
                       key expressions: _col0 (type: int)
                       null sort order: a
                       sort order: +
                       Map-reduce partition columns: _col0 (type: int)
-                      Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                      Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                       value expressions: _col1 (type: string)
             Execution mode: vectorized, llap
             LLAP IO: all inputs
@@ -739,10 +745,10 @@ STAGE PLANS:
               Select Operator
                 expressions: KEY.reducesinkkey0 (type: int), VALUE._col0 (type: string)
                 outputColumnNames: _col0, _col1
-                Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                 File Output Operator
                   compressed: false
-                  Statistics: Num rows: 47 Data size: 8648 Basic stats: COMPLETE Column stats: NONE
+                  Statistics: Num rows: 46 Data size: 8460 Basic stats: COMPLETE Column stats: NONE
                   table:
                       input format: org.apache.hadoop.mapred.TextInputFormat
                       output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
@@ -910,8 +916,10 @@ POSTHOOK: Input: default@src_bucket_tbl@hr=30/ds=2010-05-07
 PREHOOK: query: drop table src_bucket_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@src_bucket_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@src_bucket_tbl
 POSTHOOK: query: drop table src_bucket_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@src_bucket_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@src_bucket_tbl

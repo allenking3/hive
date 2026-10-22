@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,15 +20,22 @@
 package org.apache.hadoop.hive.ql.security.authorization.plugin.metastore.events;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.metastore.events.PreAlterTableEvent;
 import org.apache.hadoop.hive.metastore.events.PreEventContext;
+import org.apache.hadoop.hive.ql.security.authorization.AuthorizationUtils;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HiveOperationType;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.metastore.HiveMetaStoreAuthorizableEvent;
+import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject.HivePrivObjectActionType;
+import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject.HivePrivilegeObjectType;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.metastore.HiveMetaStoreAuthzInfo;
+import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
+import org.apache.hadoop.util.ReflectionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +45,7 @@ import java.util.List;
  */
 
 public class AlterTableEvent extends HiveMetaStoreAuthorizableEvent {
-  private static final Log LOG = LogFactory.getLog(AlterTableEvent.class);
+  private static final Logger LOG = LoggerFactory.getLogger(AlterTableEvent.class);
 
   private String COMMAND_STR = "alter table";
 
@@ -64,9 +71,7 @@ public class AlterTableEvent extends HiveMetaStoreAuthorizableEvent {
   }
 
   private List<HivePrivilegeObject> getInputHObjs() {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("==> AlterTableEvent.getInputHObjs()");
-    }
+    LOG.debug("==> AlterTableEvent.getInputHObjs()");
 
     List<HivePrivilegeObject> ret      = new ArrayList<>();
     PreAlterTableEvent        event    = (PreAlterTableEvent) preEventContext;
@@ -74,19 +79,17 @@ public class AlterTableEvent extends HiveMetaStoreAuthorizableEvent {
 
     ret.add(getHivePrivilegeObject(oldTable));
 
+    addAvroSchemaUrlInputAuth(ret, event);
+
     COMMAND_STR = buildCommandString(COMMAND_STR, oldTable);
 
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("<== AlterTableEvent.getInputHObjs(): ret=" + ret);
-    }
+    LOG.debug("<== AlterTableEvent.getInputHObjs(): ret={}", ret);
 
     return ret;
   }
 
   private List<HivePrivilegeObject> getOutputHObjs() {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("==> AlterTableEvent.getOutputHObjs()");
-    }
+    LOG.debug("==> AlterTableEvent.getOutputHObjs()");
 
     List<HivePrivilegeObject> ret      = new ArrayList<>();
     PreAlterTableEvent event    = (PreAlterTableEvent) preEventContext;
@@ -101,11 +104,42 @@ public class AlterTableEvent extends HiveMetaStoreAuthorizableEvent {
       ret.add(getHivePrivilegeObjectDfsUri(newUri));
     }
 
+    LOG.debug("<== AlterTableEvent.getOutputHObjs(): ret={}", ret);
+    if (newTable.getParameters().containsKey(hive_metastoreConstants.META_TABLE_STORAGE)) {
+      Configuration conf = new Configuration();
+      try {
+        HiveStorageHandler hiveStorageHandler = (HiveStorageHandler) ReflectionUtils.newInstance(
+                conf.getClassByName(newTable.getParameters().get(hive_metastoreConstants.META_TABLE_STORAGE)), event.getHandler().getConf());
+        String storageUri = hiveStorageHandler.getURIForAuth(newTable).toString();
+        ret.add(new HivePrivilegeObject(HivePrivilegeObjectType.STORAGEHANDLER_URI, null, null, storageUri, null, null,
+            HivePrivObjectActionType.OTHER, null, newTable.getParameters().get(hive_metastoreConstants.META_TABLE_STORAGE), newTable.getOwner(), newTable.getOwnerType()));
+      } catch (Exception ex) {
+        LOG.error("Exception occurred while getting the URI from storage handler: " + ex.getMessage(), ex);
+      }
+    }
+
     if (LOG.isDebugEnabled()) {
       LOG.debug("<== AlterTableEvent.getOutputHObjs(): ret=" + ret);
     }
 
     return ret;
+  }
+
+  private void addAvroSchemaUrlInputAuth(List<HivePrivilegeObject> ret, PreAlterTableEvent event) {
+    Table newTable = event.getNewTable();
+    Table oldTable = event.getOldTable();
+    String newSchemaUrl = AuthorizationUtils.getFilesystemAvroSchemaUrlToAuthorize(
+        new org.apache.hadoop.hive.ql.metadata.Table(newTable));
+    if (newSchemaUrl == null) {
+      return;
+    }
+    String oldSchemaUrl = oldTable == null ? null
+        : AuthorizationUtils.getFilesystemAvroSchemaUrlToAuthorize(
+            new org.apache.hadoop.hive.ql.metadata.Table(oldTable));
+    if (StringUtils.equals(oldSchemaUrl, newSchemaUrl)) {
+      return;
+    }
+    ret.add(getHivePrivilegeObjectDfsUri(newSchemaUrl));
   }
 
   private String buildCommandString(String cmdStr, Table tbl) {

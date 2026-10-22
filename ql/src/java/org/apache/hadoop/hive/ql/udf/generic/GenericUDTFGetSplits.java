@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.udf.generic;
@@ -32,8 +33,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-
-import javax.security.auth.login.LoginException;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections4.CollectionUtils;
@@ -140,9 +139,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
   protected transient StringObjectInspector stringOI;
   protected transient IntObjectInspector intOI;
   protected transient JobConf jc;
-  private boolean orderByQuery;
   private boolean limitQuery;
-  private boolean forceSingleSplit;
   protected ByteArrayOutputStream bos = new ByteArrayOutputStream(1024);
   protected DataOutput dos = new DataOutputStream(bos);
   protected String inputArgQuery;
@@ -240,7 +237,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
           + ConfVars.LLAP_HS2_ENABLE_COORDINATOR.varname + " enabled");
     }
     ApplicationId extClientAppId = coordinator.createExtClientAppId();
-    String externalDagName = SessionState.get().getConf().getVar(ConfVars.HIVEQUERYNAME);
+    String externalDagName = SessionState.get().getConf().getVar(ConfVars.HIVE_QUERY_NAME);
 
     StringBuilder sb = new StringBuilder();
     sb.append("Generated appID ").append(extClientAppId.toString()).append(" for LLAP splits");
@@ -253,28 +250,19 @@ public class GenericUDTFGetSplits extends GenericUDTF {
     TezWork tezWork = fragment.work;
     Schema schema = fragment.schema;
 
-    boolean generateSingleSplit = forceSingleSplit && orderByQuery;
-
-    SplitResult splitResult = getSplits(jc, tezWork, schema, extClientAppId, generateSingleSplit,
-        generateLightWeightSplits);
-    validateSplitResult(splitResult, generateLightWeightSplits, generateSingleSplit);
+    SplitResult splitResult = getSplits(jc, tezWork, schema, extClientAppId, generateLightWeightSplits);
+    validateSplitResult(splitResult, generateLightWeightSplits);
     return splitResult;
   }
 
-  private void validateSplitResult(SplitResult splitResult, boolean generateLightWeightSplits,
-                                   boolean generateSingleSplit) throws HiveException {
+  private void validateSplitResult(SplitResult splitResult, boolean generateLightWeightSplits) {
     Preconditions.checkNotNull(splitResult.schemaSplit, "schema split cannot be null");
     if (!schemaSplitOnly) {
       InputSplit[] splits = splitResult.actualSplits;
       if (splits.length > 0 && generateLightWeightSplits) {
         Preconditions.checkNotNull(splitResult.planSplit, "plan split cannot be null");
       }
-      LOG.info("Generated {} splits for query {}. orderByQuery: {} forceSingleSplit: {}", splits.length, inputArgQuery,
-          orderByQuery, forceSingleSplit);
-      if (generateSingleSplit && splits.length > 1) {
-        throw new HiveException("Got more than one split (Got: " + splits.length
-            + ") for order by query: " + inputArgQuery);
-      }
+      LOG.info("Generated {} splits for query {}", splits.length, inputArgQuery);
     }
   }
 
@@ -282,8 +270,8 @@ public class GenericUDTFGetSplits extends GenericUDTF {
       throws HiveException {
 
     HiveConf conf = new HiveConf(SessionState.get().getConf());
-    HiveConf.setVar(conf, ConfVars.HIVEFETCHTASKCONVERSION, "none");
-    HiveConf.setVar(conf, ConfVars.HIVEQUERYRESULTFILEFORMAT, PlanUtils.LLAP_OUTPUT_FORMAT_KEY);
+    HiveConf.setVar(conf, ConfVars.HIVE_FETCH_TASK_CONVERSION, "none");
+    HiveConf.setVar(conf, ConfVars.HIVE_QUERY_RESULT_FILEFORMAT, PlanUtils.LLAP_OUTPUT_FORMAT_KEY);
 
     String originalMode = HiveConf.getVar(conf,
         ConfVars.HIVE_EXECUTION_MODE);
@@ -294,9 +282,6 @@ public class GenericUDTFGetSplits extends GenericUDTF {
     // Tez/LLAP requires RPC query plan
     HiveConf.setBoolVar(conf, ConfVars.HIVE_RPC_QUERY_PLAN, true);
     HiveConf.setBoolVar(conf, ConfVars.HIVE_QUERY_RESULTS_CACHE_ENABLED, false);
-    // spark-llap always wraps query under a subquery, until that is removed from spark-llap
-    // hive compiler is going to remove inner order by. disable that optimization until then.
-    HiveConf.setBoolVar(conf, ConfVars.HIVE_REMOVE_ORDERBY_IN_SUBQUERY, false);
 
     if (schemaSplitOnly) {
       //Schema only
@@ -304,7 +289,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
         List<FieldSchema> fieldSchemas = ParseUtils.parseQueryAndGetSchema(conf, query);
         Schema schema = new Schema(convertSchema(fieldSchemas));
         return new PlanFragment(null, schema, null);
-      } catch (IOException | ParseException e) {
+      } catch (ParseException e) {
         throw new HiveException(e);
       }
     }
@@ -333,10 +318,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
       }
 
       QueryPlan plan = driver.getPlan();
-      orderByQuery = plan.getQueryProperties().hasOrderBy() || plan.getQueryProperties().hasOuterOrderBy();
       limitQuery = plan.getQueryProperties().getOuterQueryLimit() != -1;
-      forceSingleSplit = orderByQuery &&
-        HiveConf.getBoolVar(conf, ConfVars.LLAP_EXTERNAL_SPLITS_ORDER_BY_FORCE_SINGLE_SPLIT);
       List<Task<?>> roots = plan.getRootTasks();
       Schema schema = convertSchema(plan.getResultSchema());
       boolean fetchTask = plan.getFetchTask() != null;
@@ -435,8 +417,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
   // 1) schema and planBytes[] in each LlapInputSplit are not populated
   // 2) schemaSplit(contains only schema) and planSplit(contains only planBytes[]) are populated in SplitResult
   private SplitResult getSplits(JobConf job, TezWork work, Schema schema, ApplicationId extClientAppId,
-                               final boolean generateSingleSplit, boolean generateLightWeightSplits)
-      throws IOException {
+                                boolean generateLightWeightSplits) throws IOException {
 
     SplitResult splitResult = new SplitResult();
     splitResult.schemaSplit = new LlapInputSplit(
@@ -469,7 +450,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
 
       // Update the queryId to use the generated extClientAppId. See comment below about
       // why this is done.
-      HiveConf.setVar(wxConf, HiveConf.ConfVars.HIVEQUERYID, extClientAppId.toString());
+      HiveConf.setVar(wxConf, HiveConf.ConfVars.HIVE_QUERY_ID, extClientAppId.toString());
       Vertex wx = utils.createVertex(wxConf, mapWork, scratchDir, work,
           DagUtils.createTezLrMap(appJarLr, null));
       String vertexName = wx.getName();
@@ -483,8 +464,13 @@ public class GenericUDTFGetSplits extends GenericUDTF {
       Preconditions.checkState(HiveConf.getBoolVar(wxConf,
               ConfVars.LLAP_CLIENT_CONSISTENT_SPLITS));
 
-      HiveSplitGenerator splitGenerator = new HiveSplitGenerator(wxConf, mapWork, 
-		      generateSingleSplit, inputArgNumSplits);
+      // we're not interested in split fs serialization optimization in this case
+      // it was implemented for split generation in TezAM
+      // this can be removed any time when it turns out that's needed here too
+      HiveConf.setIntVar(wxConf, HiveConf.ConfVars.HIVE_TEZ_INPUT_FS_SERIALIZATION_THRESHOLD, -1);
+
+      HiveSplitGenerator splitGenerator =
+          new HiveSplitGenerator(wxConf, mapWork, false, inputArgNumSplits);
       List<Event> eventList = splitGenerator.initialize();
       int numGroupedSplitsGenerated = eventList.size() - 1;
       InputSplit[] result = new InputSplit[numGroupedSplitsGenerated];
@@ -637,7 +623,7 @@ public class GenericUDTFGetSplits extends GenericUDTF {
       JobTokenIdentifier identifier = new JobTokenIdentifier(new Text(
           tokenIdentifier));
       Token<JobTokenIdentifier> sessionToken = new Token<JobTokenIdentifier>(identifier,
-          new JobTokenSecretManager());
+          new JobTokenSecretManager(new Configuration()));
       sessionToken.setService(identifier.getJobId());
       return sessionToken;
     }
@@ -752,13 +738,11 @@ public class GenericUDTFGetSplits extends GenericUDTF {
    * @return LocalResource corresponding to the localized hive exec resource.
    * @throws IOException
    *           when any file system related call fails.
-   * @throws LoginException
-   *           when we are unable to determine the user.
    * @throws URISyntaxException
    *           when current jar location cannot be determined.
    */
   private LocalResource createJarLocalResource(String localJarPath,
-      DagUtils utils, Configuration conf) throws IOException, LoginException,
+      DagUtils utils, Configuration conf) throws IOException,
       IllegalArgumentException, FileNotFoundException {
     FileStatus destDirStatus = utils.getHiveJarDirectory(conf);
     assert destDirStatus != null;

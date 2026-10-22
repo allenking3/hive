@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore;
 
@@ -29,10 +30,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf.ConfVars;
 import org.apache.hadoop.hive.metastore.security.TUGIContainingTransport;
-import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.security.HadoopThriftAuthBridge;
 import org.apache.hadoop.hive.metastore.security.MetastoreDelegationTokenManager;
-import org.apache.thrift.transport.TFramedTransport;
+import org.apache.thrift.transport.layered.TFramedTransport;
 import org.apache.thrift.transport.TSaslServerTransport;
 import org.apache.thrift.transport.TTransport;
 import org.apache.thrift.transport.TTransportException;
@@ -118,7 +118,7 @@ public class AuthFactory {
     }
   }
 
-  TTransportFactory getAuthTransFactory(boolean useSSL, Configuration conf) throws LoginException {
+  TTransportFactory getAuthTransFactory(HadoopThriftAuthBridge bridge, Configuration conf) throws LoginException {
     TTransportFactory transportFactory;
     TSaslServerTransport.Factory serverTransportFactory;
 
@@ -128,8 +128,9 @@ public class AuthFactory {
           throw new LoginException("Framed transport is not supported with SASL enabled.");
         }
         serverTransportFactory = saslServer.createSaslServerTransportFactory(
-                MetaStoreUtils.getMetaStoreSaslProperties(conf, useSSL));
-        transportFactory = saslServer.wrapTransportFactoryInClientUGI(serverTransportFactory);
+            bridge.getHadoopSaslProperties(conf));
+        transportFactory = new ChainedTTransportFactory(
+            saslServer.wrapTransportFactoryInClientUGI(serverTransportFactory), new TUGIContainingTransport.Factory());
       } catch (TTransportException e) {
         throw new LoginException(e.getMessage());
       }
@@ -219,7 +220,7 @@ public class AuthFactory {
     }
 
     @Override
-    public TTransport getTransport(TTransport trans) {
+    public TTransport getTransport(TTransport trans) throws TTransportException {
       return childTransFactory.getTransport(parentTransFactory.getTransport(trans));
     }
   }

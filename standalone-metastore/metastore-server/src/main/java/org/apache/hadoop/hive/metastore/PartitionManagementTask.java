@@ -9,20 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.metastore;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,17 +29,15 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.common.repl.ReplConst;
-import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.common.TableName;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.metastore.api.TableMeta;
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.TimeValidator;
+import org.apache.hadoop.hive.metastore.utils.TableFetcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 /**
@@ -61,9 +57,6 @@ public class PartitionManagementTask implements MetastoreTaskThread {
   public static final String DISCOVER_PARTITIONS_TBLPROPERTY = "discover.partitions";
   public static final String PARTITION_RETENTION_PERIOD_TBLPROPERTY = "partition.retention.period";
   private static final Lock lock = new ReentrantLock();
-  // these are just for testing
-  private static int completedAttempts;
-  private static int skippedAttempts;
 
   private Configuration conf;
 
@@ -88,57 +81,25 @@ public class PartitionManagementTask implements MetastoreTaskThread {
             params.get(DISCOVER_PARTITIONS_TBLPROPERTY).equalsIgnoreCase("true");
   }
 
-  private static boolean tblBeingReplicatedInto(Map<String, String> params) {
-    return params != null && params.containsKey(ReplConst.REPL_TARGET_TABLE_PROPERTY) &&
-            !params.get(ReplConst.REPL_TARGET_TABLE_PROPERTY).trim().isEmpty();
-  }
-
   @Override
   public void run() {
     if (lock.tryLock()) {
-      skippedAttempts = 0;
-      String qualifiedTableName = null;
       IMetaStoreClient msc = null;
       try {
         msc = new HiveMetaStoreClient(conf);
-        List<Table> candidateTables = new ArrayList<>();
         String catalogName = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.PARTITION_MANAGEMENT_CATALOG_NAME);
         String dbPattern = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.PARTITION_MANAGEMENT_DATABASE_PATTERN);
         String tablePattern = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.PARTITION_MANAGEMENT_TABLE_PATTERN);
         String tableTypes = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.PARTITION_MANAGEMENT_TABLE_TYPES);
-        Set<String> tableTypesSet = new HashSet<>();
-        List<String> tableTypesList;
-        // if tableTypes is empty, then a list with single empty string has to specified to scan no tables.
-        // specifying empty here is equivalent to disabling the partition discovery altogether as it scans no tables.
-        if (tableTypes.isEmpty()) {
-          tableTypesList = Lists.newArrayList("");
-        } else {
-          for (String type : tableTypes.split(",")) {
-            try {
-              tableTypesSet.add(TableType.valueOf(type.trim().toUpperCase()).name());
-            } catch (IllegalArgumentException e) {
-              // ignore
-              LOG.warn("Unknown table type: {}", type);
-            }
-          }
-          tableTypesList = Lists.newArrayList(tableTypesSet);
-        }
-        List<TableMeta> foundTableMetas = msc.getTableMeta(catalogName, dbPattern, tablePattern, tableTypesList);
-        LOG.info("Looking for tables using catalog: {} dbPattern: {} tablePattern: {} found: {}", catalogName,
-          dbPattern, tablePattern, foundTableMetas.size());
+        List<TableName> candidates =
+            new TableFetcher.Builder(msc, catalogName, dbPattern, tablePattern).tableTypes(tableTypes)
+                .tableCondition(
+                    hive_metastoreConstants.HIVE_FILTER_FIELD_PARAMS + "discover__partitions like \"true\" ")
+                .build()
+                .getTableNames();
 
-        for (TableMeta tableMeta : foundTableMetas) {
-          try {
-            Table table = msc.getTable(tableMeta.getCatName(), tableMeta.getDbName(), tableMeta.getTableName());
-            if (partitionDiscoveryEnabled(table.getParameters()) && !tblBeingReplicatedInto(table.getParameters())) {
-              candidateTables.add(table);
-            }
-          } catch (NoSuchObjectException e) {
-            // Ignore dropped tables after fetching TableMeta.
-            LOG.warn(e.getMessage());
-          }
-        }
-        if (candidateTables.isEmpty()) {
+        if (candidates.isEmpty()) {
+          LOG.info("Got empty table list in catalog: {}, dbPattern: {}", catalogName, dbPattern);
           return;
         }
 
@@ -146,38 +107,32 @@ public class PartitionManagementTask implements MetastoreTaskThread {
         // will not be safe unless synchronized MSC is used. Using synchronized MSC in multi-threaded context also
         // defeats the purpose of thread pooled msck repair.
         int threadPoolSize = MetastoreConf.getIntVar(conf,
-          MetastoreConf.ConfVars.PARTITION_MANAGEMENT_TASK_THREAD_POOL_SIZE);
+            MetastoreConf.ConfVars.PARTITION_MANAGEMENT_TASK_THREAD_POOL_SIZE);
         final ExecutorService executorService = Executors
-          .newFixedThreadPool(Math.min(candidateTables.size(), threadPoolSize),
-            new ThreadFactoryBuilder().setDaemon(true).setNameFormat("PartitionDiscoveryTask-%d").build());
-        CountDownLatch countDownLatch = new CountDownLatch(candidateTables.size());
-        LOG.info("Found {} candidate tables for partition discovery", candidateTables.size());
+            .newFixedThreadPool(Math.min(candidates.size(), threadPoolSize),
+                new ThreadFactoryBuilder().setDaemon(true).setNameFormat("PartitionDiscoveryTask-%d").build());
+        CountDownLatch countDownLatch = new CountDownLatch(candidates.size());
+        LOG.info("Found {} candidate tables for partition discovery", candidates.size());
         setupMsckPathInvalidation();
         Configuration msckConf = Msck.getMsckConf(conf);
-        for (Table table : candidateTables) {
-          qualifiedTableName = Warehouse.getCatalogQualifiedTableName(table);
-          long retentionSeconds = getRetentionPeriodInSeconds(table);
-          LOG.info("Running partition discovery for table {} retentionPeriod: {}s", qualifiedTableName,
-            retentionSeconds);
+        for (TableName table : candidates) {
           // this always runs in 'sync' mode where partitions can be added and dropped
-          MsckInfo msckInfo = new MsckInfo(table.getCatName(), table.getDbName(), table.getTableName(),
-            null, null, true, true, true, retentionSeconds);
-          executorService.submit(new MsckThread(msckInfo, msckConf, qualifiedTableName, countDownLatch));
+          MsckInfo msckInfo = new MsckInfo(table.getCat(), table.getDb(), table.getTable(),
+              null, null, true, true, true, -1);
+          executorService.submit(new MsckThread(msckInfo, msckConf, table.toString(), countDownLatch));
         }
         countDownLatch.await();
         executorService.shutdownNow();
       } catch (Exception e) {
-        LOG.error("Exception while running partition discovery task for table: " + qualifiedTableName, e);
+        LOG.error("Exception while running partition discovery task", e);
       } finally {
         if (msc != null) {
           msc.close();
         }
         lock.unlock();
       }
-      completedAttempts++;
     } else {
-      skippedAttempts++;
-      LOG.info("Lock is held by some other partition discovery task. Skipping this attempt..#{}", skippedAttempts);
+      LOG.info("Lock is held by some other partition discovery task. Skipping this attempt.");
     }
   }
 
@@ -238,13 +193,4 @@ public class PartitionManagementTask implements MetastoreTaskThread {
     }
   }
 
-  @VisibleForTesting
-  public static int getSkippedAttempts() {
-    return skippedAttempts;
-  }
-
-  @VisibleForTesting
-  public static int getCompletedAttempts() {
-    return completedAttempts;
-  }
 }

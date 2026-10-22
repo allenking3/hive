@@ -1,4 +1,4 @@
-WARNING: Comparing a bigint and a double may result in a loss of precision.
+WARNING: Comparing bigint and double may result in loss of information.
 PREHOOK: query: explain vectorization SELECT AVG(cbigint) FROM alltypesparquet WHERE cbigint < cdouble
 PREHOOK: type: QUERY
 PREHOOK: Input: default@alltypesparquet
@@ -52,8 +52,8 @@ STAGE PLANS:
             Map Vectorization:
                 enabled: true
                 enabledConditionsMet: hive.vectorized.use.vectorized.input.format IS true
-                inputFormatFeatureSupport: []
-                featureSupportInUse: []
+                inputFormatFeatureSupport: [DECIMAL_64]
+                featureSupportInUse: [DECIMAL_64]
                 inputFileFormats: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
                 allNative: false
                 usesVectorUDFAdaptor: false
@@ -62,7 +62,7 @@ STAGE PLANS:
             Execution mode: vectorized, llap
             Reduce Vectorization:
                 enabled: true
-                enableConditionsMet: hive.vectorized.execution.reduce.enabled IS true, hive.execution.engine tez IN [tez, spark] IS true
+                enableConditionsMet: hive.vectorized.execution.reduce.enabled IS true, hive.execution.engine tez IN [tez] IS true
                 allNative: false
                 usesVectorUDFAdaptor: false
                 vectorized: true
@@ -90,7 +90,7 @@ STAGE PLANS:
       Processor Tree:
         ListSink
 
-WARNING: Comparing a bigint and a double may result in a loss of precision.
+WARNING: Comparing bigint and double may result in loss of information.
 PREHOOK: query: SELECT AVG(cbigint) FROM alltypesparquet WHERE cbigint < cdouble
 PREHOOK: type: QUERY
 PREHOOK: Input: default@alltypesparquet

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.util;
@@ -37,6 +38,7 @@ import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -51,6 +53,7 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.TransactionalValidationListener;
 import org.apache.hadoop.hive.metastore.Warehouse;
+import org.apache.hadoop.hive.metastore.api.AbortTxnRequest;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
@@ -58,6 +61,7 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.TableValidWriteIds;
 import org.apache.hadoop.hive.metastore.txn.TxnCommonUtils;
+import org.apache.hadoop.hive.metastore.txn.TxnErrorMsg;
 import org.apache.hadoop.hive.metastore.txn.TxnUtils;
 import org.apache.hadoop.hive.metastore.utils.HiveStrictManagedUtils;
 import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
@@ -68,10 +72,14 @@ import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.shims.HadoopShims;
 import org.apache.hadoop.hive.shims.ShimLoader;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.util.ExitUtil;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 
@@ -108,6 +116,7 @@ public class HiveStrictManagedMigration {
     final TableType tableType;
     final int tablePoolSize;
     final String fsOperationUser;
+    final String controlFileUrl;
 
     RunOptions(String dbRegex,
                String tableRegex,
@@ -121,7 +130,8 @@ public class HiveStrictManagedMigration {
                boolean dryRun,
                TableType tableType,
                int tablePoolSize,
-               String fsOperationUser) {
+               String fsOperationUser,
+               String controlFileUrl) {
       super();
       this.dbRegex = dbRegex;
       this.tableRegex = tableRegex;
@@ -136,6 +146,7 @@ public class HiveStrictManagedMigration {
       this.tableType = tableType;
       this.tablePoolSize = tablePoolSize;
       this.fsOperationUser = fsOperationUser;
+      this.controlFileUrl = controlFileUrl;
     }
 
     public void setShouldModifyManagedTableLocation(boolean shouldModifyManagedTableLocation) {
@@ -162,6 +173,7 @@ public class HiveStrictManagedMigration {
         ", tableType=" + tableType +
         ", tablePoolSize=" + tablePoolSize +
         ", fsOperationUser=" + fsOperationUser +
+        ", controlFileUrl=" + controlFileUrl +
         '}';
     }
   }
@@ -245,7 +257,7 @@ public class HiveStrictManagedMigration {
 
     // TODO: Something is preventing the process from terminating after main(), adding exit() as hacky solution.
     if (hiveConf == null) {
-      System.exit(RC);
+      ExitUtil.terminate(RC);
     }
   }
 
@@ -348,6 +360,15 @@ public class HiveStrictManagedMigration {
       .hasArg()
       .create());
 
+    result.addOption(OptionBuilder
+        .withLongOpt("controlFileUrl")
+        .withDescription("If set, migration tool will expect either a YAML file on this path, or a directory " +
+            "with YAML files in it. Such YAML file(s) shall contain which tables in which databases should the tool " +
+            "care about. The value here will be parsed and handled by Hadoop filesystem, so absolute paths with " +
+            "schemes are required.")
+        .hasArg()
+        .create());
+
     return result;
   }
 
@@ -369,6 +390,12 @@ public class HiveStrictManagedMigration {
 
     String dbRegex = cli.getOptionValue("dbRegex", ".*");
     String tableRegex = cli.getOptionValue("tableRegex", ".*");
+    String controlFileUrl = cli.getOptionValue("controlFileUrl", "");
+    if (!StringUtils.isEmpty(controlFileUrl)) {
+      if (cli.hasOption("dbRegex") || cli.hasOption("tableRegex")) {
+        throw new IllegalArgumentException("No dbRegex or tableRegex options should be set if controlFileUrl is used");
+      }
+    }
     TableMigrationOption migrationOption =
       TableMigrationOption.valueOf(cli.getOptionValue("migrationOption", "none").toUpperCase());
     boolean shouldModifyManagedTableLocation = cli.hasOption("shouldModifyManagedTableLocation");
@@ -423,7 +450,8 @@ public class HiveStrictManagedMigration {
       dryRun,
       tableTypeText == null ? null : TableType.valueOf(tableTypeText),
       tablePoolSize,
-      fsOperationUser);
+      fsOperationUser,
+      controlFileUrl);
     return runOpts;
   }
 
@@ -449,6 +477,7 @@ public class HiveStrictManagedMigration {
   private final FsPermission dirPerms;
   private final FsPermission filePerms;
   private final UserGroupInformation fsOperationUser;
+  private final HiveStrictManagedMigrationControlConfig controlConfig;
 
   private CloseableThreadLocal<HiveMetaStoreClient> hms;
   private ThreadLocal<Warehouse> wh;
@@ -457,6 +486,20 @@ public class HiveStrictManagedMigration {
 
   private AtomicBoolean failuresEncountered;
   private AtomicBoolean failedValidationChecks;
+  private final ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+  private final ObjectReader yamlReader = mapper.readerFor(HiveStrictManagedMigrationControlConfig.class);
+
+  private void readControlConfigs(FileSystem fs, Path path) {
+    if (!path.getName().endsWith(".yaml")) {
+      throw new IllegalArgumentException("Only .yaml files are supported as control files, got: " + path);
+    }
+    try (FSDataInputStream fsDataInputStream = fs.open(path)) {
+      controlConfig.putAllFromConfig(yamlReader.readValue(fsDataInputStream.getWrappedStream()));
+      LOG.info("Control configs have been read in from " + path);
+    } catch (IOException e) {
+      throw new RuntimeException("Error reading control file: " + path, e);
+    }
+  }
 
   HiveStrictManagedMigration(HiveConf conf, RunOptions runOptions, boolean createExternalDirsForDbs,
                              OwnerPermsOptions ownerPermsOptions, WarehouseRootCheckResult warehouseRootCheckResult) {
@@ -491,6 +534,27 @@ public class HiveStrictManagedMigration {
       throw new RuntimeException("Error while setting up UGI for FS operations.");
     }
 
+
+    try {
+      if (!StringUtils.isEmpty(runOptions.controlFileUrl)) {
+        controlConfig = new HiveStrictManagedMigrationControlConfig();
+        Path path = new Path(runOptions.controlFileUrl);
+        FileSystem fs = path.getFileSystem(this.conf);
+        if (fs.getFileStatus(path).isDirectory()) {
+          for (FileStatus fileStatus : fs.listStatus(path)) {
+            readControlConfigs(fs, fileStatus.getPath());
+          }
+        } else {
+          readControlConfigs(fs, path);
+        }
+      } else {
+        controlConfig = null;
+      }
+    } catch (IOException e) {
+      throw new RuntimeException("Error while setting up control file content from path: "
+          + runOptions.controlFileUrl, e);
+    }
+
     this.hms = new CloseableThreadLocal<>(() -> {
       try {
         HiveMetaStoreClient hiveMetaStoreClient = new HiveMetaStoreClient(conf);
@@ -512,7 +576,7 @@ public class HiveStrictManagedMigration {
     });
     if (runOptions.shouldModifyManagedTableLocation || runOptions.shouldMoveExternal) {
       Configuration oldConf = new Configuration(conf);
-      HiveConf.setVar(oldConf, HiveConf.ConfVars.METASTOREWAREHOUSE, runOptions.oldWarehouseRoot);
+      HiveConf.setVar(oldConf, HiveConf.ConfVars.METASTORE_WAREHOUSE, runOptions.oldWarehouseRoot);
 
       oldWh = ThreadLocal.withInitial(() -> {
         try {
@@ -537,13 +601,22 @@ public class HiveStrictManagedMigration {
   void run() throws Exception {
     LOG.info("Starting with {}", runOptions);
 
-    List<String> databases = hms.get().getDatabases(runOptions.dbRegex); //TException
-    LOG.info("Found {} databases", databases.size());
     ForkJoinPool tablePool = new ForkJoinPool(
-      runOptions.tablePoolSize,
-      new NamedForkJoinWorkerThreadFactory("Table-"),
-      getUncaughtExceptionHandler(),
-      false);
+        runOptions.tablePoolSize,
+        new NamedForkJoinWorkerThreadFactory("Table-"),
+        getUncaughtExceptionHandler(),
+        false);
+
+    List<String> databases = null;
+
+    if (controlConfig == null) {
+      databases = hms.get().getDatabases(runOptions.dbRegex); //TException
+    } else {
+      databases = hms.get().getAllDatabases().stream()
+          .filter(db -> controlConfig.getDatabaseIncludeLists().containsKey(db)).collect(toList());
+    }
+    LOG.info("Found {} databases", databases.size());
+
     databases.forEach(dbName -> processDatabase(dbName, tablePool));
     LOG.info("Done processing databases.");
 
@@ -579,7 +652,7 @@ public class HiveStrictManagedMigration {
         shouldMoveExternal = false;
       } else {
         String currentPathString = shouldModifyManagedTableLocation ?
-          HiveConf.getVar(conf, HiveConf.ConfVars.METASTOREWAREHOUSE) :
+          HiveConf.getVar(conf, HiveConf.ConfVars.METASTORE_WAREHOUSE) :
           HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_METASTORE_WAREHOUSE_EXTERNAL);
         if (arePathsEqual(conf, runOptions.oldWarehouseRoot, currentPathString)) {
           LOG.info("oldWarehouseRoot is the same as the target path {}."
@@ -594,7 +667,7 @@ public class HiveStrictManagedMigration {
           FileSystem curWhRootFs = targetPath.getFileSystem(conf);
           oldWhRootPath = oldWhRootFs.makeQualified(oldWhRootPath);
           targetPath = curWhRootFs.makeQualified(targetPath);
-          if (!FileUtils.equalsFileSystem(oldWhRootFs, curWhRootFs)) {
+          if (!FileUtils.isEqualFileSystemAndSameOzoneBucket(oldWhRootFs, curWhRootFs, oldWhRootPath, targetPath)) {
             LOG.info("oldWarehouseRoot {} has a different FS than the target path {}."
                 + " Disabling shouldModifyManagedTableLocation and shouldMoveExternal",
               runOptions.oldWarehouseRoot, currentPathString);
@@ -688,12 +761,24 @@ public class HiveStrictManagedMigration {
       }
 
       List<String> tableNames;
+      // If control file content is present we ask for all table names first, then remove those we don't care about
+      String tableRegex = controlConfig == null ? runOptions.tableRegex : ".*";
       if (runOptions.tableType == null) {
-        tableNames = hms.get().getTables(dbName, runOptions.tableRegex);
+        tableNames = hms.get().getTables(dbName, tableRegex);
         LOG.debug("found {} tables in {}", tableNames.size(), dbName);
       } else {
-        tableNames = hms.get().getTables(dbName, runOptions.tableRegex, runOptions.tableType);
+        tableNames = hms.get().getTables(dbName, tableRegex, runOptions.tableType);
         LOG.debug("found {} {}s in {}", tableNames.size(), runOptions.tableType.name(), dbName);
+      }
+
+      if (controlConfig != null) {
+        List<String> tableIncludeList = controlConfig.getDatabaseIncludeLists().get(dbName);
+        if (tableIncludeList == null) {
+          tableNames.clear();
+        } else {
+          tableNames.removeAll(tableNames.stream().filter(t -> !tableIncludeList.contains(t)).collect(toList()));
+        }
+        LOG.debug("{} tables remained after control file filtering in {}", tableNames.size(), dbName);
       }
 
       boolean errorsInThisDb = !tablePool.submit(() -> tableNames.parallelStream()
@@ -1369,7 +1454,9 @@ public class HiveStrictManagedMigration {
           result = new TxnCtx(writeId, validWriteIds, txnId);
         } finally {
           if (result == null) {
-            msc.abortTxns(Lists.newArrayList(txnId));
+            AbortTxnRequest abortTxnRequest = new AbortTxnRequest(txnId);
+            abortTxnRequest.setErrorCode(TxnErrorMsg.ABORT_MIGRATION_TXN.getErrorCode());
+            msc.rollbackTxn(abortTxnRequest);
           }
         }
         return result;
@@ -1385,7 +1472,9 @@ public class HiveStrictManagedMigration {
         if (isOk) {
           msc.commitTxn(txnCtx.txnId);
         } else {
-          msc.abortTxns(Lists.newArrayList(txnCtx.txnId));
+          AbortTxnRequest abortTxnRequest = new AbortTxnRequest(txnCtx.txnId);
+          abortTxnRequest.setErrorCode(TxnErrorMsg.ABORT_MIGRATION_TXN.getErrorCode());
+          msc.rollbackTxn(abortTxnRequest);
         }
       } catch (TException ex) {
         throw new HiveException(ex);

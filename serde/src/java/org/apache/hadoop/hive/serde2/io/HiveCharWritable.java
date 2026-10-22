@@ -9,17 +9,17 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.serde2.io;
 
 import org.apache.hadoop.hive.common.type.HiveBaseChar;
 import org.apache.hadoop.hive.common.type.HiveChar;
-import org.apache.hadoop.hive.shims.ShimLoader;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hive.common.util.HiveStringUtils;
@@ -27,7 +27,7 @@ import org.apache.hive.common.util.HiveStringUtils;
 /**
  * HiveCharWritable.
  * String values will be padded to full char length.
- * Character legnth, comparison, hashCode should ignore trailing spaces.
+ * Character length, comparison, hashCode should ignore trailing spaces.
  */
 public class HiveCharWritable extends HiveBaseCharWritable 
     implements WritableComparable<HiveCharWritable> {
@@ -41,6 +41,15 @@ public class HiveCharWritable extends HiveBaseCharWritable
 
   public HiveCharWritable(HiveCharWritable hcw) {
     set(hcw);
+  }
+
+  public HiveCharWritable(byte[] bytes, int maxLength) {
+    set(bytes, maxLength);
+  }
+
+  public void set(byte[] bytes, int maxLength) {
+    value.set(bytes);
+    enforceMaxLength(maxLength);
   }
 
   public void set(HiveChar val) {
@@ -82,9 +91,7 @@ public class HiveCharWritable extends HiveBaseCharWritable
     if (value.charAt(value.getLength() - 1) != ' ') {
       return value;
     }
-    // A lot of these methods could be done more efficiently by operating on the Text value
-    // directly, rather than converting to HiveChar.
-    return new Text(getHiveChar().getStrippedValue());
+    return new Text(HiveCharWritable.stripTrailingWhitespace(value));
   }
 
   public Text getPaddedValue() {
@@ -120,5 +127,16 @@ public class HiveCharWritable extends HiveBaseCharWritable
   @Override
   public String toString() {
     return getPaddedValue().toString();
+  }
+
+  public static byte[] stripTrailingWhitespace(Text valueToStrip) {
+    byte[] input = valueToStrip.getBytes();
+    int i = input.length;
+    // iterate from end while we see space or 0x character
+    while (i-- > 0 && (input[i] == 32 || input[i] == 0)) {
+    }
+    byte[] output = new byte[i + 1];
+    System.arraycopy(input, 0, output, 0, i + 1);
+    return output;
   }
 }

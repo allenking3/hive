@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.tools;
 
@@ -127,7 +128,11 @@ public final class SQLGenerator {
    * construct.  If the DB doesn't support, return original select.
    */
   public String addForUpdateClause(String selectStatement) throws MetaException {
-    return dbProduct.addForUpdateClause(selectStatement);
+    return dbProduct.addForUpdateClause(selectStatement, false);
+  }
+
+  public String addForUpdateNoWait(String selectStatement) throws MetaException {
+    return dbProduct.addForUpdateClause(selectStatement, true);
   }
 
   /**
@@ -141,6 +146,17 @@ public final class SQLGenerator {
    */
   public String addLimitClause(int numRows, String noSelectsqlQuery) throws MetaException {
     return dbProduct.addLimitClause(numRows, noSelectsqlQuery);
+  }
+
+  /**
+   * Returns the SQL query to lock the given table name in either shared/exclusive mode
+   * @param txnLockTable
+   * @param shared
+   * @return
+   * @throws MetaException
+   */
+  public String lockTable(String txnLockTable, boolean shared) throws MetaException {
+    return dbProduct.lockTable(txnLockTable, shared);
   }
 
   /**

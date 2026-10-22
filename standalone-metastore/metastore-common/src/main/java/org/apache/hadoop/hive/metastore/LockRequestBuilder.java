@@ -9,14 +9,16 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore;
 
+import org.apache.hadoop.hive.metastore.api.DataOperationType;
 import org.apache.hadoop.hive.metastore.api.LockComponent;
 import org.apache.hadoop.hive.metastore.api.LockRequest;
 
@@ -87,6 +89,11 @@ public class LockRequestBuilder {
 
   public LockRequestBuilder setZeroWaitReadEnabled(boolean zeroWaitRead) {
     req.setZeroWaitReadEnabled(zeroWaitRead);
+    return this;
+  }
+
+  public LockRequestBuilder setExclusiveCTAS(boolean exclusiveCTAS) {
+    req.setExclusiveCTAS(exclusiveCTAS);
     return this;
   }
 
@@ -168,8 +175,9 @@ public class LockRequestBuilder {
       if (existing == null) {
         // No existing lock for this partition.
         parts.put(comp.getPartitionname(), comp);
-      }  else if (lockTypeComparator.compare(comp.getType(), existing.getType()) > 0) {
-        // We only need to promote if comp.type is > existing.type.
+      } else if (lockTypeComparator.compare(comp.getType(), existing.getType()) > 0
+          || comp.getType() == existing.getType() && existing.getOperationType() == DataOperationType.INSERT) {
+        // We only need to promote if comp.type is > existing.type or it's an update/delete
         parts.put(comp.getPartitionname(), comp);
       }
     }

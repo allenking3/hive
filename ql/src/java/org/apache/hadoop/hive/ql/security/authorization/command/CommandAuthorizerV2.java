@@ -9,26 +9,27 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.security.authorization.command;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.HiveMetaStore;
-import org.apache.hadoop.hive.metastore.TableType;
+import org.apache.hadoop.hive.metastore.api.DataConnector;
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.Function;
 import org.apache.hadoop.hive.ql.exec.FunctionInfo;
 import org.apache.hadoop.hive.ql.exec.FunctionUtils;
 import org.apache.hadoop.hive.ql.exec.FunctionInfo.FunctionType;
@@ -47,11 +48,14 @@ import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObje
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject.HivePrivObjectActionType;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject.HivePrivilegeObjectType;
 import org.apache.hadoop.hive.ql.session.SessionState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Command authorization, new type.
  */
 final class CommandAuthorizerV2 {
+  private static final Logger LOG = LoggerFactory.getLogger(CommandAuthorizerV2.class.getName());
   private CommandAuthorizerV2() {
     throw new UnsupportedOperationException("CommandAuthorizerV2 should not be instantiated");
   }
@@ -69,9 +73,10 @@ final class CommandAuthorizerV2 {
     List<ReadEntity> inputList = new ArrayList<ReadEntity>(inputs);
     List<WriteEntity> outputList = new ArrayList<WriteEntity>(outputs);
     addPermanentFunctionEntities(ss, inputList);
+    enrichAvroSchemaUrlInputs(inputList);
 
-    List<HivePrivilegeObject> inputsHObjs = getHivePrivObjects(inputList, selectTab2Cols);
-    List<HivePrivilegeObject> outputHObjs = getHivePrivObjects(outputList, updateTab2Cols);
+    List<HivePrivilegeObject> inputsHObjs = getHivePrivObjects(inputList, selectTab2Cols, hiveOpType, sem);
+    List<HivePrivilegeObject> outputHObjs = getHivePrivObjects(outputList, updateTab2Cols, hiveOpType, sem);
 
     HiveAuthzContext.Builder authzContextBuilder = new HiveAuthzContext.Builder();
     authzContextBuilder.setUserIpAddress(ss.getUserIpAddress());
@@ -79,6 +84,13 @@ final class CommandAuthorizerV2 {
     authzContextBuilder.setCommandString(command);
 
     ss.getAuthorizerV2().checkPrivileges(hiveOpType, inputsHObjs, outputHObjs, authzContextBuilder.build());
+  }
+
+  private static void enrichAvroSchemaUrlInputs(List<ReadEntity> inputList) {
+    List<ReadEntity> snapshot = new ArrayList<>(inputList);
+    for (ReadEntity readEntity : snapshot) {
+      AuthorizationUtils.addAvroSchemaUrlInputForReadEntity(inputList, readEntity);
+    }
   }
 
   private static void addPermanentFunctionEntities(SessionState ss, List<ReadEntity> inputList) throws HiveException {
@@ -96,13 +108,16 @@ final class CommandAuthorizerV2 {
   }
 
   private static List<HivePrivilegeObject> getHivePrivObjects(List<? extends Entity> privObjects,
-      Map<String, List<String>> tableName2Cols) {
+      Map<String, List<String>> tableName2Cols, HiveOperationType hiveOpType, BaseSemanticAnalyzer sem) throws HiveException {
     List<HivePrivilegeObject> hivePrivobjs = new ArrayList<HivePrivilegeObject>();
-    if (privObjects == null){
+    if (privObjects == null) {
       return hivePrivobjs;
     }
 
-    for (Entity privObject : privObjects){
+    // Pre-scan once to collect base tables that are accessed via a regular view.
+    Set<String> baseTablesViaRegularView = buildBaseTablesViaRegularView(privObjects);
+
+    for (Entity privObject : privObjects) {
       if (privObject.isDummy()) {
         //do not authorize dummy readEntity or writeEntity
         continue;
@@ -112,19 +127,19 @@ final class CommandAuthorizerV2 {
         // it's not inside a deferred authorized view.
         ReadEntity reTable = (ReadEntity)privObject;
         Boolean isDeferred = false;
-        if( reTable.getParents() != null && reTable.getParents().size() > 0){
-          for( ReadEntity re: reTable.getParents()){
+        if ( reTable.getParents() != null && reTable.getParents().size() > 0) {
+          for ( ReadEntity re: reTable.getParents()){
             if (re.getTyp() == Type.TABLE && re.getTable() != null ) {
               Table t = re.getTable();
-              if(!isDeferredAuthView(t)){
+              if (!isDeferredAuthView(t)) {
                 continue;
-              }else{
+              } else {
                 isDeferred = true;
               }
             }
           }
         }
-        if(!isDeferred){
+        if (!isDeferred) {
           continue;
         }
       }
@@ -137,26 +152,53 @@ final class CommandAuthorizerV2 {
         continue;
       }
 
-      addHivePrivObject(privObject, tableName2Cols, hivePrivobjs);
+      if (privObject.getTyp() == Type.FUNCTION && !HiveConf.getBoolVar(SessionState.get().getConf(),
+              HiveConf.ConfVars.HIVE_AUTHORIZATION_FUNCTIONS_IN_VIEW) && hiveOpType == HiveOperationType.QUERY) {
+        String[] qualifiedFunctionName = new String[]{privObject.getDatabase() != null ?
+                privObject.getDatabase().getName() :  null, privObject.getFunctionName()};
+        if (!sem.getUserSuppliedFunctions().contains(qualifiedFunctionName[0] + "." + qualifiedFunctionName[1])) {
+          continue;
+        }
+      }
+      if (isPartitionAccessedViaRegularView(privObject, baseTablesViaRegularView)) {
+        // skip Partition Entity auth for regular view
+        continue;
+      }
+
+      addHivePrivObject(privObject, tableName2Cols, hivePrivobjs, hiveOpType);
     }
     return hivePrivobjs;
+  }
+
+  /**
+   * Pre-scans the entity list once and returns the set of "db.table" keys for base tables
+   * that are accessed indirectly via a regular view.
+   */
+  private static Set<String> buildBaseTablesViaRegularView(List<? extends Entity> entities) {
+    Set<String> result = new HashSet<>();
+    for (Entity entity : entities) {
+      if (!(entity instanceof ReadEntity) || entity.getTyp() != Type.TABLE) {
+        continue;
+      }
+      ReadEntity re = (ReadEntity) entity;
+      Table t = re.getTable();
+      if (!re.isDirect() && t != null && !hasDeferredViewParent(re) && hasRegularViewParent(re)) {
+        result.add(t.getDbName() + "." + t.getTableName());
+      }
+    }
+    return result;
   }
 
   /**
    * A deferred authorization view is view created by non-super user like spark-user. This view contains a parameter "Authorized"
    * set to false, so ranger will not authorize it during view creation. When a select statement is issued, then the ranger authorizes
    * the under lying tables.
-   * @param Table t
+   * @param t the HMS table object
    * @return boolean value
    */
   private static boolean isDeferredAuthView(Table t){
-    String tableType = t.getTTable().getTableType();
     String authorizedKeyword = "Authorized";
-    boolean isView = false;
-    if (TableType.MATERIALIZED_VIEW.name().equals(tableType) || TableType.VIRTUAL_VIEW.name().equals(tableType)) {
-      isView = true;
-    }
-    if(isView){
+    if (t.isView() || t.isMaterializedView()) {
       Map<String, String> params = t.getParameters();
       if (params != null && params.containsKey(authorizedKeyword)) {
         String authorizedValue = params.get(authorizedKeyword);
@@ -168,45 +210,136 @@ final class CommandAuthorizerV2 {
     return false;
   }
 
+  /**
+   * Returns true when a PARTITION entity should not produce its own privilege object
+   * because access is already covered by a view's TABLE_OR_VIEW object.
+   */
+  private static boolean isPartitionAccessedViaRegularView(Entity entity,
+      Set<String> baseTablesViaRegularView) {
+    if (!(entity instanceof ReadEntity)
+        || (entity.getTyp() != Type.PARTITION && entity.getTyp() != Type.DUMMYPARTITION)) {
+      return false;
+    }
+    ReadEntity re = (ReadEntity) entity;
+    // Deferred-auth views must still authorize the underlying base table.
+    if (hasDeferredViewParent(re)) {
+      return false;
+    }
+
+    if (hasRegularViewParent(re)) {
+      return true;
+    }
+    Table partTable = re.getTable();
+    return partTable != null
+        && baseTablesViaRegularView.contains(partTable.getDbName() + "." + partTable.getTableName());
+  }
+
+  private static boolean hasDeferredViewParent(ReadEntity entity) {
+    Set<ReadEntity> parents = entity.getParents();
+    if (parents == null || parents.isEmpty()) {
+      return false;
+    }
+    for (ReadEntity parent : parents) {
+      if (parent.getTyp() == Type.TABLE && parent.getTable() != null
+          && isDeferredAuthView(parent.getTable())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean hasRegularViewParent(ReadEntity entity) {
+    Set<ReadEntity> parents = entity.getParents();
+    if (parents == null || parents.isEmpty()) {
+      return false;
+    }
+    for (ReadEntity parent : parents) {
+      if (parent.getTyp() == Type.TABLE && parent.getTable() != null
+          && (parent.getTable().isView() || parent.getTable().isMaterializedView())
+          && !isDeferredAuthView(parent.getTable())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private static void addHivePrivObject(Entity privObject, Map<String, List<String>> tableName2Cols,
-      List<HivePrivilegeObject> hivePrivObjs) {
+      List<HivePrivilegeObject> hivePrivObjs, HiveOperationType hiveOpType) throws HiveException {
     HivePrivilegeObjectType privObjType = AuthorizationUtils.getHivePrivilegeObjectType(privObject.getType());
     HivePrivObjectActionType actionType = AuthorizationUtils.getActionType(privObject);
     HivePrivilegeObject hivePrivObject = null;
     switch(privObject.getType()){
     case DATABASE:
       Database database = privObject.getDatabase();
-      hivePrivObject = new HivePrivilegeObject(privObjType, database.getName(), null, null, null, actionType, null,
-          null, database.getOwnerName(), database.getOwnerType());
+      hivePrivObject = new HivePrivilegeObject(privObjType, database.getCatalogName(), database.getName(),
+          null, null, null, actionType, null, null, database.getOwnerName(), database.getOwnerType());
       break;
     case TABLE:
       Table table = privObject.getTable();
       List<String> columns = tableName2Cols == null ? null :
           tableName2Cols.get(Table.getCompleteName(table.getDbName(), table.getTableName()));
-      hivePrivObject = new HivePrivilegeObject(privObjType, table.getDbName(), table.getTableName(),
+      hivePrivObject = new HivePrivilegeObject(privObjType, table.getCatalogName(), table.getDbName(), table.getTableName(),
           null, columns, actionType, null, null, table.getOwner(), table.getOwnerType());
+      if (table.getStorageHandler() != null && HiveConf.getBoolVar(SessionState.getSessionConf(),
+          HiveConf.ConfVars.HIVE_AUTHORIZATION_TABLES_ON_STORAGEHANDLERS)) {
+        //TODO: add hive privilege object for storage based handlers for create and alter table commands.
+        if (privObject instanceof WriteEntity &&
+                (hiveOpType == HiveOperationType.CREATETABLE ||
+                hiveOpType == HiveOperationType.ALTERTABLE_PROPERTIES ||
+                hiveOpType == HiveOperationType.CREATETABLE_AS_SELECT)) {
+          try {
+            String storageUri = table.getStorageHandler().getURIForAuth(table.getTTable()).toString();
+            hivePrivObjs.add(new HivePrivilegeObject(HivePrivilegeObjectType.STORAGEHANDLER_URI, null, null, storageUri, null, null,
+                actionType, null, table.getStorageHandler().getClass().getName(), table.getOwner(), table.getOwnerType()));
+          } catch (Exception ex) {
+            LOG.error("Exception occurred while getting the URI from storage handler: " + ex.getMessage(), ex);
+            throw new HiveException("Exception occurred while getting the URI from storage handler: " + ex.getMessage());
+          }
+        }
+      }
       break;
     case DFS_DIR:
     case LOCAL_DIR:
-      hivePrivObject = new HivePrivilegeObject(privObjType, null, privObject.getD().toString(), null, null,
-          actionType, null, null, null, null);
+      hivePrivObject = new HivePrivilegeObject(privObjType, null, null, privObject.getD().toString(),
+          null, null, actionType, null);
       break;
     case FUNCTION:
-      String dbName = privObject.getDatabase() != null ? privObject.getDatabase().getName() : null;
-      hivePrivObject = new HivePrivilegeObject(privObjType, dbName, privObject.getFunctionName(),
-          null, null, actionType, null, privObject.getClassName(), null, null);
+      if (privObject.getFunction() != null) {
+        Function function = privObject.getFunction();
+        hivePrivObject = new HivePrivilegeObject(privObjType, function.getCatName(), function.getDbName(), function.getFunctionName(),
+                null, null, actionType, null, function.getClassName(), function.getOwnerName(), function.getOwnerType());
+      } else {
+        String catName = null;
+        String dbName = null;
+        if (privObject.getDatabase() != null) {
+          catName = privObject.getDatabase().getCatalogName();
+          dbName = privObject.getDatabase().getName();
+        }
+        hivePrivObject = new HivePrivilegeObject(privObjType, catName, dbName, privObject.getFunctionName(),
+            null, null, actionType, null, privObject.getClassName(), null, null);
+      }
       break;
     case DUMMYPARTITION:
     case PARTITION:
-      // TODO: not currently handled
-      return;
+      Table tbl = privObject.getTable();
+      List<String> col = tableName2Cols == null ? null :
+              tableName2Cols.get(Table.getCompleteName(tbl.getDbName(), tbl.getTableName()));
+      hivePrivObject = new HivePrivilegeObject(privObjType, tbl.getCatName(), tbl.getDbName(), tbl.getTableName(),
+              null, col, actionType, null, null, tbl.getOwner(), tbl.getOwnerType());
+      break;
     case SERVICE_NAME:
-      hivePrivObject = new HivePrivilegeObject(privObjType, null, privObject.getServiceName(), null,
-          null, actionType, null, null, null, null);
+      hivePrivObject = new HivePrivilegeObject(privObjType, null, null, privObject.getServiceName(), null,
+          null, actionType, null);
+      break;
+    case DATACONNECTOR:
+      DataConnector connector = privObject.getDataConnector();
+      hivePrivObject = new HivePrivilegeObject(privObjType, null, null, connector.getName(), null, null,
+          actionType, null, null, connector.getOwnerName(), connector.getOwnerType());
       break;
     default:
       throw new AssertionError("Unexpected object type");
     }
     hivePrivObjs.add(hivePrivObject);
   }
+
 }

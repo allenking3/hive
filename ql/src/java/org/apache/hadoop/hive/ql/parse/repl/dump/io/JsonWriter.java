@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.dump.io;
 
@@ -22,8 +23,9 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.ql.parse.ReplicationSpec;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
-import org.codehaus.jackson.JsonFactory;
-import org.codehaus.jackson.JsonGenerator;
+
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -37,7 +39,7 @@ public class JsonWriter implements Closeable {
 
   public JsonWriter(FileSystem fs, Path writePath) throws IOException {
     OutputStream out = fs.create(writePath);
-    jsonGenerator = new JsonFactory().createJsonGenerator(out);
+    jsonGenerator = new JsonFactory().createGenerator(out);
     jsonGenerator.writeStartObject();
     jsonGenerator.writeStringField("version", METADATA_FORMAT_VERSION);
   }

@@ -32,8 +32,10 @@ import org.apache.hadoop.hive.metastore.messaging.AddUniqueConstraintMessage;
 import org.apache.hadoop.hive.metastore.messaging.AllocWriteIdMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterPartitionMessage;
+import org.apache.hadoop.hive.metastore.messaging.AlterPartitionsMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterTableMessage;
 import org.apache.hadoop.hive.metastore.messaging.CommitTxnMessage;
+import org.apache.hadoop.hive.metastore.messaging.CommitCompactionMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateFunctionMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateTableMessage;
@@ -134,6 +136,11 @@ public class DeSerializer extends JSONMessageDeserializer {
   }
 
   @Override
+  public AlterPartitionsMessage getAlterPartitionsMessage(String messageBody) {
+    return super.getAlterPartitionsMessage(deCompress(messageBody));
+  }
+
+  @Override
   public DropPartitionMessage getDropPartitionMessage(String messageBody) {
     return super.getDropPartitionMessage(deCompress(messageBody));
   }
@@ -209,6 +216,11 @@ public class DeSerializer extends JSONMessageDeserializer {
   }
 
   @Override
+  public CommitCompactionMessage getCommitCompactionMessage(String messageBody) {
+    return super.getCommitCompactionMessage(deCompress(messageBody));
+  }
+
+  @Override
   public AcidWriteMessage getAcidWriteMessage(String messageBody) {
     return super.getAcidWriteMessage(deCompress(messageBody));
   }
@@ -231,5 +243,9 @@ public class DeSerializer extends JSONMessageDeserializer {
   @Override
   public DeletePartitionColumnStatMessage getDeletePartitionColumnStatMessage(String messageBody) {
     return super.getDeletePartitionColumnStatMessage(deCompress(messageBody));
+  }
+
+  public String deSerializeGenericString(String messageBody) {
+    return deCompress(messageBody);
   }
 }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2.columnar;
@@ -81,7 +82,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMNS, cols);
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES, ObjectInspectorUtils.getFieldTypes(oi));
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     OuterStruct outerStruct = new OuterStruct();
     outerStruct.mByte  = 1;
@@ -123,7 +124,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMNS, cols);
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES, ObjectInspectorUtils.getFieldTypes(oi));
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     OuterStruct outerStruct = new OuterStruct();
     outerStruct.mByte  = 101;
@@ -159,7 +160,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMNS, cols);
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES, ObjectInspectorUtils.getFieldTypes(oi));
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     OuterStruct outerStruct = new OuterStruct();
     outerStruct.mByte  = 101;
@@ -193,7 +194,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMNS, cols);
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES, ObjectInspectorUtils.getFieldTypes(oi));
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     OuterStruct outerStruct = new OuterStruct();
     BytesRefArrayWritable braw = (BytesRefArrayWritable) serde.serialize(outerStruct, oi);
@@ -218,7 +219,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMNS, cols);
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES, ObjectInspectorUtils.getFieldTypes(oi));
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     OuterStruct outerStruct = new OuterStruct();
     outerStruct.mByte  = 1;
@@ -285,7 +286,7 @@ public class TestLazyBinaryColumnarSerDe {
 
     // serialize some data in the schema before it is altered.
     LazyBinaryColumnarSerDe serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     BeforeStruct bs1 = new BeforeStruct();
     bs1.l1 = 1L;
@@ -303,7 +304,7 @@ public class TestLazyBinaryColumnarSerDe {
     props.setProperty(serdeConstants.LIST_COLUMN_TYPES,
         ObjectInspectorUtils.getFieldTypes(oi));
     serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     // serialize some data in the schema after it is altered.
     AfterStruct as = new AfterStruct();
@@ -315,7 +316,7 @@ public class TestLazyBinaryColumnarSerDe {
 
     // fetch operator
     serde = new LazyBinaryColumnarSerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), props, null);
+    serde.initialize(new Configuration(), props, null);
 
     //fetch the row inserted before schema is altered and verify
     LazyBinaryColumnarStruct struct1 = (LazyBinaryColumnarStruct) serde

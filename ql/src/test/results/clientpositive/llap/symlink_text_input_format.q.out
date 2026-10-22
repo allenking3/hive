@@ -1,7 +1,9 @@
 PREHOOK: query: DROP TABLE IF EXISTS symlink_text_input_format
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE IF EXISTS symlink_text_input_format
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: EXPLAIN
 CREATE TABLE symlink_text_input_format (key STRING, value STRING) STORED AS INPUTFORMAT 'org.apache.hadoop.hive.ql.io.SymlinkTextInputFormat' OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.IgnoreKeyTextOutputFormat'
 PREHOOK: type: CREATETABLE
@@ -222,7 +224,7 @@ STAGE PLANS:
                     Statistics: Num rows: 1 Data size: 720 Basic stats: COMPLETE Column stats: COMPLETE
                     Group By Operator
                       aggregations: count()
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0
                       Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
@@ -267,10 +269,12 @@ POSTHOOK: Input: default@symlink_text_input_format
 PREHOOK: query: DROP TABLE symlink_text_input_format
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@symlink_text_input_format
+PREHOOK: Output: database:default
 PREHOOK: Output: default@symlink_text_input_format
 POSTHOOK: query: DROP TABLE symlink_text_input_format
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@symlink_text_input_format
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@symlink_text_input_format
 PREHOOK: query: CREATE TABLE symlink_text_input_format (key STRING, value STRING) STORED AS INPUTFORMAT 'org.apache.hadoop.hive.ql.io.SymlinkTextInputFormat' OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.IgnoreKeyTextOutputFormat'
 PREHOOK: type: CREATETABLE
@@ -477,7 +481,7 @@ STAGE PLANS:
                     Statistics: Num rows: 1 Data size: 1000 Basic stats: COMPLETE Column stats: COMPLETE
                     Group By Operator
                       aggregations: count()
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0
                       Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
@@ -531,8 +535,10 @@ POSTHOOK: Input: default@symlink_text_input_format
 PREHOOK: query: DROP TABLE symlink_text_input_format
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@symlink_text_input_format
+PREHOOK: Output: database:default
 PREHOOK: Output: default@symlink_text_input_format
 POSTHOOK: query: DROP TABLE symlink_text_input_format
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@symlink_text_input_format
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@symlink_text_input_format

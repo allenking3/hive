@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.orc;
@@ -139,6 +140,7 @@ public class TestOrcRecordUpdater {
     Reader reader = OrcFile.createReader(bucketPath,
         new OrcFile.ReaderOptions(conf).filesystem(fs).maxLength(len));
     assertEquals(3, reader.getNumberOfRows());
+    reader.close();
 
     // read the second flush and make sure we see all 5 rows
     len = side.readLong();
@@ -185,6 +187,7 @@ public class TestOrcRecordUpdater {
     assertEquals("fifth",
         OrcRecordUpdater.getRow(row).getFieldValue(0).toString());
     assertEquals(false, rows.hasNext());
+    rows.close();
 
     // add one more record and close
     updater.insert(20, new MyRow("sixth"));
@@ -193,6 +196,7 @@ public class TestOrcRecordUpdater {
         new OrcFile.ReaderOptions(conf).filesystem(fs));
     assertEquals(6, reader.getNumberOfRows());
     assertEquals(6L, updater.getStats().getRowCount());
+    reader.close();
 
     assertEquals(false, fs.exists(sidePath));
   }
@@ -323,6 +327,7 @@ public class TestOrcRecordUpdater {
     assertNull(OrcRecordUpdater.getRow(row));
 
     assertEquals(false, rows.hasNext());
+    rows.close();
   }
 
   /*

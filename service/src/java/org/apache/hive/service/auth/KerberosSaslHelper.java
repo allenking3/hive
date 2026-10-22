@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hive.service.auth;
 
@@ -31,6 +32,7 @@ import org.apache.thrift.TProcessor;
 import org.apache.thrift.TProcessorFactory;
 import org.apache.thrift.transport.TSaslClientTransport;
 import org.apache.thrift.transport.TTransport;
+import org.apache.thrift.transport.TTransportException;
 
 public final class KerberosSaslHelper {
 
@@ -83,8 +85,8 @@ public final class KerberosSaslHelper {
         new TSaslClientTransport("GSSAPI", null, names[0], names[1], saslProps, null,
           underlyingTransport);
       return new TSubjectAssumingTransport(saslTransport);
-    } catch (SaslException se) {
-      throw new IOException("Could not instantiate SASL transport", se);
+    } catch (SaslException | TTransportException se) {
+      throw new IOException("Could not instantiate transport", se);
     }
   }
 

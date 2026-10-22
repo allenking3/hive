@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.streaming;
@@ -37,9 +38,11 @@ import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.cli.CliSessionState;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.txn.TxnDbUtil;
+import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
+import org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil;
 import org.apache.hadoop.hive.ql.DriverFactory;
 import org.apache.hadoop.hive.ql.IDriver;
 import org.apache.hadoop.hive.ql.processors.CommandProcessorException;
@@ -125,20 +128,21 @@ public class TestStreamingDynamicPartitioning {
   private final static String dbName2 = "testing2";
 
   public TestStreamingDynamicPartitioning() throws Exception {
-    conf = new HiveConf(this.getClass());
+    conf = new HiveConfForTest(getClass());
     conf.set("fs.raw.impl", RawFileSystem.class.getName());
     conf
       .setVar(HiveConf.ConfVars.HIVE_AUTHORIZATION_MANAGER,
         "org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory");
-    TxnDbUtil.setConfValues(conf);
+    TestTxnDbUtil.setConfValues(conf);
     conf.setBoolVar(HiveConf.ConfVars.METASTORE_EXECUTE_SET_UGI, true);
     conf.setBoolVar(HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY, true);
     dbFolder.create();
+    MetastoreConf.setVar(conf, MetastoreConf.ConfVars.WAREHOUSE, "raw://" + dbFolder.newFolder("warehouse"));
     loc1 = dbFolder.newFolder(dbName + ".db").toString();
 
     //1) Start from a clean slate (metastore)
-    TxnDbUtil.cleanDb(conf);
-    TxnDbUtil.prepDb(conf);
+    TestTxnDbUtil.cleanDb(conf);
+    TestTxnDbUtil.prepDb(conf);
 
     //2) obtain metastore clients
     msClient = new HiveMetaStoreClient(conf);
@@ -511,7 +515,7 @@ public class TestStreamingDynamicPartitioning {
     assertEquals("7\tfoo\t" + defaultPartitionName + "\t" + defaultPartitionName, res.get(6));
     assertEquals("8\tbar\t" + defaultPartitionName + "\t12", res.get(7));
 
-    defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     res = queryTable(driver, "show partitions " + (dbName + "." + tblName));
     assertEquals(5, res.size());
     assertTrue(res.contains("year=2018/month=2"));
@@ -571,7 +575,7 @@ public class TestStreamingDynamicPartitioning {
     assertTrue(exception.getMessage().equals("Transaction state is not OPEN. Missing beginTransaction?"));
 
     connection.close();
-    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     List<String> res = queryTable(driver, "select * from " + (dbName + "." + tblName) + " order by id");
     assertEquals(2, res.size());
     assertEquals("1\tfoo\tAsia\t" + defaultPartitionName, res.get(0));
@@ -705,7 +709,7 @@ public class TestStreamingDynamicPartitioning {
     assertNotNull(exception);
     assertTrue(exception.getMessage().endsWith("Streaming connection is closed already."));
 
-    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     List<String> res = queryTable(driver, "select * from " + (dbName + "." + tblName) + " order by id");
     assertEquals(2, res.size());
     assertEquals("1\tfoo\tAsia\t" + defaultPartitionName, res.get(0));
@@ -756,7 +760,7 @@ public class TestStreamingDynamicPartitioning {
     }
     assertNotNull(exception);
     assertTrue(exception.getMessage().equals("Streaming connection is closed already."));
-    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    String defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     List<String> res = queryTable(driver, "select * from " + (dbName + "." + tblName) + " order by id");
     assertEquals(3, res.size());
     assertEquals("1\tfoo\tAsia\t" + defaultPartitionName, res.get(0));

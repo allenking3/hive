@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql;
@@ -36,6 +37,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.nio.charset.StandardCharsets;
 
+import com.google.common.base.Strings;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.Schema;
 import org.apache.hadoop.hive.ql.ddl.DDLDesc.DDLDescWithWriteId;
 import org.apache.hadoop.hive.ql.exec.ConditionalTask;
@@ -47,6 +51,7 @@ import org.apache.hadoop.hive.ql.exec.mr.ExecDriver;
 import org.apache.hadoop.hive.ql.hooks.LineageInfo;
 import org.apache.hadoop.hive.ql.hooks.ReadEntity;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
 import org.apache.hadoop.hive.ql.parse.BaseSemanticAnalyzer;
 import org.apache.hadoop.hive.ql.parse.ColumnAccessInfo;
 import org.apache.hadoop.hive.ql.parse.TableAccessInfo;
@@ -105,18 +110,17 @@ public class QueryPlan implements Serializable {
 
   private String queryId;
   private org.apache.hadoop.hive.ql.plan.api.Query query;
-  private final Map<String, Map<String, Long>> counters =
-      new ConcurrentHashMap<String, Map<String, Long>>();
-  private final Set<String> done = Collections.newSetFromMap(new
-      ConcurrentHashMap<String, Boolean>());
-  private final Set<String> started = Collections.newSetFromMap(new
-      ConcurrentHashMap<String, Boolean>());
+  
+  private final Map<String, Map<String, Long>> counters = new ConcurrentHashMap<>();
+  private final Set<String> done = Collections.newSetFromMap(new ConcurrentHashMap<>());
+  private final Set<String> started = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   private QueryProperties queryProperties;
 
   private transient Long queryStartTime;
   private final HiveOperation operation;
   private final boolean acidResourcesInQuery;
+  private final boolean requiresOpenTransaction;
   private final Set<FileSinkDesc> acidSinks; // Note: both full-ACID and insert-only sinks.
   private final WriteEntity acidAnalyzeTable;
   private final DDLDescWithWriteId acidDdlDesc;
@@ -132,6 +136,7 @@ public class QueryPlan implements Serializable {
     this.reducerTimeStatsPerJobList = new ArrayList<>();
     this.operation = command;
     this.acidResourcesInQuery = false;
+    this.requiresOpenTransaction = false;
     this.acidSinks = Collections.emptySet();
     this.acidDdlDesc = null;
     this.acidAnalyzeTable = null;
@@ -164,6 +169,7 @@ public class QueryPlan implements Serializable {
     this.resultSchema = resultSchema;
     // TODO: all this ACID stuff should be in some sub-object
     this.acidResourcesInQuery = sem.hasTransactionalInQuery();
+    this.requiresOpenTransaction = sem.isRequiresOpenTransaction();
     this.acidSinks = sem.getAcidFileSinks();
     this.acidDdlDesc = sem.getAcidDdlDesc();
     this.acidAnalyzeTable = sem.getAcidAnalyzeTable();
@@ -178,6 +184,10 @@ public class QueryPlan implements Serializable {
     return acidResourcesInQuery;
   }
 
+  public boolean isRequiresOpenTransaction() {
+    return requiresOpenTransaction;
+  }
+
   public WriteEntity getAcidAnalyzeTable() {
     return acidAnalyzeTable;
   }
@@ -187,6 +197,87 @@ public class QueryPlan implements Serializable {
    */
   Set<FileSinkDesc> getAcidSinks() {
     return acidSinks;
+  }
+
+  /**
+   * This method is to get the proper statementId for the FileSinkOperator, a particular MoveTask belongs to.
+   * This is needed for ACID operations with direct insert on. In this case for listing the newly added or modified
+   * data the MoveTask has to know the statementId in order to list the files from the proper folder.
+   * Without knowing the statementId the files could be listed by multiple MoveTasks which could cause issues.
+   * To get the statementId, first the FSO has to be found in the acidSinks list. To do that, use
+   * the ACID operation, the path, the writeId and the moveTaskId.
+   *
+   * For queries with union all optimisation, there will be multiple FSOs with the same operation, writeId and moveTaskId.
+   * But one of these FSOs doesn't write data and its statementId is not valid, so if this FSO is selected and its statementId
+   * is returned, the file listing will find nothing. So check the acidSinks and if two of them have the same writeId, path
+   * and moveTaskId, then return -1 as statementId. With doing this, the file listing will find all partitions and files correctly.
+   *
+   * @param writeId
+   * @param moveTaskId
+   * @param acidOperation
+   * @param path
+   * @return The statementId from the FileSinkOperator with the given writeId, moveTaskId, operation and path.
+   * -1 if there are multiple FileSinkOperators with the same value of these parameters.
+   * The original statement id if there were no matching acid sinks.
+   */
+  public Integer getStatementIdForAcidWriteType(long writeId, String moveTaskId, AcidUtils.Operation acidOperation, Path path,
+                                                int originalStatementId) {
+    FileSinkDesc result = null;
+    for (FileSinkDesc acidSink : acidSinks) {
+      if (acidOperation.equals(acidSink.getAcidOperation()) && path.equals(acidSink.getDestPath())
+          && acidSink.getTableWriteId() == writeId
+          && (moveTaskId == null || acidSink.getMoveTaskId() == null || moveTaskId.equals(acidSink.getMoveTaskId()))) {
+        if (result != null) {
+          return -1;
+        }
+        result = acidSink;
+      }
+    }
+    if (result != null) {
+      return result.getStatementId();
+    } else {
+      // If there were no matching acid sinks proceed with the original statement id. This can happen, if we used the
+      // load data inpath command on an insert only table.
+      return originalStatementId;
+    }
+  }
+
+  /**
+   * This method is to get the dynamic partition specifications inserted by the FileSinkOperator, a particular MoveTask belongs to.
+   * This is needed for insert overwrite queries for ACID tables with direct insert on, so each MoveTask could list only the
+   * files inserted by the FSO the MoveTask belongs to. In case of an insert query, the writeId and statementId is enough to
+   * identify which delta directory was written by which FSO. But in case of insert overwrite, base directories will be created
+   * without statementIds, so we need the partition information to identify which folders to list.
+   *
+   * For queries with union all optimisation, there will be multiple FSOs with the same operation, writeId and moveTaskId.
+   * But one of these FSOs doesn't contain the partition specifications, so if this FSO is selected, the file listing will not be correct.
+   * So check the acidSinks and if two of them have the same writeId, path and moveTaskId, then return null.
+   * With doing this, the file listing will find all partitions and files correctly.
+   *
+   * @param writeId
+   * @param moveTaskId
+   * @param acidOperation
+   * @param path
+   * @return The dynamic partition specifications from the FileSinkOperator with the given writeId, moveTaskId, operation and path.
+   * null if there are multiple FileSinkOperators with the same value of these parameters.
+   */
+  public Map<String, List<Path>> getDynamicPartitionSpecs(long writeId, String moveTaskId, AcidUtils.Operation acidOperation, Path path) {
+    FileSinkDesc result = null;
+    for (FileSinkDesc acidSink : acidSinks) {
+      if (acidOperation.equals(acidSink.getAcidOperation()) && path.equals(acidSink.getDestPath())
+          && acidSink.getTableWriteId() == writeId
+          && (moveTaskId == null || acidSink.getMoveTaskId() == null || moveTaskId.equals(acidSink.getMoveTaskId()))) {
+        if (result != null) {
+          return null;
+        }
+        result = acidSink;
+      }
+    }
+    if (result != null) {
+      return result.getDynPartitionValues();
+    } else {
+      return null;
+    }
   }
 
   DDLDescWithWriteId getAcidDdlDesc() {
@@ -221,6 +312,37 @@ public class QueryPlan implements Serializable {
         .get(Calendar.MINUTE), gc.get(Calendar.SECOND))
         + "_"
         + UUID.randomUUID().toString();
+  }
+
+  /**
+   * Compute a compact per-query uniqueness tag used by the non-ACID rename branch of
+   * {@link Hive#mvFile} to make each concurrent writer's destination key unique on filesystems
+   * whose {@code rename} is not atomic-if-absent. The tag becomes the copy suffix
+   * ({@code basename_copy_<tag>}) in place of the numeric {@code _copy_N} counter.
+   * <p>
+   * Reads {@code hive.query.id} from the passed {@link HiveConf} and delegates to
+   * {@link QueryPlan#extractUniquenessTag(String)} for the actual UUID → hex derivation.
+   * The shape matches {@link ParsedOutputFileName}'s copy-index group so downstream filename
+   * parsing (taskId, attemptId, copyIndex) keeps working.
+   */
+  public static String extractUniquenessTag(HiveConf conf) {
+    String qid = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_QUERY_ID);
+    if (Strings.isNullOrEmpty(qid)) {
+      throw new IllegalStateException("hive.query.id is required to derive a unique destination name");
+    }
+    return QueryPlan.extractUniquenessTag(qid);
+  }
+
+  /**
+   * Extract a compact per-query uniqueness tag (16 lowercase hex chars) from a query id emitted
+   * by {@link #makeQueryId()}. The tag is the {@code getMostSignificantBits()} half of the UUID
+   * at the tail of the id, rendered as 16-char lowercase hex. Used by callers that need a stable
+   * per-query filename component — e.g. {@code Hive.mvFile}'s destination naming on filesystems
+   * whose {@code rename} is not atomic-if-absent.
+   */
+  public static String extractUniquenessTag(String queryId) {
+    UUID uuid = UUID.fromString(queryId.substring(queryId.lastIndexOf('_') + 1));
+    return String.format("%016x", uuid.getMostSignificantBits());
   }
 
   /**
@@ -667,32 +789,31 @@ public class QueryPlan implements Serializable {
 
   public String toThriftJSONString() throws IOException {
     org.apache.hadoop.hive.ql.plan.api.Query q = getQueryPlan();
-    TMemoryBuffer tmb = new TMemoryBuffer(q.toString().length() * 5);
-    TJSONProtocol oprot = new TJSONProtocol(tmb);
     try {
+      TMemoryBuffer tmb = new TMemoryBuffer(q.toString().length() * 5);
+      TJSONProtocol oprot = new TJSONProtocol(tmb);
       q.write(oprot);
+      return tmb.toString(StandardCharsets.UTF_8);
     } catch (TException e) {
       LOG.warn("Unable to produce query plan Thrift string", e);
       return q.toString();
     }
-    return tmb.toString(StandardCharsets.UTF_8);
+
   }
 
   public String toBinaryString() throws IOException {
     org.apache.hadoop.hive.ql.plan.api.Query q = getQueryPlan();
-    TMemoryBuffer tmb = new TMemoryBuffer(q.toString().length() * 5);
-    TBinaryProtocol oprot = new TBinaryProtocol(tmb);
     try {
+      TMemoryBuffer tmb = new TMemoryBuffer(q.toString().length() * 5);
+      TBinaryProtocol oprot = new TBinaryProtocol(tmb);
       q.write(oprot);
+      byte[] buf = new byte[tmb.length()];
+      tmb.read(buf, 0, tmb.length());
+      return new String(buf);
     } catch (TException e) {
       LOG.warn("Unable to produce query plan binary string", e);
       return q.toString();
     }
-    byte[] buf = new byte[tmb.length()];
-    tmb.read(buf, 0, tmb.length());
-    return new String(buf);
-    // return getQueryPlan().toString();
-
   }
 
   public void setStarted() {

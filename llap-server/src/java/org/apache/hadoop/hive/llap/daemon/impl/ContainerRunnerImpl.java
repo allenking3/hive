@@ -1,15 +1,20 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.daemon.impl;
@@ -40,7 +45,7 @@ import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.common.UgiFactory;
+import org.apache.hadoop.hive.llap.LlapUgiManager;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.apache.hadoop.hive.llap.DaemonId;
@@ -132,7 +137,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
   private final LlapSignerImpl signer;
   private final String clusterId;
   private final DaemonId daemonId;
-  private final UgiFactory fsUgiFactory;
+  private final LlapUgiManager llapUgiManager;
   private final SocketFactory socketFactory;
   private final boolean execUseFQDN;
 
@@ -140,7 +145,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
       AtomicReference<InetSocketAddress> localAddress,
       long totalMemoryAvailableBytes, LlapDaemonExecutorMetrics metrics,
       AMReporter amReporter, QueryTracker queryTracker, Scheduler<TaskRunnerCallable> executorService,
-      DaemonId daemonId, UgiFactory fsUgiFactory,
+      DaemonId daemonId, LlapUgiManager llapUgiManager,
       SocketFactory socketFactory) {
     super("ContainerRunnerImpl");
     Preconditions.checkState(numExecutors > 0,
@@ -151,7 +156,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
     this.amReporter = amReporter;
     this.signer = UserGroupInformation.isSecurityEnabled()
         ? new LlapSignerImpl(conf, daemonId.getClusterString()) : null;
-    this.fsUgiFactory = fsUgiFactory;
+    this.llapUgiManager = llapUgiManager;
     this.socketFactory = socketFactory;
 
     this.clusterId = daemonId.getClusterString();
@@ -187,7 +192,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
 
   @Override
   public void serviceStart() throws Exception {
-    LOG.info("Using ShufflePort: " + localShufflePort.get());
+    LOG.info("Using ShufflePort: {}", localShufflePort.get());
     AuxiliaryServiceHelper.setServiceDataIntoEnv(
         TezConstants.TEZ_SHUFFLE_HANDLER_SERVICE_ID,
         ByteBuffer.allocate(4).putInt(localShufflePort.get()), localEnv);
@@ -212,10 +217,8 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
     }
     queryTracker.registerDag(identifier.getApplicationIdString(),
         identifier.getDagIndex(), request.getUser(), credentials);
-    if (LOG.isInfoEnabled()) {
-      LOG.info("Application with  id={}, dagId={} registered",
-          identifier.getApplicationIdString(), identifier.getDagIndex());
-    }
+    LOG.info("Application with  id={}, dagId={} registered", identifier.getApplicationIdString(),
+        identifier.getDagIndex());
     return RegisterDagResponseProto.newBuilder().build();
   }
 
@@ -240,10 +243,8 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
 
     verifyJwtForExternalClient(request, qIdProto.getApplicationIdString(), fragmentIdString);
 
-    if (LOG.isInfoEnabled()) {
-      LOG.info("Queueing container for execution: fragemendId={}, {}",
-          fragmentIdString, stringifySubmitRequest(request, vertex));
-    }
+    LOG.info("Queueing container for execution: fragemendId={}, {}", fragmentIdString,
+        stringifySubmitRequest(request, vertex));
 
     HistoryLogger.logFragmentStart(qIdProto.getApplicationIdString(), request.getContainerIdString(),
         localAddress.get().getHostName(),
@@ -252,7 +253,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
         vertex.getVertexName(), request.getFragmentNumber(), request.getAttemptNumber());
 
     // This is the start of container-annotated logging.
-    final String dagId = attemptId.getTaskID().getVertexID().getDAGId().toString();
+    final String dagId = attemptId.getDAGID().toString();
     final String queryId = vertex.getHiveQueryId();
     final String fragmentId = LlapTezUtils.stripAttemptPrefix(fragmentIdString);
     MDC.put("dagId", dagId);
@@ -274,7 +275,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
       env.put(ApplicationConstants.Environment.USER.name(), vertex.getUser());
 
       TezTaskAttemptID taskAttemptId = TezTaskAttemptID.fromString(fragmentIdString);
-      int dagIdentifier = taskAttemptId.getTaskID().getVertexID().getDAGId().getId();
+      int dagIdentifier = taskAttemptId.getDAGID().getId();
 
       QueryIdentifier queryIdentifier = new QueryIdentifier(
           qIdProto.getApplicationIdString(), dagIdentifier);
@@ -296,7 +297,8 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
 
       // Lazy create conf object, as it gets expensive in this codepath.
       Supplier<Configuration> callableConf = () -> new Configuration(getConfig());
-      UserGroupInformation fsTaskUgi = fsUgiFactory == null ? null : fsUgiFactory.createUgi();
+      UserGroupInformation fsTaskUgi =
+          llapUgiManager.getOrCreateUgi(queryIdentifier, vertex.getUser(), credentials);
       boolean isGuaranteed = request.hasIsGuaranteed() && request.getIsGuaranteed();
 
       // enable the printing of (per daemon) LLAP task queue/run times via LLAP_TASK_TIME_SUMMARY
@@ -327,9 +329,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
           completionListener, socketFactory, isGuaranteed, wmCounters);
       submissionState = executorService.schedule(callable);
 
-      if (LOG.isInfoEnabled()) {
-        LOG.info("SubmissionState for {} : {} ", fragmentIdString, submissionState);
-      }
+      LOG.info("SubmissionState for {} : {} ", fragmentIdString, submissionState);
 
       if (submissionState.equals(Scheduler.SubmissionState.REJECTED)) {
         // Stop tracking the fragment and re-throw the error.
@@ -463,13 +463,13 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
     } catch (Exception e) {
       tokens = "error: " + e.getMessage();
     }
-    LOG.warn("Security error from " + userName + "; cluster " + clusterId + "; tokens " + tokens);
+    LOG.warn("Security error from {}; cluster {}; tokens {}", userName, clusterId, tokens);
   }
 
   @Override
   public SourceStateUpdatedResponseProto sourceStateUpdated(
       SourceStateUpdatedRequestProto request) throws IOException {
-    LOG.info("Processing state update: " + stringifySourceStateUpdateRequest(request));
+    LOG.info("Processing state update: {}", stringifySourceStateUpdateRequest(request));
     QueryIdentifier queryId =
         new QueryIdentifier(request.getQueryIdentifier().getApplicationIdString(),
             request.getQueryIdentifier().getDagIndex());
@@ -487,13 +487,14 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
     QueryInfo queryInfo = queryTracker.queryComplete(queryIdentifier, request.getDeleteDelay(), false);
     if (queryInfo != null) {
       List<QueryFragmentInfo> knownFragments = queryInfo.getRegisteredFragments();
-      LOG.info("DBG: Pending fragment count for completed query {} = {}", queryIdentifier,
+      LOG.info("Pending fragment count for completed query {} = {}", queryIdentifier,
         knownFragments.size());
       for (QueryFragmentInfo fragmentInfo : knownFragments) {
         LOG.info("Issuing killFragment for completed query {} {}", queryIdentifier,
           fragmentInfo.getFragmentIdentifierString());
         executorService.killFragment(fragmentInfo.getFragmentIdentifierString());
       }
+      llapUgiManager.closeAllForUgi(queryIdentifier);
       amReporter.queryComplete(queryIdentifier);
     }
     return QueryCompleteResponseProto.getDefaultInstance();
@@ -518,7 +519,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
       UpdateFragmentRequestProto request) throws IOException {
     String fragmentId = request.getFragmentIdentifierString();
     boolean isGuaranteed = request.hasIsGuaranteed() && request.getIsGuaranteed();
-    LOG.info("DBG: Received updateFragment request for {}", fragmentId);
+    LOG.info("Received updateFragment request for {}", fragmentId);
     // TODO: ideally, QueryTracker should have fragment-to-query mapping.
     QueryIdentifier queryId = executorService.findQueryByFragment(fragmentId);
     // checkPermissions returns false if query is not found, throws on failure.
@@ -613,10 +614,10 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
     LOG.info("Processing query failed notification for {}", queryIdentifier);
     List<QueryFragmentInfo> knownFragments;
     knownFragments = queryTracker.getRegisteredFragments(queryIdentifier);
-    LOG.info("DBG: Pending fragment count for failed query {} = {}", queryIdentifier,
+    LOG.info("Pending fragment count for failed query {} = {}", queryIdentifier,
         knownFragments.size());
     for (QueryFragmentInfo fragmentInfo : knownFragments) {
-      LOG.info("DBG: Issuing killFragment for failed query {} {}", queryIdentifier,
+      LOG.info("Issuing killFragment for failed query {} {}", queryIdentifier,
           fragmentInfo.getFragmentIdentifierString());
       executorService.killFragment(fragmentInfo.getFragmentIdentifierString());
     }
@@ -653,7 +654,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
           @Override
           public void onRemoval(
               RemovalNotification<String, BlockingQueue<UserGroupInformation>> notification) {
-            LOG.debug("Removing " + notification.getValue()  + " from pool.Pool size: " + ugiPool.size());
+            LOG.debug("Removing {} from pool. Pool size: {}", notification.getValue(), ugiPool.size());
           }
         }).expireAfterAccess(60 * 3, TimeUnit.MINUTES).build();
 
@@ -682,7 +683,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
               ugi.addToken(appToken);
               BlockingQueue<UserGroupInformation> queue = new LinkedBlockingQueue<>(numExecutors);
               queue.add(ugi);
-              LOG.debug("Added new ugi pool for " + appTokenIdentifier + ", Pool Size: ");
+              LOG.debug("Added new ugi pool for {}. Pool Size: {}", appTokenIdentifier, ugiPool.size());
               return queue;
             }
           });
@@ -693,7 +694,7 @@ public class ContainerRunnerImpl extends CompositeService implements ContainerRu
         ugi = UserGroupInformation.createRemoteUser(appTokenIdentifier);
         ugi.addToken(appToken);
         queue.offer(ugi);
-        LOG.info("Added new ugi for " + appTokenIdentifier + ". Pool size:" + ugiPool.size());
+        LOG.info("Added new ugi pool for {}. Pool Size: {}", appTokenIdentifier, ugiPool.size());
       }
       return ugi;
     }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -32,8 +33,13 @@ public enum HiveOperation {
   REPLDUMP("REPLDUMP", HiveParser.TOK_REPL_DUMP, new Privilege[]{Privilege.ALL}, null),
   REPLLOAD("REPLLOAD", HiveParser.TOK_REPL_LOAD, null, new Privilege[]{Privilege.ALL}),
   REPLSTATUS("REPLSTATUS", HiveParser.TOK_REPL_STATUS, new Privilege[]{Privilege.SELECT}, null),
+  CREATECATALOG("CREATECATALOG", HiveParser.TOK_CREATECATALOG, null, new Privilege[]{Privilege.CREATE}),
+  DROPCATALOG("DROPCATALOG", HiveParser.TOK_DROPCATALOG, null, new Privilege[]{Privilege.DROP}),
+  SWITCHCATALOG("SWITCHCATALOG", HiveParser.TOK_SWITCHCATALOG, null, null, true, false),
   CREATEDATABASE("CREATEDATABASE", HiveParser.TOK_CREATEDATABASE, null, new Privilege[]{Privilege.CREATE}),
+  CREATEDATACONNECTOR("CREATEDATACONNECTOR", HiveParser.TOK_CREATEDATACONNECTOR, null, new Privilege[]{Privilege.CREATE}),
   DROPDATABASE("DROPDATABASE", HiveParser.TOK_DROPDATABASE, null, new Privilege[]{Privilege.DROP}),
+  DROPDATACONNECTOR("DROPDATACONNECTOR", HiveParser.TOK_DROPDATACONNECTOR, null, new Privilege[]{Privilege.DROP}),
   SWITCHDATABASE("SWITCHDATABASE", HiveParser.TOK_SWITCHDATABASE, null, null, true, false),
   LOCKDB("LOCKDATABASE", HiveParser.TOK_LOCKDB, new Privilege[]{Privilege.LOCK}, null),
   UNLOCKDB("UNLOCKDATABASE", HiveParser.TOK_UNLOCKDB, new Privilege[]{Privilege.LOCK}, null),
@@ -43,6 +49,8 @@ public enum HiveOperation {
   MSCK("MSCK", HiveParser.TOK_MSCK, null, null),
   ALTERTABLE_ADDCOLS("ALTERTABLE_ADDCOLS", HiveParser.TOK_ALTERTABLE_ADDCOLS, new Privilege[]{Privilege.ALTER_METADATA},
       null),
+  ALTERTABLE_DROPCOL("ALTERTABLE_DROPCOL", HiveParser.TOK_ALTERTABLE_DROPCOL, new Privilege[]{Privilege.ALTER_METADATA},
+          null),
   ALTERTABLE_REPLACECOLS("ALTERTABLE_REPLACECOLS", HiveParser.TOK_ALTERTABLE_REPLACECOLS,
       new Privilege[]{Privilege.ALTER_METADATA}, null),
   ALTERTABLE_RENAMECOL("ALTERTABLE_RENAMECOL", HiveParser.TOK_ALTERTABLE_RENAMECOL,
@@ -55,6 +63,8 @@ public enum HiveOperation {
   ALTERTABLE_UPDATETABLESTATS("ALTERTABLE_UPDATETABLESTATS",
       new int[] {HiveParser.TOK_ALTERTABLE_UPDATESTATS, HiveParser.TOK_ALTERTABLE_UPDATECOLSTATS},
       new Privilege[]{Privilege.ALTER_METADATA}, null),
+  ALTERTABLE_DROP_COL_STATS("ALTERTABLE_DROP_COL_STATS", 
+      HiveParser.TOK_ALTERTABLE_DROPCOLSTATS, new Privilege[]{Privilege.ALTER_METADATA}, null),
   ALTERTABLE_RENAME("ALTERTABLE_RENAME", HiveParser.TOK_ALTERTABLE_RENAME, new Privilege[]{Privilege.ALTER_METADATA},
       null),
   ALTERTABLE_DROPPARTS("ALTERTABLE_DROPPARTS",
@@ -72,7 +82,18 @@ public enum HiveOperation {
   ALTERTABLE_PROPERTIES("ALTERTABLE_PROPERTIES",
       new int[] {HiveParser.TOK_ALTERTABLE_PROPERTIES, HiveParser.TOK_ALTERTABLE_DROPPROPERTIES},
       new Privilege[]{Privilege.ALTER_METADATA}, null),
+  ALTERTABLE_SET_WRITE_ORDER("ALTERTABLE_SET_WRITE_ORDER", HiveParser.TOK_ALTERTABLE_SET_WRITE_ORDER,
+      new Privilege[]{Privilege.ALTER_METADATA}, null),
   ALTERTABLE_OWNER("ALTERTABLE_OWNER", HiveParser.TOK_ALTERTABLE_OWNER, null, null),
+  ALTERTABLE_SETPARTSPEC("ALTERTABLE_SETPARTSPEC", HiveParser.TOK_ALTERTABLE_SETPARTSPEC, null, null),
+  ALTERTABLE_EXECUTE("ALTERTABLE_EXECUTE", HiveParser.TOK_ALTERTABLE_EXECUTE, null, null),
+  ALTERTABLE_CREATEBRANCH("ALTERTABLE_CREATEBRANCH", HiveParser.TOK_ALTERTABLE_CREATE_BRANCH, null, null),
+  ALTERTABLE_CREATETAG("ALTERTABLE_CREATETAG", HiveParser.TOK_ALTERTABLE_CREATE_TAG, null, null),
+  ALTERTABLE_DROPBRANCH("ALTERTABLE_DROPBRANCH", HiveParser.TOK_ALTERTABLE_DROP_BRANCH, null, null),
+  ALTERTABLE_RENAMEBRANCH("ALTERTABLE_RENAMEBRANCH", HiveParser.TOK_ALTERTABLE_RENAME_BRANCH, null, null),
+  ALTERTABLE_REPLACESNAPSHOTREF("ALTERTABLE_REPLACESNAPSHOTREF", HiveParser.TOK_ALTERTABLE_REPLACE_SNAPSHOTREF, null, null),
+  ALTERTABLE_DROPTAG("ALTERTABLE_DROPTAG", HiveParser.TOK_ALTERTABLE_DROP_TAG, null, null),
+  ALTERTABLE_CONVERT("ALTERTABLE_CONVERT", HiveParser.TOK_ALTERTABLE_CONVERT, null, null),
   ALTERTABLE_SERIALIZER("ALTERTABLE_SERIALIZER", HiveParser.TOK_ALTERTABLE_SERIALIZER,
       new Privilege[]{Privilege.ALTER_METADATA}, null),
   ALTERPARTITION_SERIALIZER("ALTERPARTITION_SERIALIZER", HiveParser.TOK_ALTERPARTITION_SERIALIZER,
@@ -91,7 +112,11 @@ public enum HiveOperation {
       new Privilege[]{Privilege.ALTER_METADATA}, null),
   ALTERPARTITION_BUCKETNUM("ALTERPARTITION_BUCKETNUM", HiveParser.TOK_ALTERPARTITION_BUCKETS,
       new Privilege[]{Privilege.ALTER_METADATA}, null),
+  SHOWCATALOGS("SHOWCATALOGS", HiveParser.TOK_SHOWCATALOGS, new Privilege[]{Privilege.SHOW_CATALOG}, null, true,
+      false),
   SHOWDATABASES("SHOWDATABASES", HiveParser.TOK_SHOWDATABASES, new Privilege[]{Privilege.SHOW_DATABASE}, null, true,
+      false),
+  SHOWDATACONNECTORS("SHOWDATACONNECTORS", HiveParser.TOK_SHOWDATACONNECTORS, new Privilege[]{Privilege.SHOW_DATABASE}, null, true,
       false),
   SHOWTABLES("SHOWTABLES", HiveParser.TOK_SHOWTABLES, null, null, true, false),
   SHOWCOLUMNS("SHOWCOLUMNS", HiveParser.TOK_SHOWCOLUMNS, null, null, true, false),
@@ -120,6 +145,8 @@ public enum HiveOperation {
       new Privilege[]{Privilege.DROP}),
   ALTER_MATERIALIZED_VIEW_REWRITE("ALTER_MATERIALIZED_VIEW_REWRITE", HiveParser.TOK_ALTER_MATERIALIZED_VIEW_REWRITE,
       new Privilege[]{Privilege.ALTER_METADATA}, null),
+  ALTER_MATERIALIZED_VIEW_REBUILD("ALTER_MATERIALIZED_VIEW_REBUILD", HiveParser.TOK_ALTER_MATERIALIZED_VIEW_REBUILD,
+          new Privilege[]{Privilege.SELECT}, new Privilege[]{Privilege.CREATE, Privilege.DROP},true, false),
   ALTERVIEW_PROPERTIES("ALTERVIEW_PROPERTIES",
       new int[] {HiveParser.TOK_ALTERVIEW_PROPERTIES, HiveParser.TOK_ALTERVIEW_DROPPROPERTIES}, null, null),
   LOCKTABLE("LOCKTABLE", HiveParser.TOK_LOCKTABLE, new Privilege[]{Privilege.LOCK}, null),
@@ -150,12 +177,19 @@ public enum HiveOperation {
       new Privilege[]{Privilege.CREATE}),
   QUERY("QUERY", HiveParser.TOK_QUERY, new Privilege[]{Privilege.SELECT},
       new Privilege[]{Privilege.ALTER_DATA, Privilege.CREATE}, true, false),
+  ALTERCATALOG_LOCATION("ALTERCATALOG_LOCATION", HiveParser.TOK_ALTERCATALOG_LOCATION, new Privilege[]{Privilege.ALTER_METADATA}, null),
+  ALTERCATALOG_PROPERTIES("ALTERCATALOG_PROPERTIES", HiveParser.TOK_ALTERCATALOG_PROPERTIES, null, null),
   ALTERDATABASE("ALTERDATABASE", HiveParser.TOK_ALTERDATABASE_PROPERTIES, null, null),
   ALTERDATABASE_OWNER("ALTERDATABASE_OWNER", HiveParser.TOK_ALTERDATABASE_OWNER, null, null),
   ALTERDATABASE_LOCATION("ALTERDATABASE_LOCATION",
       new int[] {HiveParser.TOK_ALTERDATABASE_LOCATION, HiveParser.TOK_ALTERDATABASE_MANAGEDLOCATION},
       new Privilege[]{Privilege.ALTER_DATA}, null),
+  DESCCATALOG("DESCCATALOG", HiveParser.TOK_DESCCATALOG, null, null),
   DESCDATABASE("DESCDATABASE", HiveParser.TOK_DESCDATABASE, null, null),
+  ALTERDATACONNECTOR("ALTERDATACONNECTOR", HiveParser.TOK_ALTERDATACONNECTOR_PROPERTIES, null, null),
+  ALTERDATACONNECTOR_OWNER("ALTERDATABASE_OWNER", HiveParser.TOK_ALTERDATACONNECTOR_OWNER, null, null),
+  ALTERDATACONNECTOR_URL("ALTERDATACONNECTOR_", HiveParser.TOK_ALTERDATACONNECTOR_URL, null, null),
+  DESCDATACONNECTOR("DESCDATACONNECTOR", HiveParser.TOK_DESCDATACONNECTOR, null, null),
   ALTERTABLE_MERGEFILES("ALTER_TABLE_MERGE", HiveParser.TOK_ALTERTABLE_MERGEFILES, new Privilege[] {Privilege.SELECT},
       new Privilege[] {Privilege.ALTER_DATA}),
   ALTERPARTITION_MERGEFILES("ALTER_PARTITION_MERGE", HiveParser.TOK_ALTERPARTITION_MERGEFILES,
@@ -186,6 +220,8 @@ public enum HiveOperation {
   ROLLBACK("ROLLBACK", HiveParser.TOK_ROLLBACK, null, null, true, true),
   SET_AUTOCOMMIT("SET AUTOCOMMIT", HiveParser.TOK_SET_AUTOCOMMIT, null, null, true, false),
   ABORT_TRANSACTIONS("ABORT TRANSACTIONS", HiveParser.TOK_ABORT_TRANSACTIONS, null, null, false, false),
+  ABORT_COMPACTION("ABORT COMPACTIONS", HiveParser.TOK_ABORT_COMPACTIONS, null, null, false, false),
+
   KILL_QUERY("KILL QUERY", HiveParser.TOK_KILL_QUERY, null, null),
   CREATE_RESOURCEPLAN("CREATE RESOURCEPLAN", HiveParser.TOK_CREATE_RP, null, null, false, false),
   SHOW_RESOURCEPLAN("SHOW RESOURCEPLAN", HiveParser.TOK_SHOW_RP, null, null, false, false),

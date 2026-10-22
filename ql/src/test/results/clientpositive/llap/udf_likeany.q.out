@@ -45,8 +45,10 @@ Function class:org.apache.hadoop.hive.ql.udf.generic.GenericUDFLikeAny
 Function type:BUILTIN
 PREHOOK: query: DROP TABLE IF EXISTS like_any_table
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE IF EXISTS like_any_table
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: CREATE TABLE like_any_table
 STORED AS TEXTFILE
 AS
@@ -71,8 +73,8 @@ POSTHOOK: type: CREATETABLE_AS_SELECT
 POSTHOOK: Input: _dummy_database@_dummy_table
 POSTHOOK: Output: database:default
 POSTHOOK: Output: default@like_any_table
-POSTHOOK: Lineage: like_any_table.company EXPRESSION []
-POSTHOOK: Lineage: like_any_table.pat EXPRESSION []
+POSTHOOK: Lineage: like_any_table.company SCRIPT []
+POSTHOOK: Lineage: like_any_table.pat SCRIPT []
 PREHOOK: query: select company from like_any_table where company like any ('%oo%','%in','fa%')
 PREHOOK: type: QUERY
 PREHOOK: Input: default@like_any_table

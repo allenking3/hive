@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore;
 
@@ -41,7 +42,7 @@ public interface IMetaStoreMetadataTransformer {
   * @param processorCapabilities A array of String capabilities received from the data processor
   * @param processorId String ID used for logging purpose.
   * @return Map A Map of transformed objects keyed by Table and value is list of required capabilities
-  * @throws HiveMetaException
+  * @throws MetaException
   */
   // TODO HiveMetaException or MetaException
   public Map<Table, List<String>> transform(List<Table> tables, List<String> processorCapabilities,
@@ -53,7 +54,7 @@ public interface IMetaStoreMetadataTransformer {
   * @param processorCapabilities A array of String capabilities received from the data processor
   * @param processorId String ID used for logging purpose.
   * @return Map A Map of transformed objects keyed by Partition and value is list of required capabilities
-  * @throws HiveMetaException
+  * @throws MetaException
   */
   // TODO HiveMetaException or MetaException
   public List<Partition> transformPartitions(List<Partition> parts, Table table, List<String> processorCapabilities,
@@ -64,7 +65,7 @@ public interface IMetaStoreMetadataTransformer {
   * @param processorCapabilities A array of String capabilities received from the data processor
   * @param processorId String ID used for logging purpose.
   * @return Table An altered Table based on the processor capabilities
-  * @throws HiveMetaException
+  * @throws MetaException
   */
  public Table transformCreateTable(Table table, List<String> processorCapabilities,
      String processorId) throws MetaException;
@@ -74,18 +75,18 @@ public interface IMetaStoreMetadataTransformer {
   * @param processorCapabilities A array of String capabilities received from the data processor
   * @param processorId String ID used for logging purpose.
   * @return Database An altered Database based on the processor capabilities
-  * @throws HiveMetaException
+  * @throws MetaException
   */
  public Database transformDatabase(Database db, List<String> processorCapabilities,
      String processorId) throws MetaException;
 
- /**
-  * @param table A table object to be transformed prior to the alteration of a table
+  /**
+  * @param oldTable A table object to be transformed prior to the alteration of a table
   * @param processorCapabilities A array of String capabilities received from the data processor
   * @param processorId String ID used for logging purpose.
   * @return Table An altered Table based on the processor capabilities
-  * @throws HiveMetaException
+  * @throws MetaException
   */
- public Table transformAlterTable(Table table, List<String> processorCapabilities,
+  public Table transformAlterTable(Table oldTable, Table newTable, List<String> processorCapabilities,
      String processorId) throws MetaException;
 }

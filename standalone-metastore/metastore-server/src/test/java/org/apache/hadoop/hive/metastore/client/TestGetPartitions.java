@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.metastore.client;
@@ -76,19 +77,17 @@ public class TestGetPartitions extends MetaStoreClientTest {
     client = metaStore.getClient();
 
     // Clean up the database
-    client.dropDatabase(DB_NAME, true, true, true);
     createDB(DB_NAME);
   }
 
   @After
   public void tearDown() throws Exception {
     try {
-      if (client != null) {
-        try {
-          client.close();
-        } catch (Exception e) {
-          // HIVE-19729: Shallow the exceptions based on the discussion in the Jira
-        }
+      client.dropDatabase(DB_NAME, true, true, true);
+      try {
+        client.close();
+      } catch (Exception e) {
+        // HIVE-19729: Shallow the exceptions based on the discussion in the Jira
       }
     } finally {
       client = null;
@@ -416,7 +415,7 @@ public class TestGetPartitions extends MetaStoreClientTest {
       createTable3PartCols1Part(client);
       client.getPartitionsByNames(null, TABLE_NAME, Lists.newArrayList("yyyy=2000/mm=01/dd=02"));
       fail("Should have thrown exception");
-    } catch (NullPointerException | TTransportException e) {
+    } catch (NullPointerException | TTransportException | MetaException e) {
       //TODO: should not throw different exceptions for different HMS deployment types
     }
   }
@@ -590,11 +589,16 @@ public class TestGetPartitions extends MetaStoreClientTest {
     Assert.assertEquals(catName, fetched.getCatName());
     Assert.assertEquals("a0", fetched.getValues().get(0));
 
-    List<Partition> fetchedParts = client.getPartitionsByNames(catName, dbName, tableName,
+    GetPartitionsByNamesRequest req = MetaStoreUtils.convertToGetPartitionsByNamesRequest(
+        MetaStoreUtils.prependCatalogToDbName(catName, dbName, metaStore.getConf()),
+        tableName,
         Arrays.asList("partcol=a0", "partcol=a1"));
+    List<Partition> fetchedParts = client.getPartitionsByNames(req).getPartitions();
     Assert.assertEquals(2, fetchedParts.size());
     Set<String> vals = new HashSet<>(fetchedParts.size());
-    for (Partition part : fetchedParts) vals.add(part.getValues().get(0));
+    for (Partition part : fetchedParts) {
+      vals.add(part.getValues().get(0));
+    }
     Assert.assertTrue(vals.contains("a0"));
     Assert.assertTrue(vals.contains("a1"));
 
@@ -626,8 +630,11 @@ public class TestGetPartitions extends MetaStoreClientTest {
   @ConditionalIgnoreOnSessionHiveMetastoreClient
   public void getPartitionsByNamesBogusCatalog() throws TException {
     createTable3PartCols1Part(client);
-    client.getPartitionsByNames("bogus", DB_NAME, TABLE_NAME,
+    GetPartitionsByNamesRequest req = MetaStoreUtils.convertToGetPartitionsByNamesRequest(
+        MetaStoreUtils.prependCatalogToDbName("bogus", DB_NAME, metaStore.getConf()),
+        TABLE_NAME,
         Collections.singletonList("yyyy=1997/mm=05/dd=16"));
+    client.getPartitionsByNames(req);
   }
 
 }

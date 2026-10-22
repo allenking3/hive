@@ -1,11 +1,15 @@
 PREHOOK: query: drop table if exists mydim
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists mydim
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop table if exists updates_staging_table
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists updates_staging_table
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop view if exists updates_staging_view
 PREHOOK: type: DROPVIEW
 POSTHOOK: query: drop view if exists updates_staging_view
@@ -94,13 +98,14 @@ POSTHOOK: Input: default@mydim
 #### A masked pattern was here ####
 1	bob	95136	true
 2	joe	70068	true
-Warning: Shuffle Join MERGEJOIN[38][tables = [$hdt$_0, $hdt$_1, $hdt$_2]] in Stage 'Reducer 3' is a cross product
+Warning: Shuffle Join MERGEJOIN[42][tables = [$hdt$_0, $hdt$_1, $hdt$_2]] in Stage 'Reducer 3' is a cross product
 PREHOOK: query: update mydim set is_current = false
 where mydim.key not in(select kv from updates_staging_view)
 PREHOOK: type: QUERY
 PREHOOK: Input: default@mydim
 PREHOOK: Input: default@updates_staging_table
 PREHOOK: Input: default@updates_staging_view
+PREHOOK: Output: default@mydim
 PREHOOK: Output: default@mydim
 POSTHOOK: query: update mydim set is_current = false
 where mydim.key not in(select kv from updates_staging_view)
@@ -109,6 +114,11 @@ POSTHOOK: Input: default@mydim
 POSTHOOK: Input: default@updates_staging_table
 POSTHOOK: Input: default@updates_staging_view
 POSTHOOK: Output: default@mydim
+POSTHOOK: Output: default@mydim
+POSTHOOK: Lineage: mydim.is_current SIMPLE []
+POSTHOOK: Lineage: mydim.key SIMPLE [(mydim)mydim.FieldSchema(name:key, type:int, comment:null), ]
+POSTHOOK: Lineage: mydim.name SIMPLE [(mydim)mydim.FieldSchema(name:name, type:string, comment:null), ]
+POSTHOOK: Lineage: mydim.zip SIMPLE [(mydim)mydim.FieldSchema(name:zip, type:string, comment:null), ]
 PREHOOK: query: select * from mydim order by key
 PREHOOK: type: QUERY
 PREHOOK: Input: default@mydim
@@ -126,6 +136,7 @@ PREHOOK: Input: default@mydim
 PREHOOK: Input: default@updates_staging_table
 PREHOOK: Input: default@updates_staging_view
 PREHOOK: Output: default@mydim
+PREHOOK: Output: default@mydim
 POSTHOOK: query: update mydim set name = 'Olaf'
 where mydim.key in(select kv from updates_staging_view)
 POSTHOOK: type: QUERY
@@ -133,6 +144,11 @@ POSTHOOK: Input: default@mydim
 POSTHOOK: Input: default@updates_staging_table
 POSTHOOK: Input: default@updates_staging_view
 POSTHOOK: Output: default@mydim
+POSTHOOK: Output: default@mydim
+POSTHOOK: Lineage: mydim.is_current SIMPLE [(mydim)mydim.FieldSchema(name:is_current, type:boolean, comment:null), ]
+POSTHOOK: Lineage: mydim.key SIMPLE [(mydim)mydim.FieldSchema(name:key, type:int, comment:null), ]
+POSTHOOK: Lineage: mydim.name SIMPLE []
+POSTHOOK: Lineage: mydim.zip SIMPLE [(mydim)mydim.FieldSchema(name:zip, type:string, comment:null), ]
 PREHOOK: query: select * from mydim order by key
 PREHOOK: type: QUERY
 PREHOOK: Input: default@mydim

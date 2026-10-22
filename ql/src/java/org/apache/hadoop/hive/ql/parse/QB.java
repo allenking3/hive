@@ -9,16 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -50,6 +52,7 @@ public class QB {
   private HashMap<String, QBExpr> aliasToSubqExpr;
   private HashMap<String, Table> viewAliasToViewSchema;
   private HashMap<String, Map<String, String>> aliasToProps;
+  private HashMap<String, QBSystemVersion> aliasToSystemVersion;
   private List<String> aliases;
   private QBParseInfo qbp;
   private QBMetaData qbm;
@@ -132,6 +135,7 @@ public class QB {
     destToWindowingSpec = new LinkedHashMap<String, WindowingSpec>();
     id = getAppendedAliasFromId(outer_id, alias);
     aliasInsideView = new HashSet<>();
+    aliasToSystemVersion = new LinkedHashMap<>();
   }
 
   // For sub-queries, the id. and alias should be appended since same aliases can be re-used
@@ -192,6 +196,10 @@ public class QB {
     aliasToProps.put(alias.toLowerCase(), props);
   }
 
+  public void setSystemVersion(String alias, QBSystemVersion asOf) {
+    aliasToSystemVersion.put(alias.toLowerCase(), asOf);
+  }
+
   public void addAlias(String alias) {
     if (!aliases.contains(alias.toLowerCase())) {
       aliases.add(alias.toLowerCase());
@@ -250,6 +258,10 @@ public class QB {
     return aliasToProps.get(alias.toLowerCase());
   }
 
+  public QBSystemVersion getSystemVersionForAlias(String alias) {
+    return aliasToSystemVersion.get(alias.toLowerCase());
+  }
+
   public void rewriteViewToSubq(String alias, String viewName, QBExpr qbexpr, Table tab) {
     alias = alias.toLowerCase();
     String tableName = aliasToTabs.remove(alias);
@@ -305,6 +317,20 @@ public class QB {
 
   public boolean hasTableSample(String alias) {
     return qbp.getTabSample(alias) != null;
+  }
+  
+  public boolean hasTableSampleRecursive() {
+    if (!qbp.getNameToSample().isEmpty()) {
+      return true;
+    }
+    
+    for (QBExpr qbExpr: aliasToSubq.values()) {
+      if (qbExpr.getQB() != null && qbExpr.getQB().hasTableSampleRecursive()) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   public CreateTableDesc getTableDesc() {
@@ -476,7 +502,7 @@ public class QB {
     QBExpr qbexpr = new QBExpr(alias);
 
     ASTNode subqref = (ASTNode) expressionTree.getChild(1);
-    semanticAnalyzer.doPhase1QBExpr(subqref, qbexpr, getId(), alias, isInsideView());
+    semanticAnalyzer.doPhase1QBExpr(subqref, qbexpr, getId(), alias, isInsideView(), null);
 
     // Insert this map into the stats
     aliasToSubqExpr.put(alias, qbexpr);

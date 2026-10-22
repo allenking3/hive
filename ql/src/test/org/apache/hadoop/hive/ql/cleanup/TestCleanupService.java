@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.cleanup;
@@ -70,12 +71,11 @@ public class TestCleanupService {
     testDeleteManyFiles(SyncCleanupService.INSTANCE, 10);
   }
 
-  @Ignore("HIVE-24345")
   @Test
   public void testEventualCleanupService_finishesCleanupBeforeExit() throws IOException, InterruptedException {
-    EventualCleanupService cleanupService = new EventualCleanupService(4, 1000);
-    testDeleteManyFiles(cleanupService, 1000, true);
-    assertTrue(cleanupService.await(1, TimeUnit.SECONDS));
+    EventualCleanupService cleanupService = new EventualCleanupService(4, 400);
+    testDeleteManyFiles(cleanupService, 400, true);
+    assertTrue(cleanupService.await(1, TimeUnit.MINUTES));
   }
 
   private void testDeleteManyFiles(CleanupService cleanupService, int n) throws IOException, InterruptedException {

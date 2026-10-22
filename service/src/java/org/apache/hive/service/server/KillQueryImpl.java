@@ -9,14 +9,17 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.service.server;
+
+import java.util.Arrays;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -26,8 +29,11 @@ import org.apache.hadoop.hive.ql.ddl.process.kill.KillQueriesOperation;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HiveAuthzContext;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HiveOperationType;
+import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject;
+import org.apache.hadoop.hive.ql.security.authorization.plugin.HivePrivilegeObject.HivePrivilegeObjectType;
 import org.apache.hadoop.hive.ql.session.KillQuery;
 import org.apache.hadoop.hive.ql.session.SessionState;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.ApplicationsRequestScope;
 import org.apache.hadoop.yarn.api.protocolrecords.GetApplicationsRequest;
@@ -58,7 +64,6 @@ public class KillQueryImpl implements KillQuery {
   private final KillQueryZookeeperManager killQueryZookeeperManager;
 
   private enum TagOrId {TAG, ID, UNKNOWN}
-
 
   public KillQueryImpl(OperationManager operationManager, KillQueryZookeeperManager killQueryZookeeperManager) {
     this.operationManager = operationManager;
@@ -116,11 +121,22 @@ public class KillQueryImpl implements KillQuery {
 
   private static boolean isAdmin() {
     boolean isAdmin = false;
-    if (SessionState.get().getAuthorizerV2() != null) {
+    // RANGER-1851
+    HivePrivilegeObject serviceNameObj = new HivePrivilegeObject(HivePrivilegeObjectType.SERVICE_NAME, "hiveservice");
+    SessionState ss = SessionState.get();
+    if (!HiveConf.getBoolVar(ss.getConf(), HiveConf.ConfVars.HIVE_AUTHORIZATION_ENABLED)) {
+      // If authorization is disabled, hs2 process owner should have kill privileges
       try {
-        SessionState.get().getAuthorizerV2()
-            .checkPrivileges(HiveOperationType.KILL_QUERY, new ArrayList<>(),
-                new ArrayList<>(), new HiveAuthzContext.Builder().build());
+        return StringUtils.equals(ss.getUserName(), UserGroupInformation.getCurrentUser().getShortUserName());
+      } catch (IOException e) {
+        LOG.warn("Unable to check for admin privileges", e);
+        return false;
+      }
+    }
+    if (ss.getAuthorizerV2() != null) {
+      try {
+        ss.getAuthorizerV2().checkPrivileges(HiveOperationType.KILL_QUERY, Arrays.asList(serviceNameObj), new ArrayList<HivePrivilegeObject>(),
+            new HiveAuthzContext.Builder().build());
         isAdmin = true;
       } catch (Exception e) {
         LOG.warn("Error while checking privileges", e);
@@ -150,17 +166,16 @@ public class KillQueryImpl implements KillQuery {
   }
 
   @Override
-  public void killQuery(String queryIdOrTag, String errMsg, HiveConf conf) throws HiveException {
-    killQuery(queryIdOrTag, errMsg, conf, false, SessionState.get().getUserName(), isAdmin());
+  public void killQuery(String queryIdOrTag, String errMsg, HiveConf conf, boolean isYarn) throws HiveException {
+    killQuery(queryIdOrTag, errMsg, conf, false, SessionState.get().getUserName(), isAdmin(), isYarn);
   }
 
-  public void killLocalQuery(String queryIdOrTag, HiveConf conf, String doAs, boolean doAsAdmin)
-      throws HiveException {
-    killQuery(queryIdOrTag, null, conf, true, doAs, doAsAdmin);
+  public void killLocalQuery(String queryIdOrTag, HiveConf conf, String doAs, boolean doAsAdmin) throws HiveException {
+    killQuery(queryIdOrTag, null, conf, true, doAs, doAsAdmin, true);
   }
 
   private void killQuery(String queryIdOrTag, String errMsg, HiveConf conf, boolean onlyLocal, String doAs,
-      boolean doAsAdmin) throws HiveException {
+      boolean doAsAdmin, boolean isYarn) throws HiveException {
     errMsg = StringUtils.defaultString(errMsg, KillQueriesOperation.KILL_QUERY_MESSAGE);
     TagOrId tagOrId = TagOrId.UNKNOWN;
     Set<Operation> operationsToKill = new HashSet<>();
@@ -175,8 +190,8 @@ public class KillQueryImpl implements KillQuery {
         LOG.debug("Query found with tag: {}", queryIdOrTag);
       }
     }
-    if (!operationsToKill.isEmpty()){
-      killOperations(queryIdOrTag, errMsg, conf, tagOrId, operationsToKill, doAs, doAsAdmin);
+    if (!operationsToKill.isEmpty()) {
+      killOperations(queryIdOrTag, errMsg, conf, tagOrId, operationsToKill, doAs, doAsAdmin, isYarn);
     } else {
       LOG.debug("Query not found with tag/id: {}", queryIdOrTag);
       if (!onlyLocal && killQueryZookeeperManager != null &&
@@ -196,7 +211,7 @@ public class KillQueryImpl implements KillQuery {
   }
 
   private void killOperations(String queryIdOrTag, String errMsg, HiveConf conf, TagOrId tagOrId,
-      Set<Operation> operationsToKill, String doAs, boolean doAsAdmin) throws HiveException {
+      Set<Operation> operationsToKill, String doAs, boolean doAsAdmin, boolean isYarn) throws HiveException {
     try {
       switch (tagOrId) {
       case ID:
@@ -207,7 +222,9 @@ public class KillQueryImpl implements KillQuery {
           if (queryTag == null) {
             queryTag = queryIdOrTag;
           }
-          killChildYarnJobs(conf, queryTag, doAs, doAsAdmin);
+          if (isYarn) {
+            killChildYarnJobs(conf, queryTag, doAs, doAsAdmin);
+          }
         } else {
           // no privilege to cancel
           throw new HiveSQLException("No privilege to kill query id");
@@ -223,7 +240,9 @@ public class KillQueryImpl implements KillQuery {
         if (numCanceled == 0) {
           throw new HiveSQLException("No privilege to kill query tag");
         } else {
-          killChildYarnJobs(conf, queryIdOrTag, doAs, doAsAdmin);
+          if (isYarn) {
+            killChildYarnJobs(conf, queryIdOrTag, doAs, doAsAdmin);
+          }
         }
         break;
       case UNKNOWN:

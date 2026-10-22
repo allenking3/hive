@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.dump.io;
 
@@ -56,7 +57,7 @@ public class FunctionSerializer implements JsonWriter.Serializer {
   @Override
   public void writeTo(JsonWriter writer, ReplicationSpec additionalPropertiesProvider)
       throws SemanticException, IOException, MetaException {
-    TSerializer serializer = new TSerializer(new TJSONProtocol.Factory());
+
     List<ResourceUri> resourceUris = new ArrayList<>();
     if (function.getResourceUris() != null) {
       for (ResourceUri uri : function.getResourceUris()) {
@@ -90,13 +91,14 @@ public class FunctionSerializer implements JsonWriter.Serializer {
     }
 
     try {
+      TSerializer serializer = new TSerializer(new TJSONProtocol.Factory());
       //This is required otherwise correct work object on repl load wont be created.
       writer.jsonGenerator.writeStringField(ReplicationSpec.KEY.REPL_SCOPE.toString(),
           "all");
-      writer.jsonGenerator.writeStringField(ReplicationSpec.KEY.CURR_STATE_ID.toString(),
+      writer.jsonGenerator.writeStringField(ReplicationSpec.KEY.CURR_STATE_ID_SOURCE.toString(),
           additionalPropertiesProvider.getCurrentReplicationState());
       writer.jsonGenerator
-          .writeStringField(FIELD_NAME, serializer.toString(copyObj, UTF_8));
+          .writeStringField(FIELD_NAME, serializer.toString(copyObj));
     } catch (TException e) {
       throw new SemanticException(ErrorMsg.ERROR_SERIALIZE_METASTORE.getMsg(), e);
     }

@@ -1,7 +1,9 @@
 PREHOOK: query: drop table intermediate_n0
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table intermediate_n0
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table intermediate_n0(key int) partitioned by (p int) stored as orc
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -39,8 +41,10 @@ POSTHOOK: Output: default@intermediate_n0@p=457
 POSTHOOK: Lineage: ###Masked###
 PREHOOK: query: drop table part_mm_n0
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table part_mm_n0
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table part_mm_n0(key int) partitioned by (key_mm int) stored as orc tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -100,37 +104,37 @@ STAGE PLANS:
                       outputColumnNames: key, key_mm
                       Statistics: Num rows: 6 Data size: 48 Basic stats: COMPLETE Column stats: COMPLETE
                       Group By Operator
-                        aggregations: min(key), max(key), count(1), count(key), compute_bit_vector(key, 'hll')
+                        aggregations: min(key), max(key), count(1), count(key), compute_bit_vector_hll(key)
                         keys: key_mm (type: int)
-                        minReductionHashAggr: 0.5
+                        minReductionHashAggr: 0.4
                         mode: hash
                         outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5
-                        Statistics: Num rows: 3 Data size: 516 Basic stats: COMPLETE Column stats: COMPLETE
+                        Statistics: Num rows: 6 Data size: 1032 Basic stats: COMPLETE Column stats: COMPLETE
                         Reduce Output Operator
                           key expressions: _col0 (type: int)
                           null sort order: z
                           sort order: +
                           Map-reduce partition columns: _col0 (type: int)
-                          Statistics: Num rows: 3 Data size: 516 Basic stats: COMPLETE Column stats: COMPLETE
+                          Statistics: Num rows: 6 Data size: 1032 Basic stats: COMPLETE Column stats: COMPLETE
                           value expressions: _col1 (type: int), _col2 (type: int), _col3 (type: bigint), _col4 (type: bigint), _col5 (type: binary)
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: all inputs
         Reducer 2 
-            Execution mode: llap
+            Execution mode: vectorized, llap
             Reduce Operator Tree:
               Group By Operator
-                aggregations: min(VALUE._col0), max(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector(VALUE._col4)
+                aggregations: min(VALUE._col0), max(VALUE._col1), count(VALUE._col2), count(VALUE._col3), compute_bit_vector_hll(VALUE._col4)
                 keys: KEY._col0 (type: int)
                 mode: mergepartial
                 outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5
-                Statistics: Num rows: 3 Data size: 516 Basic stats: COMPLETE Column stats: COMPLETE
+                Statistics: Num rows: 6 Data size: 1032 Basic stats: COMPLETE Column stats: COMPLETE
                 Select Operator
                   expressions: 'LONG' (type: string), UDFToLong(_col1) (type: bigint), UDFToLong(_col2) (type: bigint), (_col3 - _col4) (type: bigint), COALESCE(ndv_compute_bit_vector(_col5),0) (type: bigint), _col5 (type: binary), _col0 (type: int)
                   outputColumnNames: _col0, _col1, _col2, _col3, _col4, _col5, _col6
-                  Statistics: Num rows: 3 Data size: 804 Basic stats: COMPLETE Column stats: COMPLETE
+                  Statistics: Num rows: 6 Data size: 1608 Basic stats: COMPLETE Column stats: COMPLETE
                   File Output Operator
                     compressed: false
-                    Statistics: Num rows: 3 Data size: 804 Basic stats: COMPLETE Column stats: COMPLETE
+                    Statistics: Num rows: 6 Data size: 1608 Basic stats: COMPLETE Column stats: COMPLETE
                     table:
                         input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                         output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
@@ -289,15 +293,19 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table part_mm_n0
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@part_mm_n0
+PREHOOK: Output: database:default
 PREHOOK: Output: default@part_mm_n0
 POSTHOOK: query: drop table part_mm_n0
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@part_mm_n0
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@part_mm_n0
 PREHOOK: query: drop table simple_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table simple_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table simple_mm(key int) stored as orc tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -387,15 +395,19 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table simple_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@simple_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@simple_mm
 POSTHOOK: query: drop table simple_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@simple_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@simple_mm
 PREHOOK: query: drop table dp_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table dp_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table dp_mm (key int) partitioned by (key1 string, key2 int) stored as orc
   tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -460,10 +472,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table dp_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@dp_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@dp_mm
 POSTHOOK: query: drop table dp_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@dp_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@dp_mm
 PREHOOK: query: create table union_mm(id int)  tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -684,10 +698,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table union_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@union_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@union_mm
 POSTHOOK: query: drop table union_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@union_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@union_mm
 PREHOOK: query: create table partunion_mm(id int) partitioned by (key int) tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -786,10 +802,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table partunion_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@partunion_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@partunion_mm
 POSTHOOK: query: drop table partunion_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@partunion_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@partunion_mm
 PREHOOK: query: create table skew_mm(k1 int, k2 int, k4 int) skewed by (k1, k4) on ((0,0),(1,1),(2,2),(3,3))
  stored as directories tblproperties ("transactional"="true", "transactional_properties"="insert_only")
@@ -837,10 +855,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table skew_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@skew_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@skew_mm
 POSTHOOK: query: drop table skew_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@skew_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@skew_mm
 PREHOOK: query: create table skew_dp_union_mm(k1 int, k2 int, k4 int) partitioned by (k3 int) 
 skewed by (k1, k4) on ((0,0),(1,1),(2,2),(3,3)) stored as directories tblproperties ("transactional"="true", "transactional_properties"="insert_only")
@@ -967,10 +987,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table skew_dp_union_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@skew_dp_union_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@skew_dp_union_mm
 POSTHOOK: query: drop table skew_dp_union_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@skew_dp_union_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@skew_dp_union_mm
 PREHOOK: query: create table merge0_mm (id int) stored as orc tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -1047,10 +1069,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table merge0_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@merge0_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@merge0_mm
 POSTHOOK: query: drop table merge0_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@merge0_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@merge0_mm
 PREHOOK: query: create table merge2_mm (id int) tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -1127,10 +1151,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table merge2_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@merge2_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@merge2_mm
 POSTHOOK: query: drop table merge2_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@merge2_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@merge2_mm
 PREHOOK: query: create table merge1_mm (id int) partitioned by (key int) stored as orc tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -1253,15 +1279,19 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table merge1_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@merge1_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@merge1_mm
 POSTHOOK: query: drop table merge1_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@merge1_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@merge1_mm
 PREHOOK: query: drop table ctas0_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table ctas0_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table ctas0_mm tblproperties ("transactional"="true", "transactional_properties"="insert_only") as select * from intermediate_n0
 PREHOOK: type: CREATETABLE_AS_SELECT
 PREHOOK: Input: default@intermediate_n0
@@ -1297,15 +1327,19 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table ctas0_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@ctas0_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@ctas0_mm
 POSTHOOK: query: drop table ctas0_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@ctas0_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@ctas0_mm
 PREHOOK: query: drop table ctas1_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table ctas1_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table ctas1_mm tblproperties ("transactional"="true", "transactional_properties"="insert_only") as
   select * from intermediate_n0 union all select * from intermediate_n0
 PREHOOK: type: CREATETABLE_AS_SELECT
@@ -1349,19 +1383,25 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table ctas1_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@ctas1_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@ctas1_mm
 POSTHOOK: query: drop table ctas1_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@ctas1_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@ctas1_mm
 PREHOOK: query: drop table multi0_1_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table multi0_1_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop table multi0_2_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table multi0_2_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table multi0_1_mm (key int, key2 int)  tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -1491,23 +1531,29 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table multi0_1_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@multi0_1_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@multi0_1_mm
 POSTHOOK: query: drop table multi0_1_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@multi0_1_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@multi0_1_mm
 PREHOOK: query: drop table multi0_2_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@multi0_2_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@multi0_2_mm
 POSTHOOK: query: drop table multi0_2_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@multi0_2_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@multi0_2_mm
 PREHOOK: query: drop table multi1_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table multi1_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table multi1_mm (key int, key2 int) partitioned by (p int) tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -1649,8 +1695,6 @@ POSTHOOK: Lineage: ###Masked###
 POSTHOOK: Lineage: ###Masked###
 POSTHOOK: Lineage: ###Masked###
 POSTHOOK: Lineage: ###Masked###
-POSTHOOK: Lineage: ###Masked###
-POSTHOOK: Lineage: ###Masked###
 PREHOOK: query: select key, key2, p from multi1_mm order by key, key2, p
 PREHOOK: type: QUERY
 PREHOOK: Input: default@multi1_mm
@@ -1786,15 +1830,19 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table multi1_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@multi1_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@multi1_mm
 POSTHOOK: query: drop table multi1_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@multi1_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@multi1_mm
 PREHOOK: query: drop table stats_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table stats_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table stats_mm(key int)  tblproperties("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -1839,7 +1887,7 @@ Table Parameters:
 	numFiles            	3                   
 	numRows             	6                   
 	rawDataSize         	13                  
-	totalSize           	19                  
+	totalSize           	#Masked#
 	transactional       	true                
 	transactional_properties	insert_only         
 #### A masked pattern was here ####
@@ -1890,7 +1938,7 @@ Table Parameters:
 	numFiles            	6                   
 	numRows             	12                  
 	rawDataSize         	26                  
-	totalSize           	38                  
+	totalSize           	#Masked#
 	transactional       	true                
 	transactional_properties	insert_only         
 #### A masked pattern was here ####
@@ -1908,15 +1956,19 @@ Storage Desc Params:
 PREHOOK: query: drop table stats_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_mm
 POSTHOOK: query: drop table stats_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_mm
 PREHOOK: query: drop table stats2_mm
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table stats2_mm
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table stats2_mm tblproperties("transactional"="true", "transactional_properties"="insert_only") as select array(key, value) from src
 PREHOOK: type: CREATETABLE_AS_SELECT
 PREHOOK: Input: default@src
@@ -1946,10 +1998,10 @@ Table Type:         	MANAGED_TABLE
 Table Parameters:	 	 
 	COLUMN_STATS_ACCURATE	{\"BASIC_STATS\":\"true\"}
 	bucketing_version   	2                   
-	numFiles            	33                  
+	numFiles            	27                  
 	numRows             	500                 
 	rawDataSize         	5312                
-	totalSize           	5812                
+	totalSize           	#Masked#
 	transactional       	true                
 	transactional_properties	insert_only         
 #### A masked pattern was here ####
@@ -1967,10 +2019,12 @@ Storage Desc Params:
 PREHOOK: query: drop table stats2_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats2_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats2_mm
 POSTHOOK: query: drop table stats2_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats2_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats2_mm
 PREHOOK: query: CREATE TABLE skewjoin_mm(key INT, value STRING) STORED AS TEXTFILE tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -2002,10 +2056,12 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table skewjoin_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@skewjoin_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@skewjoin_mm
 POSTHOOK: query: drop table skewjoin_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@skewjoin_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@skewjoin_mm
 PREHOOK: query: CREATE TABLE parquet1_mm(id INT) STORED AS PARQUET tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -2072,23 +2128,29 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table parquet1_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@parquet1_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@parquet1_mm
 POSTHOOK: query: drop table parquet1_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@parquet1_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@parquet1_mm
 PREHOOK: query: drop table parquet2_mm
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@parquet2_mm
+PREHOOK: Output: database:default
 PREHOOK: Output: default@parquet2_mm
 POSTHOOK: query: drop table parquet2_mm
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@parquet2_mm
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@parquet2_mm
 PREHOOK: query: DROP TABLE IF EXISTS temp1
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: DROP TABLE IF EXISTS temp1
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: CREATE TEMPORARY TABLE temp1 (a int) TBLPROPERTIES ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -2138,8 +2200,10 @@ POSTHOOK: Output: hdfs://### HDFS PATH ###
 PREHOOK: query: drop table intermediate_n0
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@intermediate_n0
+PREHOOK: Output: database:default
 PREHOOK: Output: default@intermediate_n0
 POSTHOOK: query: drop table intermediate_n0
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@intermediate_n0
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@intermediate_n0

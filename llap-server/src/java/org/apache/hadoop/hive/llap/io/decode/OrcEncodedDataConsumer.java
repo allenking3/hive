@@ -6,12 +6,15 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.llap.io.decode;
 
@@ -58,14 +61,13 @@ import org.apache.orc.TypeDescription;
 import org.apache.orc.impl.SchemaEvolution;
 import org.apache.orc.impl.TreeReaderFactory;
 import org.apache.orc.impl.TreeReaderFactory.StructTreeReader;
-import org.apache.orc.impl.TreeReaderFactory.TreeReader;
 import org.apache.orc.impl.WriterImpl;
 import org.apache.orc.OrcProto;
-
+import org.apache.orc.impl.reader.tree.TypeReader;
 
 public class OrcEncodedDataConsumer
   extends EncodedDataConsumer<OrcBatchKey, OrcEncodedColumnBatch> {
-  private TreeReaderFactory.TreeReader[] columnReaders;
+  private TypeReader[] columnReaders;
   private int previousStripeIndex = -1;
   private ConsumerFileMetadata fileMetadata; // We assume one request is only for one file.
   private CompressionCodec codec;
@@ -191,9 +193,9 @@ public class OrcEncodedDataConsumer
            *     it doesn't get confused.
            *
            */
-          TreeReader reader = columnReaders[idx];
+          TypeReader reader = columnReaders[idx];
           ColumnVector cv = prepareColumnVector(cvb, idx, batchSize);
-          reader.nextVector(cv, null, batchSize);
+          reader.nextVector(cv, null, batchSize, cvb.filterContext, TypeReader.ReadPhase.ALL);
         }
 
         // we are done reading a batch, send it to consumer for processing
@@ -299,18 +301,18 @@ public class OrcEncodedDataConsumer
     }
   }
 
-  private void positionInStreams(TreeReaderFactory.TreeReader[] columnReaders,
+  private void positionInStreams(TypeReader[] columnReaders,
       OrcBatchKey batchKey, ConsumerStripeMetadata stripeMetadata) throws IOException {
     PositionProvider[] pps = createPositionProviders(columnReaders, batchKey, stripeMetadata);
     if (pps == null) return;
     for (int i = 0; i < columnReaders.length; i++) {
       if (columnReaders[i] == null) continue;
       // TODO: we could/should trace seek destinations; pps needs a "peek" method
-      columnReaders[i].seek(pps);
+      columnReaders[i].seek(pps, TypeReader.ReadPhase.ALL);
     }
   }
 
-  private void repositionInStreams(TreeReaderFactory.TreeReader[] columnReaders,
+  private void repositionInStreams(TypeReader[] columnReaders,
       EncodedColumnBatch<OrcBatchKey> batch, boolean sameStripe,
       ConsumerStripeMetadata stripeMetadata) throws IOException {
     PositionProvider[] pps = createPositionProviders(
@@ -320,7 +322,7 @@ public class OrcEncodedDataConsumer
     }
     if (pps == null) return;
     for (int i = 0; i < columnReaders.length; i++) {
-      TreeReader reader = columnReaders[i];
+      TypeReader reader = columnReaders[i];
       if (reader == null) continue;
       // Note: we assume this never happens for SerDe reader - the batch would never have vectors.
       // That is always true now; but it wasn't some day, the below would throw in getColumnData.
@@ -331,7 +333,7 @@ public class OrcEncodedDataConsumer
         ((EncodedTreeReaderFactory.TimestampStreamReader) reader)
                 .updateTimezone(stripeMetadata.getWriterTimezone());
       }
-      reader.seek(pps);
+      reader.seek(pps, TypeReader.ReadPhase.ALL);
     }
   }
 
@@ -352,7 +354,7 @@ public class OrcEncodedDataConsumer
   }
 
   private PositionProvider[] createPositionProviders(
-      TreeReaderFactory.TreeReader[] columnReaders, OrcBatchKey batchKey,
+      TypeReader[] columnReaders, OrcBatchKey batchKey,
       ConsumerStripeMetadata stripeMetadata) throws IOException {
     if (columnReaders.length == 0) return null;
     PositionProvider[] pps = null;

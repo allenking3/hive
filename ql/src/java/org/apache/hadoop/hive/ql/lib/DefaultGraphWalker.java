@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.lib;
@@ -164,9 +165,20 @@ public class DefaultGraphWalker implements SemanticGraphWalker {
 
       // Add a single child and restart the loop
       for (Node childNode : node.getChildren()) {
-        if (!getDispatchedList().contains(childNode)) {
-          opStack.push(childNode);
+        // skip if already dispatched
+        if (getDispatchedList().contains(childNode)) {
+          continue;
+        }
+
+        boolean hasChildren = childNode.getChildren() != null;
+        opStack.push(childNode);
+        if (hasChildren) {
+          // exit loop to process child's children
           break;
+        } else { // no children - safe to dispatch in-line
+          dispatch(childNode, opStack);
+          opQueue.add(childNode);
+          opStack.pop();
         }
       }
     } // end while

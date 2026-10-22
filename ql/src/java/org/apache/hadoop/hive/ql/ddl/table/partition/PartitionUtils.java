@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.partition;
@@ -23,10 +24,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Map.Entry;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.GetPartitionsRequest;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.FunctionRegistry;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
@@ -38,7 +40,6 @@ import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,30 +56,42 @@ public final class PartitionUtils {
   }
 
   /**
-   * Certain partition values are are used by hive. e.g. the default partition in dynamic partitioning and the
+   * Certain partition values are used by hive. e.g. the default partition in dynamic partitioning and the
    * intermediate partition values used in the archiving process. Naturally, prohibit the user from creating partitions
    * with these reserved values. The check that this function is more restrictive than the actual limitation, but it's
    * simpler. Should be okay since the reserved names are fairly long and uncommon.
    */
-  public static void validatePartitions(HiveConf conf, Map<String, String> partitionSpec) throws SemanticException {
-    Set<String> reservedPartitionValues = new HashSet<>();
+  public static void validatePartitions(HiveConf conf, Map<String, String> partitionSpec) {
     // Partition can't have this name
-    reservedPartitionValues.add(HiveConf.getVar(conf, ConfVars.DEFAULTPARTITIONNAME));
-    reservedPartitionValues.add(HiveConf.getVar(conf, ConfVars.DEFAULT_ZOOKEEPER_PARTITION_NAME));
-    // Partition value can't end in this suffix
-    reservedPartitionValues.add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_ORIGINAL));
-    reservedPartitionValues.add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_ARCHIVED));
-    reservedPartitionValues.add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_EXTRACTED));
+    Set<String> reservedPartitionValues =
+        new HashSet<String>() {{
+          add(HiveConf.getVar(conf, ConfVars.DEFAULT_PARTITION_NAME));
+          add(HiveConf.getVar(conf, ConfVars.DEFAULT_ZOOKEEPER_PARTITION_NAME));
+        }};
 
-    for (Entry<String, String> e : partitionSpec.entrySet()) {
-      for (String s : reservedPartitionValues) {
-        String value = e.getValue();
-        if (value != null && value.contains(s)) {
-          throw new SemanticException(ErrorMsg.RESERVED_PART_VAL.getMsg(
-              "(User value: " + e.getValue() + " Reserved substring: " + s + ")"));
-        }
+    // Partition value can't end in this suffix
+    Set<String> reservedPartitionSuffixes =
+        new HashSet<String>() {{
+          add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_ORIGINAL));
+          add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_ARCHIVED));
+          add(HiveConf.getVar(conf, ConfVars.METASTORE_INT_EXTRACTED));
+        }};
+
+    partitionSpec.forEach((key, value) -> {
+      if (value == null) {
+        return;
       }
-    }
+      reservedPartitionValues.stream().filter(value::equals).findAny()
+          .ifPresent(s -> {
+            throw new RuntimeException(ErrorMsg.RESERVED_PART_VAL.getMsg(
+                "(User value: " + value + " Reserved string: " + s + ")"));
+          });
+      reservedPartitionSuffixes.stream().filter(value::endsWith).findAny()
+          .ifPresent(s -> {
+            throw new RuntimeException(ErrorMsg.RESERVED_PART_VAL.getMsg(
+                "(User value: " + value + " Partition value cannot end with Reserved substring: " + s + ")"));
+          });
+    });
   }
 
   public static ExprNodeGenericFuncDesc makeBinaryPredicate(String fn, ExprNodeDesc left, ExprNodeDesc right)
@@ -96,7 +109,7 @@ public final class PartitionUtils {
       throws SemanticException {
     Partition partition;
     try {
-      partition = db.getPartition(table, partitionSpec, false);
+      partition = db.getPartition(table, partitionSpec);
     } catch (Exception e) {
       throw new SemanticException(toMessage(ErrorMsg.INVALID_PARTITION, partitionSpec), e);
     }
@@ -120,6 +133,27 @@ public final class PartitionUtils {
     return partitions;
   }
 
+  public static List<Partition> getPartitionsWithSpecs(Hive db, Table table, GetPartitionsRequest request,
+      boolean throwException) throws SemanticException {
+    List<Partition> partitions = null;
+    try {
+      partitions = db.getPartitionsWithSpecs(table, request);
+    } catch (Exception e) {
+      throw new SemanticException(toMessage(ErrorMsg.INVALID_PARTITION, request.getFilterSpec())
+              + " for the following partition keys: " + tablePartitionColNames(table), e);
+    }
+    if (partitions.isEmpty() && throwException) {
+      throw new SemanticException(toMessage(ErrorMsg.INVALID_PARTITION, request.getFilterSpec())
+              + " for the following partition keys: " + tablePartitionColNames(table));
+    }
+    return partitions;
+  }
+
+  private static String tablePartitionColNames(Table table) {
+    List<FieldSchema> partCols = table.getPartCols();
+    return String.join("/", partCols.toString());
+  }
+
   private static String toMessage(ErrorMsg message, Object detail) {
     return detail == null ? message.getMsg() : message.getMsg(detail.toString());
   }
@@ -136,7 +170,7 @@ public final class PartitionUtils {
         try {
           parts = db.getPartitions(table, partitionSpec);
         } catch (HiveException e) {
-          LOG.error("Got HiveException during obtaining list of partitions" + StringUtils.stringifyException(e));
+          LOG.error("Got HiveException during obtaining list of partitions", e);
           throw new SemanticException(e.getMessage(), e);
         }
       } else {
@@ -147,7 +181,7 @@ public final class PartitionUtils {
             parts.add(p);
           }
         } catch (HiveException e) {
-          LOG.debug("Wrong specification" + StringUtils.stringifyException(e));
+          LOG.debug("Wrong specification", e);
           throw new SemanticException(e.getMessage(), e);
         }
       }

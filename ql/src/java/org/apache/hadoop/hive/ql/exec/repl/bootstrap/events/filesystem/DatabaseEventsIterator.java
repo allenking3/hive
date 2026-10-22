@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.repl.bootstrap.events.filesystem;
 
@@ -124,7 +125,7 @@ class DatabaseEventsIterator implements Iterator<BootstrapEvent> {
           LocatedFileStatus next = remoteIterator.next();
           // we want to skip this file, this also means there cant be a table with name represented
           // by constant ReplExternalTables.FILE_NAME or ReplUtils.REPL_TABLE_LIST_DIR_NAME (_tables)
-          if(next.getPath().toString().endsWith(ReplExternalTables.FILE_NAME) ||
+          if(next.getPath().toString().endsWith(EximUtil.FILE_LIST_EXTERNAL) ||
                   next.getPath().toString().endsWith(ReplUtils.REPL_TABLE_LIST_DIR_NAME)) {
             continue;
           }

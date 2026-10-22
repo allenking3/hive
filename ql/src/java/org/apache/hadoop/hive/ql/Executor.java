@@ -9,16 +9,16 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql;
 
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -97,15 +97,14 @@ public class Executor {
       LOG.info("Executing command(queryId=" + driverContext.getQueryId() + "): " + driverContext.getQueryString());
 
       // TODO: should this use getUserFromAuthenticator?
-      hookContext = new PrivateHookContext(driverContext.getPlan(), driverContext.getQueryState(),
-          context.getPathToCS(), SessionState.get().getUserName(), SessionState.get().getUserIpAddress(),
-          InetAddress.getLocalHost().getHostAddress(), driverContext.getOperationId(),
-          SessionState.get().getSessionId(), Thread.currentThread().getName(), SessionState.get().isHiveServerQuery(),
-          SessionState.getPerfLogger(), driverContext.getQueryInfo(), context);
+      hookContext = new PrivateHookContext(driverContext, context);
 
       preExecutionActions();
       preExecutionCacheActions();
+      // Disable HMS cache so any metadata calls during execution get fresh responses.
+      driverContext.getQueryState().disableHMSCache();
       runTasks(noName);
+      driverContext.getQueryState().enableHMSCache();
       postExecutionCacheActions();
       postExecutionActions();
     } catch (CommandProcessorException cpe) {
@@ -118,6 +117,7 @@ public class Executor {
       handleException(hookContext, e);
     } finally {
       cleanUp(noName, hookContext, executionError);
+      driverContext.getQueryState().enableHMSCache();
     }
   }
 
@@ -298,19 +298,13 @@ public class Executor {
   }
 
   private String getJobName() {
-    int maxlen;
-    if ("spark".equals(driverContext.getConf().getVar(ConfVars.HIVE_EXECUTION_ENGINE))) {
-      maxlen = driverContext.getConf().getIntVar(HiveConf.ConfVars.HIVESPARKJOBNAMELENGTH);
-    } else {
-      maxlen = driverContext.getConf().getIntVar(HiveConf.ConfVars.HIVEJOBNAMELENGTH);
-    }
+    int maxlen = driverContext.getConf().getIntVar(HiveConf.ConfVars.HIVE_JOBNAME_LENGTH);
     return Utilities.abbreviate(driverContext.getQueryString(), maxlen - 6);
   }
 
   private int getJobCount() {
     int mrJobCount = Utilities.getMRTasks(driverContext.getPlan().getRootTasks()).size();
-    int jobCount = mrJobCount + Utilities.getTezTasks(driverContext.getPlan().getRootTasks()).size()
-        + Utilities.getSparkTasks(driverContext.getPlan().getRootTasks()).size();
+    int jobCount = mrJobCount + Utilities.getTezTasks(driverContext.getPlan().getRootTasks()).size();
     if (jobCount > 0) {
       if (mrJobCount > 0 && "mr".equals(HiveConf.getVar(driverContext.getConf(), ConfVars.HIVE_EXECUTION_ENGINE))) {
         LOG.warn(HiveConf.generateMrDeprecationWarning());
@@ -329,7 +323,7 @@ public class Executor {
   private void launchTasks(boolean noName, int jobCount, String jobName) throws HiveException {
     // Launch upto maxthreads tasks
     Task<?> task;
-    int maxthreads = HiveConf.getIntVar(driverContext.getConf(), HiveConf.ConfVars.EXECPARALLETHREADNUMBER);
+    int maxthreads = HiveConf.getIntVar(driverContext.getConf(), HiveConf.ConfVars.EXEC_PARALLEL_THREAD_NUMBER);
     while ((task = taskQueue.getRunnable(maxthreads)) != null) {
       TaskRunner runner = launchTask(task, noName, jobName, jobCount);
       if (!runner.isRunning()) {
@@ -353,7 +347,7 @@ public class Executor {
     TaskRunner taskRun = new TaskRunner(task, taskQueue);
     taskQueue.launching(taskRun);
 
-    if (HiveConf.getBoolVar(task.getConf(), HiveConf.ConfVars.EXECPARALLEL) && task.canExecuteInParallel()) {
+    if (HiveConf.getBoolVar(task.getConf(), HiveConf.ConfVars.EXEC_PARALLEL) && task.canExecuteInParallel()) {
       LOG.info("Starting task [" + task + "] in parallel");
       taskRun.start();
     } else {
@@ -544,10 +538,6 @@ public class Executor {
     driverContext.getQueryDisplay().setHmsTimings(QueryDisplay.Phase.EXECUTION, executionHMSTimings);
 
     logExecutionResourceUsage();
-
-    if (SessionState.get().getSparkSession() != null) {
-      SessionState.get().getSparkSession().onQueryCompletion(driverContext.getQueryId());
-    }
 
     driverState.executionFinishedWithLocking(executionError);
 

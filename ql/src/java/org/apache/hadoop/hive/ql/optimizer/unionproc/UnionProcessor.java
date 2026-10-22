@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.optimizer.unionproc;
@@ -95,8 +96,7 @@ public class UnionProcessor extends Transform {
     // Walk the tree again to see if the union can be removed completely
     HiveConf conf = pCtx.getConf();
     opRules.clear();
-    if (conf.getBoolVar(HiveConf.ConfVars.HIVE_OPTIMIZE_UNION_REMOVE)
-      && !conf.getVar(HiveConf.ConfVars.HIVE_EXECUTION_ENGINE).equals("spark")) {
+    if (conf.getBoolVar(HiveConf.ConfVars.HIVE_OPTIMIZE_UNION_REMOVE)) {
 
       opRules.put(new RuleRegExp("R5", UnionOperator.getOperatorName() + "%" +
                                  ".*" + FileSinkOperator.getOperatorName() + "%"),

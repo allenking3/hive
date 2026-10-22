@@ -9,32 +9,107 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.jdbc;
 
+import static org.apache.hadoop.hive.conf.Constants.MODE;
+import static org.apache.hive.service.auth.HiveAuthConstants.AuthTypes;
+import static org.apache.hive.service.cli.operation.hplsql.HplSqlQueryExecutor.HPLSQL;
+
+import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.net.ConnectException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.security.AccessControlContext;
+import java.security.AccessController;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.CallableStatement;
+import java.sql.Clob;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.NClob;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLClientInfoException;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.SQLWarning;
+import java.sql.SQLXML;
+import java.sql.Savepoint;
+import java.sql.Statement;
+import java.sql.Struct;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Stream;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.TrustManagerFactory;
+import javax.security.auth.Subject;
+import javax.security.sasl.Sasl;
+import javax.security.sasl.SaslException;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.hive.common.auth.HiveAuthUtils;
+import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
+import org.apache.hadoop.hive.common.IPStackUtils;
+import org.apache.hive.jdbc.jwt.HttpJwtAuthRequestInterceptor;
+import org.apache.hive.jdbc.saml.HiveJdbcBrowserClientFactory;
+import org.apache.hive.jdbc.saml.HiveJdbcSamlRedirectStrategy;
+import org.apache.hive.jdbc.saml.HttpSamlAuthRequestInterceptor;
+import org.apache.hive.jdbc.saml.IJdbcBrowserClient;
+import org.apache.hive.jdbc.saml.IJdbcBrowserClient.HiveJdbcBrowserException;
+import org.apache.hive.jdbc.saml.IJdbcBrowserClient.HiveJdbcBrowserServerResponse;
+import org.apache.hive.jdbc.saml.IJdbcBrowserClientFactory;
 import org.apache.hive.service.rpc.thrift.TSetClientInfoResp;
 
 import org.apache.hive.service.rpc.thrift.TSetClientInfoReq;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.hadoop.hive.common.auth.HiveAuthUtils;
-import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.apache.hive.jdbc.Utils.JdbcConnectionParams;
 import org.apache.hive.service.auth.HiveAuthConstants;
 import org.apache.hive.service.auth.KerberosSaslHelper;
 import org.apache.hive.service.auth.PlainSaslHelper;
 import org.apache.hive.service.auth.SaslQOP;
+
 import org.apache.hive.service.cli.session.SessionUtils;
 import org.apache.hive.service.rpc.thrift.TCLIService;
 import org.apache.hive.service.rpc.thrift.TCancelDelegationTokenReq;
@@ -48,11 +123,17 @@ import org.apache.hive.service.rpc.thrift.TProtocolVersion;
 import org.apache.hive.service.rpc.thrift.TRenewDelegationTokenReq;
 import org.apache.hive.service.rpc.thrift.TRenewDelegationTokenResp;
 import org.apache.hive.service.rpc.thrift.TSessionHandle;
-import org.apache.http.HttpRequestInterceptor;
+import org.apache.http.HttpEntityEnclosingRequest;
+import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
+import org.apache.http.NoHttpResponseException;
+import org.apache.http.HttpStatus;
 import org.apache.http.client.CookieStore;
 import org.apache.http.client.HttpRequestRetryHandler;
 import org.apache.http.client.ServiceUnavailableRetryStrategy;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.config.Registry;
 import org.apache.http.config.RegistryBuilder;
 import org.apache.http.conn.socket.ConnectionSocketFactory;
@@ -62,9 +143,12 @@ import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.client.RequestWrapper;
 import org.apache.http.impl.conn.BasicHttpClientConnectionManager;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.ssl.SSLContexts;
+import org.apache.http.util.Args;
+import org.apache.thrift.TBaseHelper;
 import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.transport.THttpClient;
@@ -72,64 +156,14 @@ import org.apache.thrift.transport.TTransport;
 import org.apache.thrift.transport.TTransportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManagerFactory;
-import javax.security.auth.Subject;
-import javax.security.sasl.Sasl;
-import javax.security.sasl.SaslException;
-import java.io.BufferedReader;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.KeyStore;
-import java.security.SecureRandom;
-import java.sql.Array;
-import java.sql.Blob;
-import java.sql.CallableStatement;
-import java.sql.Clob;
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.DriverManager;
-import java.sql.NClob;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLClientInfoException;
-import java.sql.SQLException;
-import java.sql.SQLFeatureNotSupportedException;
-import java.sql.SQLWarning;
-import java.sql.SQLXML;
-import java.sql.Savepoint;
-import java.sql.Statement;
-import java.sql.Struct;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Properties;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Stream;
+import java.util.function.Supplier;
 
 /**
  * HiveConnection.
  *
  */
 public class HiveConnection implements java.sql.Connection {
-  public static final Logger LOG = LoggerFactory.getLogger(HiveConnection.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(HiveConnection.class);
 
   private String jdbcUriString;
   private String host;
@@ -147,12 +181,16 @@ public class HiveConnection implements java.sql.Connection {
   private final List<TProtocolVersion> supportedProtocols = new LinkedList<TProtocolVersion>();
   private int loginTimeout = 0;
   private TProtocolVersion protocol;
-  private final int initFetchSize;
-  private int defaultFetchSize;
+  int fetchSize;
+  int fetchThreads;
   private String initFile = null;
   private String wmPool = null, wmApp = null;
   private Properties clientInfo;
   private Subject loggedInSubject;
+  private int maxRetries = 1;
+  private IJdbcBrowserClient browserClient;
+
+  public TCLIService.Iface getClient() { return client; }
 
   /**
    * Get all direct HiveServer2 URLs from a ZooKeeper based HiveServer2 URL
@@ -248,32 +286,86 @@ public class HiveConnection implements java.sql.Connection {
   public HiveConnection() {
     sessConfMap = null;
     isEmbeddedMode = true;
-    initFetchSize = 0;
+    fetchSize = 50;
+    fetchThreads = 0;
   }
 
   public HiveConnection(String uri, Properties info) throws SQLException {
-    setupLoginTimeout();
+    this(uri, info, HiveJdbcBrowserClientFactory.get());
+  }
+
+  /**
+   * Create a new connection that shares the same session ID as the current connection.
+   */
+  public HiveConnection(HiveConnection hiveConnection) throws SQLException {
+    this(hiveConnection.getConnectedUrl(), hiveConnection.getClientInfo(), HiveJdbcBrowserClientFactory.get(), false);
+    // These are set/updated when the session is established.
+    this.sessHandle = hiveConnection.sessHandle;
+    this.connParams = hiveConnection.connParams;
+    this.protocol = hiveConnection.protocol;
+    this.fetchSize = hiveConnection.fetchSize;
+    this.fetchThreads = hiveConnection.fetchThreads;
+  }
+
+  protected int getNumRetries() {
+    return maxRetries;
+  }
+
+  boolean isPersistableSession() {
+    String varname = ConfVars.HIVE_SERVER2_SESSION_STATE_STORE_FETCH_STRATEGY.varname;
+    String prefixedKey = Utils.JdbcConnectionParams.HIVE_CONF_PREFIX + varname;
+    String fetchStrategy = connParams.getHiveConfs().get(prefixedKey);
+    if (fetchStrategy == null) {
+      fetchStrategy = connParams.getHiveConfs().get(varname);
+    }
+    if (fetchStrategy == null) {
+      fetchStrategy = connParams.getSessionVars().get(prefixedKey);
+    }
+    return fetchStrategy != null && !"NEVER".equalsIgnoreCase(fetchStrategy);
+  }
+
+  @VisibleForTesting
+  protected HiveConnection(String uri, Properties info,
+      IJdbcBrowserClientFactory browserClientFactory) throws SQLException {
+    this(uri, info, browserClientFactory, true);
+  }
+
+  protected HiveConnection(String uri, Properties info,
+      IJdbcBrowserClientFactory browserClientFactory,
+      boolean initSession) throws SQLException {
     try {
       connParams = Utils.parseURL(uri, info);
     } catch (ZooKeeperHiveClientException e) {
       throw new SQLException(e);
     }
     jdbcUriString = connParams.getJdbcUriString();
+    LOG.debug("Establishing connection to " + jdbcUriString);
     // JDBC URL: jdbc:hive2://<host>:<port>/dbName;sess_var_list?hive_conf_list#hive_var_list
     // each list: <key1>=<val1>;<key2>=<val2> and so on
     // sess_var_list -> sessConfMap
     // hive_conf_list -> hiveConfMap
     // hive_var_list -> hiveVarMap
     sessConfMap = connParams.getSessionVars();
+    setupLoginTimeout();
     if (isKerberosAuthMode()) {
-      host = Utils.getCanonicalHostName(connParams.getHost());
+      // Ensure UserGroupInformation includes any authorized Kerberos principals.
+      LOG.debug("Configuring Kerberos mode");
+      Configuration config = new Configuration();
+      config.set("hadoop.security.authentication", AuthTypes.KERBEROS.getAuthName());
+      UserGroupInformation.setConfiguration(config);
+
+      if (isEnableCanonicalHostnameCheck()) {
+        host = Utils.getCanonicalHostName(connParams.getHost());
+      } else {
+        host = connParams.getHost();
+      }
+    } else if (isBrowserAuthMode() && !isHttpTransportMode()) {
+      throw new SQLException("Browser auth mode is only applicable in http mode");
     } else {
       host = connParams.getHost();
     }
     port = connParams.getPort();
     isEmbeddedMode = connParams.isEmbeddedMode();
-
-    initFetchSize = Integer.parseInt(sessConfMap.getOrDefault(JdbcConnectionParams.FETCH_SIZE, "0"));
 
     if (sessConfMap.containsKey(JdbcConnectionParams.INIT_FILE)) {
       initFile = sessConfMap.get(JdbcConnectionParams.INIT_FILE);
@@ -297,27 +389,30 @@ public class HiveConnection implements java.sql.Connection {
     supportedProtocols.add(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V8);
     supportedProtocols.add(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V9);
     supportedProtocols.add(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V10);
+    supportedProtocols.add(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11);
+    supportedProtocols.add(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V12);
 
+    if (isBrowserAuthMode()) {
+      try {
+        browserClient = browserClientFactory.create(connParams);
+      } catch (HiveJdbcBrowserException e) {
+        throw new SQLException("");
+      }
+    }
     if (isEmbeddedMode) {
       client = EmbeddedCLIServicePortal.get(connParams.getHiveConfs());
       connParams.getHiveConfs().clear();
       // open client session
-      openSession();
-      executeInitSql();
-    } else {
-      int maxRetries = 1;
-      long retryInterval = 1000L;
-      try {
-        String strRetries = sessConfMap.get(JdbcConnectionParams.RETRIES);
-        if (StringUtils.isNotBlank(strRetries)) {
-          maxRetries = Integer.parseInt(strRetries);
-        }
-        String strRetryInterval = sessConfMap.get(JdbcConnectionParams.RETRY_INTERVAL);
-        if(StringUtils.isNotBlank(strRetryInterval)){
-          retryInterval = Long.parseLong(strRetryInterval);
-        }
-      } catch(NumberFormatException e) { // Ignore the exception
+      if (isBrowserAuthMode()) {
+        throw new SQLException(new IllegalArgumentException(
+            "Browser mode is not supported in embedded mode"));
       }
+      if (initSession) {
+        openSession();
+        executeInitSql();
+      }
+    } else {
+      long retryInterval = getRetryIntervalMillis();
 
       for (int numRetries = 0;;) {
         try {
@@ -326,14 +421,22 @@ public class HiveConnection implements java.sql.Connection {
           // set up the client
           client = new TCLIService.Client(new TBinaryProtocol(transport));
           // open client session
-          openSession();
-          executeInitSql();
+          if (initSession) {
+            openSession();
+            executeInitSql();
+          }
 
           break;
         } catch (Exception e) {
           LOG.warn("Failed to connect to " + connParams.getHost() + ":" + connParams.getPort());
           String errMsg = null;
           String warnMsg = "Could not open client transport with JDBC Uri: " + jdbcUriString + ": ";
+          try {
+            close();
+          } catch (Exception ex) {
+            // Swallow the exception
+            LOG.debug("Error while closing the connection", ex);
+          }
           if (ZooKeeperHiveClientHelper.isZkDynamicDiscoveryMode(sessConfMap)) {
             errMsg = "Could not open client transport for any of the Server URI's in ZooKeeper: ";
             // Try next available server in zookeeper, or retry all the servers again if retry is enabled
@@ -342,7 +445,7 @@ public class HiveConnection implements java.sql.Connection {
             }
             // Update with new values
             jdbcUriString = connParams.getJdbcUriString();
-            if (isKerberosAuthMode()) {
+            if (isKerberosAuthMode() && isEnableCanonicalHostnameCheck()) {
               host = Utils.getCanonicalHostName(connParams.getHost());
             } else {
               host = connParams.getHost();
@@ -371,17 +474,38 @@ public class HiveConnection implements java.sql.Connection {
     client = newSynchronizedClient(client);
   }
 
+  /**
+   * Gets {@code retries} and {@code retryInterval} from the session configuration, updating
+   * {@link #maxRetries} as a side-effect, and returns the interval in milliseconds (default 1000).
+   * Extracted from the constructor to keep its length within Sonar's 150-line limit.
+   */
+  private long getRetryIntervalMillis() {
+    long retryInterval = 1000L;
+    try {
+      String strRetries = sessConfMap.get(JdbcConnectionParams.RETRIES);
+      if (StringUtils.isNotBlank(strRetries)) {
+        maxRetries = Integer.parseInt(strRetries);
+      }
+      String strRetryInterval = sessConfMap.get(JdbcConnectionParams.RETRY_INTERVAL);
+      if (StringUtils.isNotBlank(strRetryInterval)) {
+        retryInterval = Long.parseLong(strRetryInterval);
+      }
+    } catch (NumberFormatException e) { // Ignore — bad values are silently skipped
+    }
+    return retryInterval;
+  }
+
   private void executeInitSql() throws SQLException {
     if (initFile != null) {
-      try {
+      try (Statement st = createStatement()) {
         List<String> sqlList = parseInitFile(initFile);
-        Statement st = createStatement();
         for(String sql : sqlList) {
           boolean hasResult = st.execute(sql);
           if (hasResult) {
-            ResultSet rs = st.getResultSet();
-            while (rs.next()) {
-              System.out.println(rs.getString(1));
+            try (ResultSet rs = st.getResultSet()) {
+              while (rs.next()) {
+                System.out.println(rs.getString(1));
+              }
             }
           }
         }
@@ -451,6 +575,18 @@ public class HiveConnection implements java.sql.Connection {
     logZkDiscoveryMessage("Connected to " + connParams.getHost() + ":" + connParams.getPort());
   }
 
+  void reconnect() throws SQLException {
+    try {
+      if (transport != null && transport.isOpen()) {
+        transport.close();
+      }
+      openTransport();
+      client = newSynchronizedClient(new TCLIService.Client(new TBinaryProtocol(transport)));
+    } catch (Exception e) {
+      throw new SQLException("Failed to reconnect transport", "08S01", e);
+    }
+  }
+
   public String getConnectedUrl() {
     return jdbcUriString;
   }
@@ -467,16 +603,28 @@ public class HiveConnection implements java.sql.Connection {
     } else if (!httpPath.startsWith("/")) {
       httpPath = "/" + httpPath;
     }
-    return schemeName + "://" + host + ":" + port + httpPath;
+    return schemeName + "://" + IPStackUtils.concatHostPort(host, port) + httpPath;
   }
 
   private TTransport createHttpTransport() throws SQLException, TTransportException {
     CloseableHttpClient httpClient;
     boolean useSsl = isSslConnection();
-    // Create an http client from the configs
+    validateSslForBrowserMode();
     httpClient = getHttpClient(useSsl);
     transport = new THttpClient(getServerHttpUrl(useSsl), httpClient);
+    HiveAuthUtils.configureThriftMaxMessageSize(transport, getMaxMessageSize());
     return transport;
+  }
+
+  protected void validateSslForBrowserMode() throws SQLException {
+    if (disableSSLValidation()) {
+      LOG.warn("SSL validation for the browser mode is disabled.");
+      return;
+    }
+    if (isBrowserAuthMode() && !isSslConnection()) {
+      throw new SQLException(new IllegalArgumentException(
+          "Browser mode is only supported with SSL is enabled"));
+    }
   }
 
   private CloseableHttpClient getHttpClient(Boolean useSsl) throws SQLException {
@@ -487,9 +635,9 @@ public class HiveConnection implements java.sql.Connection {
       JdbcConnectionParams.DEFAULT_COOKIE_NAMES_HS2 :
       sessConfMap.get(JdbcConnectionParams.COOKIE_NAME);
     CookieStore cookieStore = isCookieEnabled ? new BasicCookieStore() : null;
-    HttpClientBuilder httpClientBuilder;
+    HttpClientBuilder httpClientBuilder = null;
     // Request interceptor for any request pre-processing logic
-    HttpRequestInterceptor requestInterceptor;
+    HttpRequestInterceptorBase requestInterceptor;
     Map<String, String> additionalHttpHeaders = new HashMap<String, String>();
     Map<String, String> customCookies = new HashMap<String, String>();
 
@@ -522,9 +670,20 @@ public class HiveConnection implements java.sql.Connection {
        * for sending to the server before every request.
        * In https mode, the entire information is encrypted
        */
-      requestInterceptor = new HttpKerberosRequestInterceptor(sessConfMap.get(JdbcConnectionParams.AUTH_PRINCIPAL),
-          host, getServerHttpUrl(useSsl), loggedInSubject, cookieStore, cookieName, useSsl, additionalHttpHeaders,
+      requestInterceptor = new HttpKerberosRequestInterceptor(
+          sessConfMap.get(JdbcConnectionParams.AUTH_PRINCIPAL),
+          host, getServerHttpUrl(useSsl), loggedInSubject, cookieStore, cookieName,
+          useSsl, additionalHttpHeaders,
           customCookies);
+    } else if (isJwtAuthMode()) {
+      final String signedJwt = getJWT();
+      Preconditions.checkArgument(signedJwt != null && !signedJwt.isEmpty(), "For jwt auth mode," +
+          " a signed jwt must be provided");
+      requestInterceptor = new HttpJwtAuthRequestInterceptor(signedJwt, cookieStore,
+          cookieName, useSsl, additionalHttpHeaders, customCookies);
+    } else if (isBrowserAuthMode()) {
+      requestInterceptor = new HttpSamlAuthRequestInterceptor(browserClient, cookieStore,
+          cookieName, useSsl, additionalHttpHeaders, customCookies);
     } else {
       // Check for delegation token, if present add it in the header
       String tokenStr = getClientDelegationToken(sessConfMap);
@@ -572,35 +731,130 @@ public class HiveConnection implements java.sql.Connection {
     } else {
       httpClientBuilder = HttpClientBuilder.create();
     }
-    // In case the server's idletimeout is set to a lower value, it might close it's side of
-    // connection. However we retry one more time on NoHttpResponseException
+
+    // Beeline <------> LB <------> Reverse Proxy <-----> Hiveserver2
+    // In case of deployments like above, the LoadBalancer (LB) can be configured with Idle Timeout after which the LB
+    // will send TCP RST to Client (Beeline) and Backend (Reverse Proxy). If user is connected to beeline, idle for
+    // sometime and resubmits a query after the idle timeout there is a broken pipe between beeline and LB. When Beeline
+    // tries to submit the query one of two things happen, it either hangs or times out (if socketTimeout is defined in
+    // the jdbc param). The hang is because of the default infinite socket timeout for which there is no auto-recovery
+    // (user have to manually interrupt the query). If the socketTimeout jdbc param was specified, beeline will receive
+    // SocketTimeoutException (Read Timeout) or NoHttpResponseException both of which can be retried if maxRetries is
+    // also specified by the user (jdbc param).
+    // The following retry handler handles the above cases in addition to retries for idempotent and unsent requests.
     httpClientBuilder.setRetryHandler(new HttpRequestRetryHandler() {
+      // This handler is mostly a copy of DefaultHttpRequestRetryHandler except it also retries some exceptions
+      // which could be thrown in certain cases where idle timeout from intermediate proxy triggers a connection reset.
+      private final List<Class<? extends IOException>> nonRetriableClasses = Arrays.asList(
+              InterruptedIOException.class,
+              UnknownHostException.class,
+              ConnectException.class,
+              SSLException.class);
+      // socket exceptions could happen because of timeout, broken pipe or server not responding in which case it is
+      // better to reopen the connection and retry if user specified maxRetries
+      private final List<Class<? extends IOException>> retriableClasses = Arrays.asList(
+              SocketTimeoutException.class,
+              SocketException.class,
+              NoHttpResponseException.class
+      );
+
       @Override
       public boolean retryRequest(IOException exception, int executionCount, HttpContext context) {
-        if (executionCount > 1) {
-          LOG.info("Retry attempts to connect to server exceeded.");
+        Args.notNull(exception, "Exception parameter");
+        Args.notNull(context, "HTTP context");
+        if (executionCount > maxRetries) {
+          // Do not retry if over max retry count
+          LOG.error("Max retries (" + maxRetries + ") exhausted.", exception);
           return false;
         }
-        if (exception instanceof org.apache.http.NoHttpResponseException) {
-          LOG.info("Could not connect to the server. Retrying one more time.");
+        if (this.retriableClasses.contains(exception.getClass())) {
+          LOG.info("Retrying " + exception.getClass() + " as it is in retriable classes list.");
           return true;
         }
+        if (this.nonRetriableClasses.contains(exception.getClass())) {
+          LOG.info("Not retrying as the class (" + exception.getClass() + ") is non-retriable class.");
+          return false;
+        } else {
+          for (final Class<? extends IOException> rejectException : this.nonRetriableClasses) {
+            if (rejectException.isInstance(exception)) {
+              LOG.info("Not retrying as the class (" + exception.getClass() + ") is an instance of is non-retriable class.");
+              return false;
+            }
+          }
+        }
+        final HttpClientContext clientContext = HttpClientContext.adapt(context);
+        final HttpRequest request = clientContext.getRequest();
+
+        if(requestIsAborted(request)){
+          LOG.info("Not retrying as request is aborted.");
+          return false;
+        }
+
+        if (handleAsIdempotent(request)) {
+          LOG.info("Retrying idempotent request. Attempt " + executionCount + " of " + maxRetries);
+          // Retry if the request is considered idempotent
+          return true;
+        }
+
+        if (!clientContext.isRequestSent()) {
+          LOG.info("Retrying unsent request. Attempt " + executionCount + " of " + maxRetries);
+          // Retry if the request has not been sent fully or
+          // if it's OK to retry methods that have been sent
+          return true;
+        }
+
+        LOG.info("Not retrying as the request is not idempotent or is already sent.");
+        // otherwise do not retry
         return false;
       }
+
+      // requests that handles "Expect continue" handshakes. If server received the header and is waiting for body
+      // then those requests can be retried. Most basic http method methods except DELETE are idempotent as long as they
+      // are not aborted.
+      protected boolean handleAsIdempotent(final HttpRequest request) {
+        return !(request instanceof HttpEntityEnclosingRequest);
+      }
+
+      // checks if the request got aborted
+      protected boolean requestIsAborted(final HttpRequest request) {
+        HttpRequest req = request;
+        if (request instanceof RequestWrapper) { // does not forward request to original
+          req = ((RequestWrapper) request).getOriginal();
+        }
+        return (req instanceof HttpUriRequest && ((HttpUriRequest)req).isAborted());
+      }
+
     });
 
+    if (isBrowserAuthMode()) {
+      httpClientBuilder
+          .setRedirectStrategy(new HiveJdbcSamlRedirectStrategy(browserClient));
+    }
+
+    requestInterceptor.setRequestTrackingEnabled(isRequestTrackingEnabled());
+
     // Add the request interceptor to the client builder
-    httpClientBuilder.addInterceptorFirst(requestInterceptor);
+    httpClientBuilder.addInterceptorFirst(requestInterceptor.sessionId(getSessionId()));
+    httpClientBuilder.addInterceptorLast(new HttpDefaultResponseInterceptor());
 
     // Add an interceptor to add in an XSRF header
     httpClientBuilder.addInterceptorLast(new XsrfHttpRequestInterceptor());
+
+    // Add an interceptor to add in a CSRF header
+    httpClientBuilder.addInterceptorLast(new CsrfHttpRequestInterceptor());
+
+    // set the specified timeout (socketTimeout jdbc param) for http connection as well
+    RequestConfig config = RequestConfig.custom()
+            .setConnectTimeout(loginTimeout * 1000)
+            .setConnectionRequestTimeout(loginTimeout * 1000)
+            .setSocketTimeout(loginTimeout * 1000).build();
+    httpClientBuilder.setDefaultRequestConfig(config);
 
     // Configure http client for SSL
     if (useSsl) {
       String useTwoWaySSL = sessConfMap.get(JdbcConnectionParams.USE_TWO_WAY_SSL);
       String sslTrustStorePath = sessConfMap.get(JdbcConnectionParams.SSL_TRUST_STORE);
-      String sslTrustStorePassword = sessConfMap.get(
-        JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
+      String sslTrustStorePassword = Utils.getPassword(sessConfMap, JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
       KeyStore sslTrustStore;
       SSLConnectionSocketFactory socketFactory;
       SSLContext sslContext;
@@ -624,7 +878,7 @@ public class HiveConnection implements java.sql.Connection {
           }
           sslTrustStore = KeyStore.getInstance(trustStoreType);
           try (FileInputStream fis = new FileInputStream(sslTrustStorePath)) {
-            sslTrustStore.load(fis, sslTrustStorePassword.toCharArray());
+            sslTrustStore.load(fis, sslTrustStorePassword != null ? sslTrustStorePassword.toCharArray() : null);
           }
           sslContext = SSLContexts.custom().loadTrustMaterial(sslTrustStore, null).build();
           socketFactory =
@@ -643,13 +897,68 @@ public class HiveConnection implements java.sql.Connection {
     return httpClientBuilder.build();
   }
 
+  private boolean isRequestTrackingEnabled() {
+    return Boolean.parseBoolean(sessConfMap.get(JdbcConnectionParams.JDBC_PARAM_REQUEST_TRACK));
+  }
+
+  /**
+   * Creates a sessionId Supplier for interceptors. When interceptors are instantiated,
+   * there is no session yet (sessHandle is null) so this Supplier can take care
+   * of the sessionId in a lazy way.
+   */
+  private Supplier<String> getSessionId() {
+    Supplier<String> sessionId = () -> {
+      if (sessHandle == null) {
+        return "NO_SESSION";
+      }
+      StringBuilder b = new StringBuilder();
+      TBaseHelper.toString(sessHandle.getSessionId().bufferForGuid(), b);
+      return b.toString().replaceAll("\\s", "");
+    };
+    return sessionId;
+  }
+
+  private String getJWT() {
+    String jwtCredential = getJWTStringFromSession();
+    if (jwtCredential == null || jwtCredential.isEmpty()) {
+      jwtCredential = getJWTStringFromEnv();
+    }
+    return jwtCredential;
+  }
+
+  private String getJWTStringFromEnv() {
+    String jwtCredential = System.getenv(JdbcConnectionParams.AUTH_JWT_ENV);
+    if (jwtCredential == null || jwtCredential.isEmpty()) {
+      LOG.debug("No JWT is specified in env variable {}", JdbcConnectionParams.AUTH_JWT_ENV);
+    } else {
+      int startIndex = Math.max(0, jwtCredential.length() - 7);
+      String lastSevenChars = jwtCredential.substring(startIndex);
+      LOG.debug("Fetched JWT (ends with {}) from the env.", lastSevenChars);
+    }
+    return jwtCredential;
+  }
+
+  private String getJWTStringFromSession() {
+    String jwtCredential = sessConfMap.get(JdbcConnectionParams.AUTH_TYPE_JWT_KEY);
+    if (jwtCredential == null || jwtCredential.isEmpty()) {
+      LOG.debug("No JWT is specified in connection string.");
+    } else {
+      int startIndex = Math.max(0, jwtCredential.length() - 7);
+      String lastSevenChars = jwtCredential.substring(startIndex);
+      LOG.debug("Fetched JWT (ends with {}) from the session.", lastSevenChars);
+    }
+    return jwtCredential;
+  }
+
   /**
    * Create underlying SSL or non-SSL transport
    *
    * @return TTransport
    * @throws TTransportException
+   * @throws SQLException
    */
-  private TTransport createUnderlyingTransport() throws TTransportException {
+  private TTransport createUnderlyingTransport() throws TTransportException, SQLException {
+    int maxMessageSize = getMaxMessageSize();
     TTransport transport = null;
     // Note: Thrift returns an SSL socket that is already bound to the specified host:port
     // Therefore an open called on this would be a no-op later
@@ -659,11 +968,10 @@ public class HiveConnection implements java.sql.Connection {
     if (isSslConnection()) {
       // get SSL socket
       String sslTrustStore = sessConfMap.get(JdbcConnectionParams.SSL_TRUST_STORE);
-      String sslTrustStorePassword = sessConfMap.get(
-        JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
+      String sslTrustStorePassword = Utils.getPassword(sessConfMap, JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
 
       if (sslTrustStore == null || sslTrustStore.isEmpty()) {
-        transport = HiveAuthUtils.getSSLSocket(host, port, loginTimeout);
+        transport = HiveAuthUtils.getSSLSocket(host, port, loginTimeout, maxMessageSize);
       } else {
         String trustStoreType =
                 sessConfMap.get(JdbcConnectionParams.SSL_TRUST_STORE_TYPE);
@@ -675,14 +983,30 @@ public class HiveConnection implements java.sql.Connection {
         if (trustStoreAlgorithm == null) {
           trustStoreAlgorithm = "";
         }
-        transport = HiveAuthUtils.getSSLSocket(host, port, loginTimeout,
-            sslTrustStore, sslTrustStorePassword, trustStoreType, trustStoreAlgorithm);
+        transport = HiveAuthUtils.getSSLSocket(host, port, loginTimeout, sslTrustStore, sslTrustStorePassword,
+            trustStoreType, trustStoreAlgorithm, maxMessageSize);
       }
     } else {
       // get non-SSL socket transport
-      transport = HiveAuthUtils.getSocketTransport(host, port, loginTimeout);
+      transport = HiveAuthUtils.getSocketTransport(host, port, loginTimeout, maxMessageSize);
     }
     return transport;
+  }
+
+  private int getMaxMessageSize() throws SQLException {
+    String maxMessageSize = sessConfMap.get(JdbcConnectionParams.THRIFT_CLIENT_MAX_MESSAGE_SIZE);
+    if (maxMessageSize == null) {
+      return -1;
+    }
+
+    try {
+      return Integer.parseInt(maxMessageSize);
+    } catch (Exception e) {
+      String errFormat = "Invalid {} configuration of '{}'. Expected an integer specifying number of bytes. " +
+          "A configuration of <= 0 uses default max message size.";
+      String errMsg = String.format(errFormat, JdbcConnectionParams.THRIFT_CLIENT_MAX_MESSAGE_SIZE, maxMessageSize);
+      throw new SQLException(errMsg, "42000", e);
+    }
   }
 
   /**
@@ -757,8 +1081,10 @@ public class HiveConnection implements java.sql.Connection {
         JdbcConnectionParams.SUNX509_ALGORITHM_STRING,
         JdbcConnectionParams.SUNJSSE_ALGORITHM_STRING);
       String keyStorePath = sessConfMap.get(JdbcConnectionParams.SSL_KEY_STORE);
-      String keyStorePassword = sessConfMap.get(JdbcConnectionParams.SSL_KEY_STORE_PASSWORD);
-      KeyStore sslKeyStore = KeyStore.getInstance(JdbcConnectionParams.SSL_KEY_STORE_TYPE);
+      String keyStorePassword = Utils.getPassword(sessConfMap, JdbcConnectionParams.SSL_KEY_STORE_PASSWORD);
+      String keyStoreType = sessConfMap.get(JdbcConnectionParams.SSL_KEY_STORE_TYPE);
+      keyStoreType = (!StringUtils.isBlank(keyStoreType)) ? keyStoreType : KeyStore.getDefaultType();
+      KeyStore sslKeyStore = KeyStore.getInstance(keyStoreType);
 
       if (keyStorePath == null || keyStorePath.isEmpty()) {
         throw new IllegalArgumentException(JdbcConnectionParams.SSL_KEY_STORE
@@ -772,8 +1098,7 @@ public class HiveConnection implements java.sql.Connection {
       TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
         JdbcConnectionParams.SUNX509_ALGORITHM_STRING);
       String trustStorePath = sessConfMap.get(JdbcConnectionParams.SSL_TRUST_STORE);
-      String trustStorePassword = sessConfMap.get(
-        JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
+      String trustStorePassword = Utils.getPassword(sessConfMap, JdbcConnectionParams.SSL_TRUST_STORE_PASSWORD);
       String trustStoreType = sessConfMap.get(JdbcConnectionParams.SSL_TRUST_STORE_TYPE);
       if (trustStoreType == null || trustStoreType.isEmpty()) {
         trustStoreType = KeyStore.getDefaultType();
@@ -785,7 +1110,7 @@ public class HiveConnection implements java.sql.Connection {
         + " Not configured for 2 way SSL connection");
       }
       try (FileInputStream fis = new FileInputStream(trustStorePath)) {
-        sslTrustStore.load(fis, trustStorePassword.toCharArray());
+        sslTrustStore.load(fis, trustStorePassword != null ? trustStorePassword.toCharArray() : null);
       }
       trustManagerFactory.init(sslTrustStore);
       SSLContext context = SSLContext.getInstance("TLS");
@@ -850,9 +1175,11 @@ public class HiveConnection implements java.sql.Connection {
   }
 
   private void openSession() throws SQLException {
+    LOG.debug("Opening Hive connection session");
+
     TOpenSessionReq openReq = new TOpenSessionReq();
 
-    Map<String, String> openConf = new HashMap<String, String>();
+    Map<String, String> openConf = new HashMap<>();
     // for remote JDBC client, try to set the conf var using 'set foo=bar'
     for (Entry<String, String> hiveConf : connParams.getHiveConfs().entrySet()) {
       openConf.put("set:hiveconf:" + hiveConf.getKey(), hiveConf.getValue());
@@ -861,8 +1188,11 @@ public class HiveConnection implements java.sql.Connection {
     for (Entry<String, String> hiveVar : connParams.getHiveVars().entrySet()) {
       openConf.put("set:hivevar:" + hiveVar.getKey(), hiveVar.getValue());
     }
+
     // switch the database
+    LOG.debug("Default database: {}", connParams.getDbName());
     openConf.put("use:database", connParams.getDbName());
+    
     if (wmPool != null) {
       openConf.put("set:hivevar:wmpool", wmPool);
     }
@@ -881,6 +1211,16 @@ public class HiveConnection implements java.sql.Connection {
       openConf.put("set:hiveconf:hive.create.as.external.legacy",
           sessConfMap.get(JdbcConnectionParams.CREATE_TABLE_AS_EXTERNAL).toLowerCase());
     }
+    if (isHplSqlMode()) {
+      openConf.put("set:hivevar:mode", HPLSQL);
+    }
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Dumping initial configuration...");
+      for (Map.Entry<String, String> entry : openConf.entrySet()) {
+        LOG.debug("{}={}", entry.getKey(), entry.getValue());
+      }
+    }
 
     openReq.setConfiguration(openConf);
 
@@ -890,39 +1230,153 @@ public class HiveConnection implements java.sql.Connection {
       openReq.setPassword(sessConfMap.get(JdbcConnectionParams.AUTH_PASSWD));
     }
 
+    //TODO This is a bit hacky. We piggy back on a dummy OpenSession call
+    // to get the redirect response from the server. Instead its probably cleaner to
+    // explicitly do a HTTP post request and get the response.
     try {
-      TOpenSessionResp openResp = client.OpenSession(openReq);
-
-      // Populate a given configuration from HS2 server HiveConf, only if that configuration
-      // is not already present in Connection parameter HiveConf i.e., client side configuration
-      // takes precedence over the server side configuration.
-      Map<String, String> serverHiveConf = openResp.getConfiguration();
-
-      updateServerHiveConf(serverHiveConf, connParams);
-
-      // validate connection
-      Utils.verifySuccess(openResp.getStatus());
-      if (!supportedProtocols.contains(openResp.getServerProtocolVersion())) {
-        throw new TException("Unsupported Hive2 protocol");
+      int numRetry = 1;
+      if (isBrowserAuthMode()) {
+        numRetry = 2;
+        browserClient.startListening();
       }
-      protocol = openResp.getServerProtocolVersion();
-      sessHandle = openResp.getSessionHandle();
-
-      final String serverFetchSizeString =
-          openResp.getConfiguration().get(ConfVars.HIVE_SERVER2_THRIFT_RESULTSET_DEFAULT_FETCH_SIZE.varname);
-      if (serverFetchSizeString == null) {
-        throw new IllegalStateException("Server returned a null default fetch size. Check that "
-            + ConfVars.HIVE_SERVER2_THRIFT_RESULTSET_DEFAULT_FETCH_SIZE.varname + " is configured correctly.");
+      for (int i=0; i<numRetry; i++) {
+        try {
+          openSession(openReq);
+        } catch (TException e) {
+          if (isSamlRedirect(e)) {
+            boolean success = doBrowserSSO();
+            if (!success) {
+              String msg = browserClient.getServerResponse() == null
+                  || browserClient.getServerResponse().getMsg() == null ? ""
+                  : browserClient.getServerResponse().getMsg();
+              throw new SQLException(
+                  "Could not establish connection to " + jdbcUriString + ": "
+                      + msg, " 08S01", e);
+            }
+          } else {
+            throw new SQLException(
+                "Could not establish connection to " + jdbcUriString + ": " + e
+                    .getMessage(), " 08S01", e);
+          }
+        }
       }
-
-      this.defaultFetchSize = Integer.parseInt(serverFetchSizeString);
-      if (this.defaultFetchSize <= 0) {
-        throw new IllegalStateException("Default fetch size must be greater than 0");
+    } catch (HiveJdbcBrowserException e) {
+      throw new SQLException(
+          "Could not establish connection to " + jdbcUriString + ": " + e
+              .getMessage(), " 08S01", e);
+    } finally {
+      if (browserClient != null) {
+        try {
+          browserClient.close();
+        } catch (IOException e) {
+          LOG.error("Unable to close the browser SSO client : " + e.getMessage(), e);
+        }
       }
-    } catch (TException e) {
-      throw new SQLException("Could not establish connection to " + jdbcUriString + ": " + e.getMessage(), " 08S01", e);
     }
     isClosed = false;
+  }
+
+  @VisibleForTesting
+  protected void injectBrowserSSOError() throws Exception {
+    //no-op
+  }
+
+  @VisibleForTesting
+  protected boolean doBrowserSSO() throws SQLException {
+    try {
+      injectBrowserSSOError();
+      Preconditions.checkNotNull(browserClient);
+      try (IJdbcBrowserClient bc = browserClient) {
+        browserClient.doBrowserSSO();
+        HiveJdbcBrowserServerResponse response = browserClient.getServerResponse();
+        if (response != null) {
+          return response.isSuccessful();
+        }
+        return false;
+      }
+    } catch (Exception ex) {
+      throw new SQLException("Browser based SSO failed: " + ex.getMessage(),
+          " 08S01", ex);
+    }
+  }
+
+  @VisibleForTesting
+  public IJdbcBrowserClient getBrowserClient() {
+    return browserClient;
+  }
+
+  private void openSession(TOpenSessionReq openReq) throws TException, SQLException {
+    TOpenSessionResp openResp = client.OpenSession(openReq);
+
+    // Populate a given configuration from HS2 server HiveConf, only if that configuration
+    // is not already present in Connection parameter HiveConf i.e., client side configuration
+    // takes precedence over the server side configuration.
+    Map<String, String> serverHiveConf = openResp.getConfiguration();
+
+    updateServerHiveConf(serverHiveConf, connParams);
+
+    // validate connection
+    Utils.verifySuccess(openResp.getStatus());
+    if (!supportedProtocols.contains(openResp.getServerProtocolVersion())) {
+      throw new TException("Unsupported Hive2 protocol");
+    }
+    protocol = openResp.getServerProtocolVersion();
+    sessHandle = openResp.getSessionHandle();
+
+    ConfVars fetchSizeConf = ConfVars.HIVE_SERVER2_THRIFT_RESULTSET_DEFAULT_FETCH_SIZE;
+    int serverFetchSize = Optional.ofNullable(openResp.getConfiguration().get(fetchSizeConf.varname))
+        .map(size -> Integer.parseInt(size))
+        .orElse(fetchSizeConf.defaultIntVal);
+    if (serverFetchSize <= 0) {
+      throw new IllegalStateException("Default fetch size must be greater than 0");
+    }
+    this.fetchSize = Optional.ofNullable(sessConfMap.get(JdbcConnectionParams.FETCH_SIZE))
+        .map(size -> Integer.parseInt(size))
+        .filter(v -> v > 0)
+        .orElse(serverFetchSize);
+
+    ConfVars fetchThreadsConf = ConfVars.HIVE_JDBC_FETCH_THREADS;
+    int serverFetchThreads = Optional.ofNullable(openResp.getConfiguration().get(fetchThreadsConf.varname))
+        .map(size -> Integer.parseInt(size))
+        .orElse(fetchThreadsConf.defaultIntVal);
+    if (serverFetchThreads <= 0) {
+      throw new IllegalStateException("Default fetch threads must be >= 0");
+    }
+    this.fetchThreads = Optional.ofNullable(sessConfMap.get(JdbcConnectionParams.FETCH_THREADS))
+        .map(size -> Integer.parseInt(size))
+        .filter(v -> v >= 0)
+        .orElse(serverFetchThreads);
+
+  }
+
+  /**
+   * This is a util method to parse the message from the TException and extract
+   * the HTTP response code. In case of SAML 2.0 specification with redirect binding,
+   * we expect the response code to be either 302 or 303. This method returns true, if
+   * the response code was 302 and 303 else false based on the exception message.
+   *
+   * This is not very clean. Ideally we should get the underlying HttpResponse, but
+   * THttpClient doesn't expose that information.
+   */
+  private boolean isSamlRedirect(TException e) {
+    //Unfortunately, thrift over http doesn't return the response code
+    if (e.getMessage().startsWith("HTTP Response code: ")) {
+      String code = e.getMessage().substring("HTTP Response code: ".length());
+      try {
+        int statusCode = Integer.parseInt(code.trim());
+        if (statusCode == HttpStatus.SC_SEE_OTHER
+            || statusCode == HttpStatus.SC_MOVED_TEMPORARILY) {
+          return true;
+        }
+      } catch (NumberFormatException ex) {
+        // ignore, return false
+      }
+    }
+    return false;
+  }
+
+  public boolean isHplSqlMode() {
+    return HPLSQL.equalsIgnoreCase(sessConfMap.getOrDefault(MODE, ""));
   }
 
   @VisibleForTesting
@@ -942,7 +1396,7 @@ public class HiveConnection implements java.sql.Connection {
   /**
    * @return username from sessConfMap
    */
-  private String getUserName() {
+  String getUserName() {
     return getSessionValue(JdbcConnectionParams.AUTH_USER, JdbcConnectionParams.ANONYMOUS_USER);
   }
 
@@ -961,6 +1415,31 @@ public class HiveConnection implements java.sql.Connection {
     return !JdbcConnectionParams.AUTH_SIMPLE.equals(sessConfMap.get(JdbcConnectionParams.AUTH_TYPE))
         && !JdbcConnectionParams.AUTH_TOKEN.equals(sessConfMap.get(JdbcConnectionParams.AUTH_TYPE))
         && sessConfMap.containsKey(JdbcConnectionParams.AUTH_PRINCIPAL);
+  }
+
+  private boolean isEnableCanonicalHostnameCheck() {
+    return Boolean.parseBoolean(
+        sessConfMap.getOrDefault(JdbcConnectionParams.AUTH_KERBEROS_ENABLE_CANONICAL_HOSTNAME_CHECK, "true"));
+  }
+
+  private boolean isBrowserAuthMode() {
+    return JdbcConnectionParams.AUTH_SSO_BROWSER_MODE
+        .equals(sessConfMap.get(JdbcConnectionParams.AUTH_TYPE));
+  }
+
+  private boolean isJwtAuthMode() {
+    return JdbcConnectionParams.AUTH_TYPE_JWT.equalsIgnoreCase(sessConfMap.get(JdbcConnectionParams.AUTH_TYPE))
+        || sessConfMap.containsKey(JdbcConnectionParams.AUTH_TYPE_JWT_KEY);
+  }
+
+  /**
+   * This checks for {@code JdbcConnectionParams.AUTH_BROWSER_DISABLE_SSL_VALIDATION}
+   * on the connection url and returns the boolean value of it. Returns false if the
+   * parameter is not present.
+   */
+  private boolean disableSSLValidation() {
+    return Boolean.parseBoolean(
+        sessConfMap.get(JdbcConnectionParams.AUTH_BROWSER_DISABLE_SSL_VALIDATION));
   }
 
   private boolean isHttpTransportMode() {
@@ -992,11 +1471,19 @@ public class HiveConnection implements java.sql.Connection {
     return varValue;
   }
 
-  // copy loginTimeout from driver manager. Thrift timeout needs to be in millis
+  // use socketTimeout from jdbc connection url. Thrift timeout needs to be in millis
   private void setupLoginTimeout() {
-    long timeOut = TimeUnit.SECONDS.toMillis(DriverManager.getLoginTimeout());
+    String socketTimeoutStr = sessConfMap.getOrDefault(JdbcConnectionParams.SOCKET_TIMEOUT, "0");
+    long timeOut = 0;
+    try {
+      timeOut = Long.parseLong(socketTimeoutStr);
+    } catch (NumberFormatException e) {
+      LOG.info("Failed to parse socketTimeout of value " + socketTimeoutStr);
+    }
     if (timeOut > Integer.MAX_VALUE) {
       loginTimeout = Integer.MAX_VALUE;
+    } else if (timeOut < 0) {
+      loginTimeout = 0;
     } else {
       loginTimeout = (int) timeOut;
     }
@@ -1008,6 +1495,9 @@ public class HiveConnection implements java.sql.Connection {
   }
 
   public String getDelegationToken(String owner, String renewer) throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     TGetDelegationTokenReq req = new TGetDelegationTokenReq(sessHandle, owner, renewer);
     try {
       TGetDelegationTokenResp tokenResp = client.GetDelegationToken(req);
@@ -1020,6 +1510,9 @@ public class HiveConnection implements java.sql.Connection {
   }
 
   public void cancelDelegationToken(String tokenStr) throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     TCancelDelegationTokenReq cancelReq = new TCancelDelegationTokenReq(sessHandle, tokenStr);
     try {
       TCancelDelegationTokenResp cancelResp =
@@ -1033,6 +1526,9 @@ public class HiveConnection implements java.sql.Connection {
   }
 
   public void renewDelegationToken(String tokenStr) throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     TRenewDelegationTokenReq cancelReq = new TRenewDelegationTokenReq(sessHandle, tokenStr);
     try {
       TRenewDelegationTokenResp renewResp =
@@ -1064,19 +1560,21 @@ public class HiveConnection implements java.sql.Connection {
 
   @Override
   public void close() throws SQLException {
-    if (!isClosed) {
-      TCloseSessionReq closeReq = new TCloseSessionReq(sessHandle);
       try {
-        client.CloseSession(closeReq);
+        if (!isClosed) {
+          TCloseSessionReq closeReq = new TCloseSessionReq(sessHandle);
+          client.CloseSession(closeReq);
+        }
       } catch (TException e) {
         throw new SQLException("Error while cleaning up the server resources", e);
       } finally {
         isClosed = true;
-        if (transport != null) {
+        client = null;
+        if (transport != null && transport.isOpen()) {
           transport.close();
+          transport = null;
         }
       }
-    }
   }
 
   /*
@@ -1165,7 +1663,7 @@ public class HiveConnection implements java.sql.Connection {
     if (isClosed) {
       throw new SQLException("Can't create Statement, connection is closed");
     }
-    return new HiveStatement(this, client, sessHandle, false, initFetchSize, defaultFetchSize);
+    return new HiveStatement(this, client, sessHandle, false, fetchSize, fetchThreads);
   }
 
   /*
@@ -1185,8 +1683,10 @@ public class HiveConnection implements java.sql.Connection {
       throw new SQLException("Statement with resultset type " + resultSetType +
           " is not supported", "HYC00"); // Optional feature not implemented
     }
-    return new HiveStatement(this, client, sessHandle, resultSetType == ResultSet.TYPE_SCROLL_INSENSITIVE,
-        initFetchSize, defaultFetchSize);
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
+    return new HiveStatement(this, client, sessHandle, resultSetType == ResultSet.TYPE_SCROLL_INSENSITIVE);
   }
 
   /*
@@ -1373,9 +1873,12 @@ public class HiveConnection implements java.sql.Connection {
     if (timeout < 0) {
       throw new SQLException("timeout value was negative");
     }
+    if (isClosed) {
+      return false;
+    }
     boolean rc = false;
     try {
-      String productName = new HiveDatabaseMetaData(this, client, sessHandle)
+      new HiveDatabaseMetaData(this, client, sessHandle)
               .getDatabaseProductName();
       rc = true;
     } catch (SQLException e) {
@@ -1442,6 +1945,9 @@ public class HiveConnection implements java.sql.Connection {
 
   @Override
   public PreparedStatement prepareStatement(String sql) throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     return new HivePreparedStatement(this, client, sessHandle, sql);
   }
 
@@ -1454,6 +1960,9 @@ public class HiveConnection implements java.sql.Connection {
   @Override
   public PreparedStatement prepareStatement(String sql, int autoGeneratedKeys)
       throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     return new HivePreparedStatement(this, client, sessHandle, sql);
   }
 
@@ -1493,6 +2002,9 @@ public class HiveConnection implements java.sql.Connection {
   @Override
   public PreparedStatement prepareStatement(String sql, int resultSetType,
       int resultSetConcurrency) throws SQLException {
+    if (isClosed) {
+      throw new SQLException("Connection is closed");
+    }
     return new HivePreparedStatement(this, client, sessHandle, sql);
   }
 
@@ -1615,6 +2127,9 @@ public class HiveConnection implements java.sql.Connection {
 
 
   private void sendClientInfo() throws SQLClientInfoException {
+    if (isClosed) {
+      throw new SQLClientInfoException("Connection is closed", null);
+    }
     TSetClientInfoReq req = new TSetClientInfoReq(sessHandle);
     Map<String, String> map = new HashMap<>();
     if (clientInfo != null) {
@@ -1706,9 +2221,9 @@ public class HiveConnection implements java.sql.Connection {
     if (schema.contains(";")) {
       throw new SQLException("invalid schema name");
     }
-    Statement stmt = createStatement();
-    stmt.execute("use " + schema);
-    stmt.close();
+    try (Statement stmt = createStatement()) {
+      stmt.execute("use " + schema);
+    }
   }
 
   /*

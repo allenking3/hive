@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,7 +20,7 @@
 package org.apache.hadoop.hive.ql.security.authorization.plugin.metastore;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hadoop.hive.metastore.HiveMetaStore;
+import org.apache.hadoop.hive.metastore.HMSHandler;
 import org.apache.hadoop.hive.metastore.events.PreEventContext;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HiveAuthzContext;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.HiveOperationType;
@@ -49,6 +49,15 @@ public class HiveMetaStoreAuthzInfo {
     this.outputHObjs      = outputHObjs;
     this.commandString    = commandString;
     this.hiveAuthzContext = createHiveAuthzContext();
+  }
+
+  public HiveMetaStoreAuthzInfo(PreEventContext preEventContext, HiveOperationType operationType, List<HivePrivilegeObject> inputHObjs, List<HivePrivilegeObject> outputHObjs, String commandString, HiveAuthzContext hiveAuthzContext) {
+    this.preEventContext = preEventContext;
+    this.operationType = operationType;
+    this.inputHObjs = inputHObjs;
+    this.outputHObjs = outputHObjs;
+    this.commandString = commandString;
+    this.hiveAuthzContext = hiveAuthzContext;
   }
 
   public HiveOperationType getOperationType() {
@@ -104,7 +113,7 @@ public class HiveMetaStoreAuthzInfo {
     // TODO: refer to SessionManager/HiveSessionImpl for details on getting ipAddress and forwardedAddresses
     builder.setForwardedAddresses(new ArrayList<>());
 
-    String ipAddress = HiveMetaStore.HMSHandler.getIPAddress();
+    String ipAddress = HMSHandler.getIPAddress();
 
     builder.setUserIpAddress(ipAddress);
 

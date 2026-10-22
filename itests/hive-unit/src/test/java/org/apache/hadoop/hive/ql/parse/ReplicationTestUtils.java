@@ -9,27 +9,35 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.ql.parse.repl.PathBuilder;
+import org.apache.hadoop.hive.ql.exec.repl.DirCopyWork;
+import org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils;
 import org.junit.Assert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Arrays;
 import java.util.Set;
 import java.util.HashSet;
 
@@ -37,6 +45,7 @@ import java.util.HashSet;
  * ReplicationTestUtils - static helper functions for replication test
  */
 public class ReplicationTestUtils {
+  private static final Logger LOG = LoggerFactory.getLogger(ReplicationTestUtils.class);
 
   public enum OperationType {
     REPL_TEST_ACID_INSERT, REPL_TEST_ACID_INSERT_SELECT, REPL_TEST_ACID_CTAS,
@@ -318,7 +327,7 @@ public class ReplicationTestUtils {
             .run(txnStrCommit);
   }
 
-  private static void insertIntoDB(WarehouseInstance primary, String dbName, String tableName,
+  public static void insertIntoDB(WarehouseInstance primary, String dbName, String tableName,
                                    String tableProperty, String storageType, String[] resultArray)
           throws Throwable {
     insertIntoDB(primary, dbName, tableName, tableProperty, storageType, resultArray, false);
@@ -523,21 +532,74 @@ public class ReplicationTestUtils {
     return withClause;
   }
 
-  public static void assertExternalFileInfo(WarehouseInstance warehouseInstance,
-                                      List<String> expected, Path externalTableInfoFile) throws IOException {
+  public static void assertFalseExternalFileList(WarehouseInstance warehouseInstance,
+                                                 String dumpLocation) throws IOException {
     DistributedFileSystem fileSystem = warehouseInstance.miniDFSCluster.getFileSystem();
-    Assert.assertTrue(fileSystem.exists(externalTableInfoFile));
-    InputStream inputStream = fileSystem.open(externalTableInfoFile);
+    Path hivePath = new Path(dumpLocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path externalTblFileList = new Path(hivePath, EximUtil.FILE_LIST_EXTERNAL);
+    Assert.assertFalse(fileSystem.exists(externalTblFileList));
+  }
+
+  public static void assertExternalFileList(List<String> expected, String dumplocation,
+                                            WarehouseInstance warehouseInstance) throws IOException {
+    Path hivePath = new Path(dumplocation, ReplUtils.REPL_HIVE_BASE_DIR);
+    Path externalTableFileList = new Path(hivePath, EximUtil.FILE_LIST_EXTERNAL);
+    DistributedFileSystem fileSystem = warehouseInstance.miniDFSCluster.getFileSystem();
+    Assert.assertTrue(fileSystem.exists(externalTableFileList));
+    InputStream inputStream = fileSystem.open(externalTableFileList);
     BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
     Set<String> tableNames = new HashSet<>();
     for (String line = reader.readLine(); line != null; line = reader.readLine()) {
-      String[] components = line.split(",");
-      Assert.assertEquals("The file should have tableName,base64encoded(data_location)",
-              2, components.length);
-      tableNames.add(components[0]);
+      String[] components = line.split(DirCopyWork.URI_SEPARATOR);
+      Assert.assertEquals("The file should have sourcelocation#targetlocation#tblName#copymode", 5,
+          components.length);
+      tableNames.add(components[2]);
+      Assert.assertTrue(components[0].length() > 0);
       Assert.assertTrue(components[1].length() > 0);
+      Assert.assertTrue(components[2].length() > 0);
+      Assert.assertTrue(components[3].length() > 0);
     }
     Assert.assertTrue(tableNames.containsAll(expected));
     reader.close();
+  }
+
+  public static void findTxnsFromDump(WarehouseInstance.Tuple tuple, HiveConf conf,
+                                      List<Path> openTxns, List<Path> commitTxns, List<Path> abortTxns) throws IOException {
+    Path dumpRoot = new Path(tuple.dumpLocation);
+    FileSystem fs = FileSystem.get(dumpRoot.toUri(), conf);
+
+    LOG.info("Scanning for event files: " + dumpRoot.toString());
+    RemoteIterator<LocatedFileStatus> files = fs.listFiles(dumpRoot, true);
+    while(files.hasNext()) {
+      LocatedFileStatus status = files.next();
+
+      if (!status.getPath().getName().equals("_dumpmetadata")) {
+        continue;
+      }
+
+      String event = getEvent(fs, status.getPath());
+      if (event.equals("EVENT_OPEN_TXN")) {
+        openTxns.add(status.getPath());
+      } else if (event.equals("EVENT_COMMIT_TXN")) {
+        commitTxns.add(status.getPath());
+      } else if (event.equals("EVENT_ABORT_TXN")) {
+        abortTxns.add(status.getPath());
+      }
+    }
+  }
+
+  private static String getEvent(FileSystem fs, Path path) throws IOException {
+    try (FSDataInputStream fdis = fs.open(path);
+         BufferedReader br = new BufferedReader(new InputStreamReader(fdis))) {
+      // Assumes event is at least on first line.
+      String line = br.readLine();
+      Assert.assertNotNull(line);
+      // Assumes event is present.
+      int index = line.indexOf("\t");
+      Assert.assertNotEquals(-1, index);
+      String event = line.substring(0, index);
+      LOG.info("Reading event file: " + path.toString() + " : " + event + ", raw: " + line);
+      return event;
+    }
   }
 }

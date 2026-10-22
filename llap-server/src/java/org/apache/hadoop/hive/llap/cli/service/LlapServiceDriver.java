@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.cli.service;
@@ -27,12 +28,14 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfUtil;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.apache.hadoop.hive.llap.LlapUtil;
 import org.apache.hadoop.hive.llap.cli.LlapSliderUtils;
 import org.apache.hadoop.hive.llap.configuration.LlapDaemonConfiguration;
 import org.apache.hadoop.hive.llap.daemon.impl.LlapConstants;
 import org.apache.hadoop.hive.ql.session.SessionState;
+import org.apache.hadoop.util.ExitUtil;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.service.client.ServiceClient;
@@ -44,7 +47,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Paths;
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -73,6 +76,9 @@ public class LlapServiceDriver {
 
     SessionState ss = SessionState.get();
     this.conf = (ss != null) ? ss.getConf() : new HiveConf(SessionState.class);
+
+    HiveConfUtil.copyFromProperties(cl.getConfig(), this.conf);
+
     if (conf == null) {
       throw new Exception("Cannot load any configuration to run command");
     }
@@ -298,7 +304,7 @@ public class LlapServiceDriver {
     int rc;
     String version = System.getenv("HIVE_VERSION");
     if (StringUtils.isEmpty(version)) {
-      version = DateTimeFormatter.BASIC_ISO_DATE.format(Instant.now());
+      version = DateTimeFormatter.BASIC_ISO_DATE.format(LocalDateTime.now());
     }
 
     String outputDir = cl.getOutput();
@@ -392,6 +398,6 @@ public class LlapServiceDriver {
       LOG.info("LLAP service driver finished");
     }
     LOG.debug("Completed processing - exiting with " + ret);
-    System.exit(ret);
+    ExitUtil.terminate(ret);
   }
 }

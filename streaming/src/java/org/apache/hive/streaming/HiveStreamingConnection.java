@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.streaming;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.StreamCapabilities;
@@ -47,6 +49,7 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.TxnToWriteId;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.ql.io.HdfsUtils;
 import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
@@ -688,7 +691,7 @@ public class HiveStreamingConnection implements StreamingConnection {
         getHeatbeatMSC().close();
         try {
           // Close the HMS that is used for addWriteNotificationLog
-          Hive.get(conf).getSynchronizedMSC().close();
+          Hive.get(conf).getMSC().close();
         } catch (Exception e) {
           LOG.warn("Error while closing HMS connection", e);
         }
@@ -698,9 +701,7 @@ public class HiveStreamingConnection implements StreamingConnection {
         ShutdownHookManager.removeShutdownHook(this.onShutdownRunner);
       }
     }
-    if (LOG.isInfoEnabled()) {
-      LOG.info("Closed streaming connection. Agent: {} Stats: {}", getAgentInfo(), getConnectionStats());
-    }
+    LOG.info("Closed streaming connection. Agent: {} Stats: {}", getAgentInfo(), getConnectionStats());
   }
 
   @Override
@@ -782,8 +783,7 @@ public class HiveStreamingConnection implements StreamingConnection {
 
         // List the new files added inside the write path (delta directory).
         FileSystem fs = tableObject.getDataLocation().getFileSystem(conf);
-        List<Path> newFiles = new ArrayList<>();
-        Hive.listFilesInsideAcidDirectory(writeInfo.getWriteDir(), fs, newFiles);
+        List<FileStatus> newFiles = HdfsUtils.listLocatedFileStatus(fs, writeInfo.getWriteDir(), null, true);
 
         // If no files are added by this streaming writes, then no need to log write notification event.
         if (newFiles.isEmpty()) {
@@ -794,7 +794,7 @@ public class HiveStreamingConnection implements StreamingConnection {
 
         // Add write notification events into HMS table.
         Hive.addWriteNotificationLog(conf, tableObject, writeInfo.getPartitionVals(),
-                currentTxnId, currentWriteId, newFiles);
+                currentTxnId, currentWriteId, newFiles, null);
       }
     } catch (IOException | TException | HiveException e) {
       throw new StreamingException("Failed to log write notification events.", e);
@@ -828,7 +828,7 @@ public class HiveStreamingConnection implements StreamingConnection {
     setHiveConf(conf, HiveConf.ConfVars.HIVE_TXN_MANAGER, DbTxnManager.class.getName());
     setHiveConf(conf, HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY, true);
     setHiveConf(conf, MetastoreConf.ConfVars.EXECUTE_SET_UGI.getHiveName());
-    setHiveConf(conf, HiveConf.ConfVars.DYNAMICPARTITIONINGMODE, "nonstrict");
+    setHiveConf(conf, HiveConf.ConfVars.DYNAMIC_PARTITIONING_MODE, "nonstrict");
     if (streamingOptimizations) {
       setHiveConf(conf, HiveConf.ConfVars.HIVE_ORC_DELTA_STREAMING_OPTIMIZATIONS_ENABLED, true);
     }

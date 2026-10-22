@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.dbinstall.rules;
 
@@ -25,14 +26,15 @@ import org.apache.hadoop.hive.metastore.utils.MetaStoreServerUtils;
  */
 public class Derby extends DatabaseRule {
 
-  @Override
-  public String getDockerImageName() {
-    return null;
+  boolean purgeInAfter;
+
+  public Derby() {
+    this(false);
   }
 
-  @Override
-  public String[] getDockerAdditionalArgs() {
-    return null;
+  public Derby(boolean purgeInAfter) {
+    super();
+    this.purgeInAfter = purgeInAfter;
   }
 
   @Override
@@ -62,19 +64,18 @@ public class Derby extends DatabaseRule {
 
   @Override
   public String getJdbcDriver() {
-    return "org.apache.derby.jdbc.EmbeddedDriver";
+    return "org.apache.derby.iapi.jdbc.AutoloadedDriver";
   }
 
   @Override
   public String getJdbcUrl() {
-    return String.format("jdbc:derby:memory:%s/%s;create=true", System.getProperty("test.tmp.dir"),
-        getDb());
+
+    return String.format("jdbc:derby:memory:%s;create=true", getDb());
   }
 
   @Override
   public String getInitialJdbcUrl() {
-    return String.format("jdbc:derby:memory:%s/%s;create=true", System.getProperty("test.tmp.dir"),
-        getDb());
+    return String.format("jdbc:derby:memory:%s;create=true", getDb());
   }
 
   public String getDb() {
@@ -82,18 +83,21 @@ public class Derby extends DatabaseRule {
   };
 
   @Override
-  public boolean isContainerReady(String logOutput) {
-    return true;
-  }
-
-  @Override
-  public void before() throws Exception {
+  public void before() {
     MetastoreSchemaTool.setHomeDirForTesting();
   }
 
   @Override
   public void after() {
-    // no-op, no need for docker container for derby
+    if(purgeInAfter) {
+      try {
+        java.sql.DriverManager.getConnection(String.format("jdbc:derby:memory:%s;drop=true", getDb())).close();
+      } catch(Exception e) {
+        if(!e.getMessage().contains("dropped")) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
   }
 
   @Override

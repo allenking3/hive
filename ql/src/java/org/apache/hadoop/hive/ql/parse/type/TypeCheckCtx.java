@@ -9,24 +9,27 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse.type;
 
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.hadoop.hive.ql.lib.NodeProcessorCtx;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
+import org.apache.hadoop.hive.ql.parse.QBSubQueryParseInfo;
 import org.apache.hadoop.hive.ql.parse.RowResolver;
 import org.apache.hadoop.hive.ql.parse.UnparseTranslator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -53,7 +56,7 @@ public class TypeCheckCtx implements NodeProcessorCtx {
   /**
    * Map from astnode of a subquery to it's logical plan.
    */
-  private Map<ASTNode, RelNode> subqueryToRelNode;
+  private Map<ASTNode, QBSubQueryParseInfo> subqueryToRelNode;
 
   private final boolean useCaching;
 
@@ -95,6 +98,8 @@ public class TypeCheckCtx implements NodeProcessorCtx {
   private final boolean allowSubQueryExpr;
 
   private RexBuilder rexBuilder;
+
+  private final List<String> columnAliases;
 
   /**
    * Constructor.
@@ -145,6 +150,7 @@ public class TypeCheckCtx implements NodeProcessorCtx {
     this.outerRR = null;
     this.subqueryToRelNode = null;
     this.rexBuilder = rexBuilder;
+    this.columnAliases = new ArrayList<>();
   }
 
   /**
@@ -181,14 +187,14 @@ public class TypeCheckCtx implements NodeProcessorCtx {
    * @param subqueryToRelNode
    *          the subqueryToRelNode to set
    */
-  public void setSubqueryToRelNode(Map<ASTNode, RelNode> subqueryToRelNode) {
+  public void setSubqueryToRelNode(Map<ASTNode, QBSubQueryParseInfo> subqueryToRelNode) {
     this.subqueryToRelNode = subqueryToRelNode;
   }
 
   /**
    * @return the outerRR
    */
-  public Map<ASTNode, RelNode> getSubqueryToRelNode() {
+  public Map<ASTNode, QBSubQueryParseInfo> getSubqueryToRelNode() {
     return subqueryToRelNode;
   }
 
@@ -294,5 +300,13 @@ public class TypeCheckCtx implements NodeProcessorCtx {
 
   public RexBuilder getRexBuilder() {
     return rexBuilder;
+  }
+
+  public void addColumnAlias(String alias) {
+    columnAliases.add(alias);
+  }
+
+  public List<String> getColumnAliases() {
+    return columnAliases;
   }
 }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
@@ -22,6 +23,8 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hive.cli.CliSessionState;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
+import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.AllocateTableWriteIdsRequest;
 import org.apache.hadoop.hive.metastore.api.OpenTxnRequest;
 import org.apache.hadoop.hive.metastore.api.OpenTxnsResponse;
@@ -35,13 +38,12 @@ import org.apache.hadoop.hive.metastore.api.TxnOpenException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.UnlockRequest;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
-import org.apache.hadoop.hive.metastore.txn.TxnDbUtil;
+import org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil;
 import org.apache.hadoop.hive.metastore.txn.TxnStore;
 import org.apache.hadoop.hive.ql.DriverFactory;
 import org.apache.hadoop.hive.ql.IDriver;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.shims.Utils;
-
 import org.junit.rules.TestName;
 import org.junit.After;
 import org.junit.Assert;
@@ -59,18 +61,18 @@ import java.util.List;
 import java.util.Collections;
 import java.util.Map;
 
-import static org.apache.hadoop.hive.metastore.ReplChangeManager.SOURCE_OF_REPLICATION;
+import static org.apache.hadoop.hive.common.repl.ReplConst.SOURCE_OF_REPLICATION;
 
 /**
  * TestReplicationScenariosAcidTablesBase - base class for replication for ACID tables tests
  */
 public class BaseReplicationScenariosAcidTables {
-
   @Rule
   public final TestName testName = new TestName();
 
   protected static final Logger LOG = LoggerFactory.getLogger(TestReplicationScenarios.class);
   private static final Path REPLICA_EXTERNAL_BASE = new Path("/replica_external_base");
+  protected static final String PRIMARY_CAT_NAME = Warehouse.DEFAULT_CATALOG_NAME;
   protected static String fullyQualifiedReplicaExternalBase;
   static WarehouseInstance primary;
   static WarehouseInstance replica, replicaNonAcid;
@@ -81,11 +83,13 @@ public class BaseReplicationScenariosAcidTables {
 
   static void internalBeforeClassSetup(Map<String, String> overrides, Class clazz)
           throws Exception {
-    conf = new HiveConf(clazz);
+    conf = new HiveConfForTest(clazz);
+    //TODO: HIVE-28044: Replication tests to run on Tez
+    conf.setVar(HiveConf.ConfVars.HIVE_EXECUTION_ENGINE, "mr");
     conf.set("dfs.client.use.datanode.hostname", "true");
     conf.set("hadoop.proxyuser." + Utils.getUGI().getShortUserName() + ".hosts", "*");
     MiniDFSCluster miniDFSCluster =
-        new MiniDFSCluster.Builder(conf).numDataNodes(1).format(true).build();
+        new MiniDFSCluster.Builder(conf).numDataNodes(2).format(true).build();
     HashMap<String, String> acidEnableConf = new HashMap<String, String>() {{
       put("fs.defaultFS", miniDFSCluster.getFileSystem().getUri().toString());
       put("hive.support.concurrency", "true");
@@ -117,7 +121,7 @@ public class BaseReplicationScenariosAcidTables {
     replicaNonAcid = new WarehouseInstance(LOG, miniDFSCluster, overridesForHiveConf1);
   }
 
-  private static void setReplicaExternalBase(FileSystem fs, Map<String, String> confMap) throws IOException {
+  protected static void setReplicaExternalBase(FileSystem fs, Map<String, String> confMap) throws IOException {
     fs.mkdirs(REPLICA_EXTERNAL_BASE);
     fullyQualifiedReplicaExternalBase =  fs.getFileStatus(REPLICA_EXTERNAL_BASE).getPath().toString();
     confMap.put(HiveConf.ConfVars.REPL_EXTERNAL_TABLE_BASE_DIR.varname, fullyQualifiedReplicaExternalBase);
@@ -341,14 +345,14 @@ public class BaseReplicationScenariosAcidTables {
     OpenTxnsResponse otResp = txnHandler.openTxns(new OpenTxnRequest(numTxns, "u1", "localhost"));
     List<Long> txns = otResp.getTxn_ids();
     String txnIdRange = " txn_id >= " + txns.get(0) + " and txn_id <= " + txns.get(numTxns - 1);
-    Assert.assertEquals(TxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
-            numTxns, TxnDbUtil.countQueryAgent(primaryConf,
+    Assert.assertEquals(TestTxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
+            numTxns, TestTxnDbUtil.countQueryAgent(primaryConf,
                     "select count(*) from TXNS where txn_state = 'o' and " + txnIdRange));
     return txns;
   }
 
-  List<Long> allocateWriteIdsForTablesAndAquireLocks(String primaryDbName, Map<String, Long> tables,
-                                                     TxnStore txnHandler,
+  List<Long> allocateWriteIdsForTablesAndAcquireLocks(String primaryCatName, String primaryDbName,
+                                                      Map<String, Long> tables, TxnStore txnHandler,
                                                      List<Long> txns, HiveConf primaryConf) throws Throwable {
     AllocateTableWriteIdsRequest rqst = new AllocateTableWriteIdsRequest();
     rqst.setDbName(primaryDbName);
@@ -360,6 +364,7 @@ public class BaseReplicationScenariosAcidTables {
       for (long txnId : txns) {
         LockComponent comp = new LockComponent(LockType.SHARED_WRITE, LockLevel.TABLE,
           primaryDbName);
+        comp.setCatName(primaryCatName);
         comp.setTablename(entry.getKey());
         comp.setOperationType(DataOperationType.UPDATE);
         List<LockComponent> components = new ArrayList<LockComponent>(1);
@@ -376,9 +381,9 @@ public class BaseReplicationScenariosAcidTables {
   void verifyWriteIdsForTables(Map<String, Long> tables, HiveConf conf, String dbName)
           throws Throwable {
     for(Map.Entry<String, Long> entry : tables.entrySet()) {
-      Assert.assertEquals(TxnDbUtil.queryToString(conf, "select * from TXN_TO_WRITE_ID"),
+      Assert.assertEquals(TestTxnDbUtil.queryToString(conf, "select * from TXN_TO_WRITE_ID"),
                           entry.getValue().longValue(),
-                          TxnDbUtil.countQueryAgent(conf,
+                          TestTxnDbUtil.countQueryAgent(conf,
           "select count(*) from TXN_TO_WRITE_ID where t2w_database = '"
                     + dbName.toLowerCase()
                     + "' and t2w_table = '" + entry.getKey() + "'"));
@@ -388,22 +393,22 @@ public class BaseReplicationScenariosAcidTables {
   void verifyAllOpenTxnsAborted(List<Long> txns, HiveConf primaryConf) throws Throwable {
     int numTxns = txns.size();
     String txnIdRange = " txn_id >= " + txns.get(0) + " and txn_id <= " + txns.get(numTxns - 1);
-    Assert.assertEquals(TxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
-            0, TxnDbUtil.countQueryAgent(primaryConf,
+    Assert.assertEquals(TestTxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
+            0, TestTxnDbUtil.countQueryAgent(primaryConf,
                     "select count(*) from TXNS where txn_state = 'o' and " + txnIdRange));
-    Assert.assertEquals(TxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
-            numTxns, TxnDbUtil.countQueryAgent(primaryConf,
+    Assert.assertEquals(TestTxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
+            numTxns, TestTxnDbUtil.countQueryAgent(primaryConf,
                     "select count(*) from TXNS where txn_state = 'a' and " + txnIdRange));
   }
 
   void verifyAllOpenTxnsNotAborted(List<Long> txns, HiveConf primaryConf) throws Throwable {
     int numTxns = txns.size();
     String txnIdRange = " txn_id >= " + txns.get(0) + " and txn_id <= " + txns.get(numTxns - 1);
-    Assert.assertEquals(TxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
-      numTxns, TxnDbUtil.countQueryAgent(primaryConf,
+    Assert.assertEquals(TestTxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
+      numTxns, TestTxnDbUtil.countQueryAgent(primaryConf,
         "select count(*) from TXNS where txn_state = 'o' and " + txnIdRange));
-    Assert.assertEquals(TxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
-      0, TxnDbUtil.countQueryAgent(primaryConf,
+    Assert.assertEquals(TestTxnDbUtil.queryToString(primaryConf, "select * from TXNS"),
+      0, TestTxnDbUtil.countQueryAgent(primaryConf,
         "select count(*) from TXNS where txn_state = 'a' and " + txnIdRange));
   }
 
@@ -411,7 +416,7 @@ public class BaseReplicationScenariosAcidTables {
     // Verify the next write id
     for(Map.Entry<String, Long> entry : tables.entrySet()) {
       String[] nextWriteId =
-              TxnDbUtil.queryToString(conf,
+              TestTxnDbUtil.queryToString(conf,
                       "select nwi_next from NEXT_WRITE_ID where  nwi_database = '"
                               + dbName.toLowerCase() + "' and nwi_table = '"
                               + entry.getKey() + "'").split("\n");
@@ -422,9 +427,9 @@ public class BaseReplicationScenariosAcidTables {
   void verifyCompactionQueue(Map<String, Long> tables, String dbName, HiveConf conf)
           throws Throwable {
     for(Map.Entry<String, Long> entry : tables.entrySet()) {
-      Assert.assertEquals(TxnDbUtil.queryToString(conf, "select * from COMPACTION_QUEUE"),
+      Assert.assertEquals(TestTxnDbUtil.queryToString(conf, "select * from COMPACTION_QUEUE"),
                           entry.getValue().longValue(),
-                          TxnDbUtil.countQueryAgent(conf,
+                          TestTxnDbUtil.countQueryAgent(conf,
                     "select count(*) from COMPACTION_QUEUE where cq_database = '" + dbName
                             + "' and cq_table = '" + entry.getKey() + "'"));
     }

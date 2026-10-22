@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.tools;
@@ -24,7 +25,6 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -1085,28 +1085,34 @@ public class GenVectorCode extends Task {
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n, true);", ""},
       // Log(base, Col) is a special case and will be implemented separately from this template
       // Pow(col, P) and Power(col, P) are special cases implemented separately from this template
-      {"ColumnUnaryFunc", "FuncSqrt", "double", "double", "Math.sqrt", "", "",
+      {"ColumnUnaryFunc", "FuncSqrt", "double", "double", "StrictMath.sqrt", "", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
-      {"ColumnUnaryFunc", "FuncSqrt", "double", "long", "Math.sqrt", "(double)", "",
+      {"ColumnUnaryFunc", "FuncSqrt", "double", "long", "StrictMath.sqrt", "(double)", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
-      {"ColumnUnaryFunc", "FuncASin", "double", "double", "Math.asin", "", "",
+      {"ColumnUnaryFunc", "FuncASin", "double", "double", "StrictMath.asin", "", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
-      {"ColumnUnaryFunc", "FuncASin", "double", "long", "Math.asin", "(double)", "",
+      {"ColumnUnaryFunc", "FuncASin", "double", "long", "StrictMath.asin", "(double)", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
-      {"ColumnUnaryFunc", "FuncACos", "double", "double", "Math.acos", "", "",
+      {"ColumnUnaryFunc", "FuncACos", "double", "double", "StrictMath.acos", "", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
-      {"ColumnUnaryFunc", "FuncACos", "double", "long", "Math.acos", "(double)", "",
+      {"ColumnUnaryFunc", "FuncACos", "double", "long", "StrictMath.acos", "(double)", "",
         "MathExpr.NaNToNull(outputColVector, sel, batch.selectedInUse, n);", ""},
       {"ColumnUnaryFunc", "FuncAbs", "double", "double", "Math.abs", "", "", "", ""},
       {"ColumnUnaryFunc", "FuncAbs", "long", "long", "MathExpr.abs", "", "", "", ""},
-      {"ColumnUnaryFunc", "FuncSin", "double", "double", "Math.sin", "", "", "", ""},
-      {"ColumnUnaryFunc", "FuncSin", "double", "long", "Math.sin", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncSin", "double", "double", "StrictMath.sin", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncSin", "double", "long", "StrictMath.sin", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncSinh", "double", "double", "StrictMath.sinh", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncSinh", "double", "long", "StrictMath.sinh", "(double)", "", "", ""},
       {"ColumnUnaryFunc", "FuncCos", "double", "double", "StrictMath.cos", "", "", "", ""},
       {"ColumnUnaryFunc", "FuncCos", "double", "long", "StrictMath.cos", "(double)", "", "", ""},
-      {"ColumnUnaryFunc", "FuncTan", "double", "double", "Math.tan", "", "", "", ""},
-      {"ColumnUnaryFunc", "FuncTan", "double", "long", "Math.tan", "(double)", "", "", ""},
-      {"ColumnUnaryFunc", "FuncATan", "double", "double", "Math.atan", "", "", "", ""},
-      {"ColumnUnaryFunc", "FuncATan", "double", "long", "Math.atan", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncCosh", "double", "double", "StrictMath.cosh", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncCosh", "double", "long", "StrictMath.cosh", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncTan", "double", "double", "StrictMath.tan", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncTan", "double", "long", "StrictMath.tan", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncTanh", "double", "double", "StrictMath.tanh", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncTanh", "double", "long", "StrictMath.tanh", "(double)", "", "", ""},
+      {"ColumnUnaryFunc", "FuncATan", "double", "double", "StrictMath.atan", "", "", "", ""},
+      {"ColumnUnaryFunc", "FuncATan", "double", "long", "StrictMath.atan", "(double)", "", "", ""},
       {"ColumnUnaryFunc", "FuncDegrees", "double", "double", "Math.toDegrees", "", "", "", ""},
       {"ColumnUnaryFunc", "FuncDegrees", "double", "long", "Math.toDegrees", "(double)", "", "", ""},
       {"ColumnUnaryFunc", "FuncRadians", "double", "double", "Math.toRadians", "", "", "", ""},
@@ -1208,6 +1214,16 @@ public class GenVectorCode extends Task {
       // Template, <ClassName>, <ValueType>
       {"VectorUDAFSum", "VectorUDAFSumLong", "long"},
       {"VectorUDAFSum", "VectorUDAFSumDouble", "double"},
+
+      // "long" as <ValueType> for "MERGING" is ignored
+      {"VectorUDAFComputeBitVector", "VectorUDAFComputeBitVectorFinal", "long", "MERGING"},
+      {"VectorUDAFComputeBitVector", "VectorUDAFComputeBitVectorLong", "long", "COMPLETE"},
+      {"VectorUDAFComputeBitVector", "VectorUDAFComputeBitVectorDouble", "double", "COMPLETE"},
+
+      // "double" as <ValueType> for "MERGING" is ignored
+      {"VectorUDAFComputeDsKllSketch", "VectorUDAFComputeDsKllSketchFinal", "double", "MERGING"},
+      {"VectorUDAFComputeDsKllSketch", "VectorUDAFComputeDsKllSketchDouble", "double", "COMPLETE"},
+
 
       // Template, <ClassName>, <ValueType>, <IfDefined>
       {"VectorUDAFAvg", "VectorUDAFAvgLong", "long", "PARTIAL1"},
@@ -1460,6 +1476,10 @@ public class GenVectorCode extends Task {
         generateVectorUDAFAvgObject(tdesc);
       } else if (tdesc[0].equals("VectorUDAFAvgDecimalMerge")) {
         generateVectorUDAFAvgMerge(tdesc);
+      } else if (tdesc[0].equals("VectorUDAFComputeBitVector")) {
+        generateVectorUDAFDataSummary(tdesc);
+      } else if (tdesc[0].equals("VectorUDAFComputeDsKllSketch")) {
+        generateVectorUDAFDataSummary(tdesc);
       } else if (tdesc[0].equals("VectorUDAFVar")) {
         generateVectorUDAFVar(tdesc);
       } else if (tdesc[0].equals("VectorUDAFVarDecimal")) {
@@ -1922,6 +1942,27 @@ public class GenVectorCode extends Task {
     templateString = templateString.replaceAll("<UpperCaseColumnVectorType>", valueType.toUpperCase());
     templateString = templateString.replaceAll("<InputColumnVectorType>", columnType);
 
+    templateString = evaluateIfDefined(templateString, ifDefined);
+
+    writeFile(templateFile.lastModified(), udafOutputDirectory, udafClassesDirectory,
+        className, templateString);
+  }
+
+  private void generateVectorUDAFDataSummary(String[] tdesc) throws Exception {
+    String className = tdesc[1];
+    String valueType = tdesc[2];
+    String columnType = getColumnVectorType(valueType);
+    String ifDefined = "";
+    if (tdesc.length > 3) {
+      ifDefined = tdesc[3];
+    }
+
+    File templateFile = new File(joinPath(this.udafTemplateDirectory, tdesc[0] + ".txt"));
+
+    String templateString = readFile(templateFile);
+    templateString = templateString.replaceAll("<ClassName>", className);
+    templateString = templateString.replaceAll("<UpperCaseColumnVectorType>", valueType.toUpperCase());
+    templateString = templateString.replaceAll("<InputColumnVectorType>", columnType);
     templateString = evaluateIfDefined(templateString, ifDefined);
 
     writeFile(templateFile.lastModified(), udafOutputDirectory, udafClassesDirectory,
@@ -3405,7 +3446,7 @@ public class GenVectorCode extends Task {
     if (type.equals("date")) {
       return
           "Date dt = Date.ofEpochMilli(DateWritableV2.daysToMillis((int) value));\n" +
-          "    return  \"date \" + dt.toString() + \", \" + getColumnParamString(0, colNum);";
+          "    return  \"date \" + dt.toString() + \", \" + getColumnParamString(0, inputColumnNum[0]);";
     } else {
       return
           "    return super.vectorExpressionParameters();";
@@ -3416,7 +3457,7 @@ public class GenVectorCode extends Task {
     if (type.equals("date")) {
       return
           "Date dt = Date.ofEpochMilli(DateWritableV2.daysToMillis((int) value));\n" +
-          "    return getColumnParamString(0, colNum) + \", date \" + dt.toString();";
+          "    return getColumnParamString(0, inputColumnNum[0]) + \", date \" + dt.toString();";
     } else {
       return
           "    return super.vectorExpressionParameters();";

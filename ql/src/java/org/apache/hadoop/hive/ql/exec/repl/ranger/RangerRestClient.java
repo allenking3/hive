@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.repl.ranger;
@@ -37,6 +38,9 @@ public interface RangerRestClient {
                                               String rangerHiveServiceName,
                                               HiveConf hiveConf) throws Exception;
 
+  void deleteRangerPolicy(String policyName, String baseUrl, String rangerHiveServiceName,
+                          HiveConf hiveConf) throws Exception;
+
   List<RangerPolicy> removeMultiResourcePolicies(List<RangerPolicy> rangerPolicies);
 
   List<RangerPolicy> changeDataSet(List<RangerPolicy> rangerPolicies, String sourceDbName,
@@ -50,6 +54,7 @@ public interface RangerRestClient {
 
   boolean checkConnection(String url, HiveConf hiveConf) throws Exception;
 
-  List<RangerPolicy> addDenyPolicies(List<RangerPolicy> rangerPolicies, String rangerServiceName,
-                                     String sourceDb, String targetDb) throws SemanticException;
+  RangerPolicy getDenyPolicyForReplicatedDb(String rangerServiceName, String sourceDb,
+                                            String targetDb) throws SemanticException;
+
 }

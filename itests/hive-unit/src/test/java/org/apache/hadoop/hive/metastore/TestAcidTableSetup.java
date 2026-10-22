@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.metastore;
@@ -26,7 +27,7 @@ import java.util.Map;
 import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf.ConfVars;
-import org.apache.hadoop.hive.metastore.txn.TxnDbUtil;
+import org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil;
 import org.junit.Before;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +59,7 @@ public class TestAcidTableSetup {
     MetastoreConf.setClass(conf, ConfVars.EXPRESSION_PROXY_CLASS,
         DefaultPartitionExpressionProxy.class, PartitionExpressionProxy.class);
     client = new HiveMetaStoreClient(conf);
-    TxnDbUtil.prepDb(conf);
+    TestTxnDbUtil.prepDb(conf);
   }
 
   @Test
@@ -91,7 +92,7 @@ public class TestAcidTableSetup {
       client.createTable(t);
       fail("Expected exception");
     } catch (MetaException e) {
-      assertEquals("'transactional' property of TBLPROPERTIES may only have value 'true': acidDb.acidTable",
+      assertEquals("'transactional' property of TBLPROPERTIES may only have value 'true': aciddb.acidtable",
           e.getMessage());
     }
 
@@ -108,7 +109,7 @@ public class TestAcidTableSetup {
       client.createTable(t);
       fail("Expected exception");
     } catch (MetaException e) {
-      assertEquals("'transactional' property of TBLPROPERTIES may only have value 'true': acidDb.acidTable",
+      assertEquals("'transactional' property of TBLPROPERTIES may only have value 'true': aciddb.acidtable",
           e.getMessage());
     }
 
@@ -125,7 +126,7 @@ public class TestAcidTableSetup {
       client.createTable(t);
       fail("Expected exception");
     } catch (MetaException e) {
-      assertEquals("The table must be stored using an ACID compliant format (such as ORC): acidDb.acidTable",
+      assertEquals("The table must be stored using an ACID compliant format (such as ORC): aciddb.acidtable",
           e.getMessage());
     }
 
@@ -145,7 +146,7 @@ public class TestAcidTableSetup {
       client.createTable(t);
       fail("Expected exception");
     } catch (MetaException e) {
-      assertEquals("The table must be stored using an ACID compliant format (such as ORC): acidDb.acidTable",
+      assertEquals("The table must be stored using an ACID compliant format (such as ORC): aciddb.acidtable",
           e.getMessage());
     }
 
@@ -197,7 +198,7 @@ public class TestAcidTableSetup {
       client.alter_table(dbName, tblName, t);
       fail("Expected exception");
     } catch (MetaException e) {
-      assertEquals("The table must be stored using an ACID compliant format (such as ORC): acidDb.acidTable1",
+      assertEquals("The table must be stored using an ACID compliant format (such as ORC): aciddb.acidtable1",
           e.getMessage());
     }
 
@@ -227,7 +228,7 @@ public class TestAcidTableSetup {
         client.dropTable(dbName, tableName);
       }
       client.dropDatabase(dbName);
-    } catch (NoSuchObjectException|InvalidOperationException e) {
+    } catch (NoSuchObjectException|InvalidOperationException|MetaException e) {
       // NOP
     }
   }

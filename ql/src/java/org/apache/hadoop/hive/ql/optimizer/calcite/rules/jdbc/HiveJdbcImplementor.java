@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.rules.jdbc;
 
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.adapter.jdbc.JdbcImplementor;
+import org.apache.calcite.adapter.jdbc.JdbcTableScan;
 import org.apache.calcite.linq4j.tree.Expressions;
 import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
@@ -52,12 +54,11 @@ public class HiveJdbcImplementor extends JdbcImplementor {
 
   @Override public Result visit(Project e) {
     // This variant keeps the column aliases instead of producing STAR
-    Result x = visitChild(0, e.getInput());
+    Result x = visitInput(e, 0, Clause.SELECT);
     parseCorrelTable(e, x);
-    final Builder builder =
-        x.builder(e, Clause.SELECT);
+    final Builder builder = x.builder(e);
     final List<SqlNode> selectList = new ArrayList<>();
-    for (RexNode ref : e.getChildExps()) {
+    for (RexNode ref : e.getProjects()) {
       SqlNode sqlExpr = builder.context.toSql(null, ref);
       addSelect(selectList, sqlExpr, e.getRowType());
     }
@@ -66,44 +67,9 @@ public class HiveJdbcImplementor extends JdbcImplementor {
     return builder.result();
   }
 
-  @Override public Result visit(Sort e) {
-    Result x = visitChild(0, e.getInput());
-    Builder builder = x.builder(e, Clause.ORDER_BY);
-    List<SqlNode> orderByList = Expressions.list();
-    for (RelFieldCollation field : e.getCollation().getFieldCollations()) {
-      builder.addOrderItem(orderByList, field);
-    }
-
-    // Create select list as we want to keep the column aliases
-    // instead of producing STAR
-    final List<SqlNode> selectList = new ArrayList<>();
-    for (int i = 0; i < e.getRowType().getFieldCount(); i++) {
-      RexInputRef ref = RexInputRef.of(i, e.getRowType());
-      SqlNode sqlExpr = builder.context.toSql(null, ref);
-      addSelect(selectList, sqlExpr, e.getRowType());
-    }
-    builder.setSelect(new SqlNodeList(selectList, POS));
-
-    if (!orderByList.isEmpty()) {
-      builder.setOrderBy(new SqlNodeList(orderByList, POS));
-      x = builder.result();
-    }
-    if (e.fetch != null) {
-      builder = x.builder(e, Clause.FETCH);
-      builder.setFetch(builder.context.toSql(null, e.fetch));
-      x = builder.result();
-    }
-    if (e.offset != null) {
-      builder = x.builder(e, Clause.OFFSET);
-      builder.setOffset(builder.context.toSql(null, e.offset));
-      x = builder.result();
-    }
-    return x;
-  }
-
   @Override public Result visit(Join e) {
-    final Result leftResult = visitChild(0, e.getLeft()).resetAlias();
-    final Result rightResult = visitChild(1, e.getRight()).resetAlias();
+    final Result leftResult = visitInput(e, 0).resetAlias();
+    final Result rightResult = visitInput(e, 1).resetAlias();
     final Context leftContext = leftResult.qualifiedContext();
     final Context rightContext = rightResult.qualifiedContext();
     SqlNode sqlCondition = null;
@@ -127,6 +93,10 @@ public class HiveJdbcImplementor extends JdbcImplementor {
             condType,
             sqlCondition);
     return result(join, leftResult, rightResult);
+  }
+
+  public Result visit(JdbcTableScan scan) {
+    return result(scan.jdbcTable.tableName(), ImmutableList.of(Clause.FROM), scan, null);
   }
 
   /**

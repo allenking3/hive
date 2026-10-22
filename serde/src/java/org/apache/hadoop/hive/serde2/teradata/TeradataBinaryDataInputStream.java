@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2.teradata;
@@ -136,7 +137,7 @@ public class TeradataBinaryDataInputStream extends SwappedDataInputStream {
    * Read CHAR(N).
    * The representation of char in Teradata binary format is
    * the byte number to read is based on the [charLength] * [bytePerChar] &lt;- totalLength,
-   * bytePerChar is decided by the charset: LATAIN charset is 2 bytes per char and UNICODE charset is 3 bytes per char.
+   * bytePerChar is decided by the charset: LATIN charset is 2 bytes per char and UNICODE charset is 3 bytes per char.
    * the null char will use space to pad.
    *
    * @param totalLength the total length

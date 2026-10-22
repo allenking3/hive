@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.ddl;
 
@@ -41,17 +42,24 @@ public final class DDLWork implements Serializable {
   /** List of WriteEntities that are passed to the hooks. */
   private Set<WriteEntity> outputs;
   private boolean isReplication;
+  private boolean executeInParallel;
   private String dumpDirectory;
   private transient ReplicationMetricCollector metricCollector;
 
   public DDLWork(Set<ReadEntity> inputs, Set<WriteEntity> outputs, DDLDesc ddlDesc, boolean isReplication,
                  String dumpDirectory, ReplicationMetricCollector metricCollector) {
+    this(inputs, outputs, ddlDesc, isReplication, dumpDirectory, metricCollector, false);
+  }
+
+  public DDLWork(Set<ReadEntity> inputs, Set<WriteEntity> outputs, DDLDesc ddlDesc, boolean isReplication,
+                 String dumpDirectory, ReplicationMetricCollector metricCollector, boolean executeInParallel) {
     this.inputs = inputs;
     this.outputs = outputs;
     this.ddlDesc = ddlDesc;
     this.isReplication = isReplication;
     this.dumpDirectory = dumpDirectory;
     this.metricCollector = metricCollector;
+    this.executeInParallel = executeInParallel;
   }
 
   public DDLWork(Set<ReadEntity> inputs, Set<WriteEntity> outputs, DDLDesc ddlDesc) {
@@ -91,5 +99,9 @@ public final class DDLWork implements Serializable {
   @Explain(skipHeader = true, explainLevels = { Level.USER, Level.DEFAULT, Level.EXTENDED })
   public DDLDesc getDDLDesc() {
     return ddlDesc;
+  }
+
+  public boolean canExecuteInParallel() {
+    return executeInParallel;
   }
 }

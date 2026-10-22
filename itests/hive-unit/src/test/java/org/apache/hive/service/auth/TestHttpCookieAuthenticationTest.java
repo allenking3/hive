@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.service.auth;
@@ -34,7 +35,6 @@ import java.util.Map;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hive.jdbc.HiveConnection;
-import org.apache.hive.jdbc.HiveDriver;
 import org.apache.hive.jdbc.miniHS2.MiniHS2;
 import org.apache.http.client.CookieStore;
 import org.apache.http.client.HttpClient;
@@ -75,8 +75,6 @@ public class TestHttpCookieAuthenticationTest {
   @Test
   public void testHttpJdbcCookies() throws Exception {
     String sqlQuery = "show tables";
-
-    Class.forName(HiveDriver.class.getCanonicalName());
 
     String username = System.getProperty("user.name");
     try(Connection connection = DriverManager.getConnection(miniHS2.getJdbcURL(), username, "bar")) {

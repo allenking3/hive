@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.llap.cache;
 
@@ -39,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.hadoop.hive.common.io.CacheTag;
+import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.common.io.DiskRange;
 import org.apache.hadoop.hive.common.io.DiskRangeList;
 import org.apache.hadoop.hive.common.io.DataCache.DiskRangeListFactory;
@@ -71,10 +73,17 @@ public class TestLowLevelCacheImpl {
 
     @Override
     public void deallocate(MemoryBuffer buffer) {
+      if (buffer instanceof LlapCacheableBuffer) {
+        ((LlapCacheableBuffer)buffer).invalidate();
+      }
     }
 
     @Override
     public void deallocateEvicted(MemoryBuffer buffer) {
+    }
+
+    @Override
+    public void deallocateProactivelyEvicted(MemoryBuffer buffer) {
     }
 
     @Override
@@ -230,6 +239,22 @@ Example code to test specific scenarios:
   }
 
   @Test
+  public void testCacheHydrationMetadata() {
+    LowLevelCacheImpl cache = new LowLevelCacheImpl(
+        LlapDaemonCacheMetrics.create("test", "1"), new DummyCachePolicy(),
+        new DummyAllocator(), true, -1); // no cleanup thread
+    long fn1 = 1234;
+    long baseOffset = 100;
+    LlapDataBuffer[] buffs = IntStream.range(0, 3).mapToObj(i -> fb()).toArray(LlapDataBuffer[]::new);
+    DiskRange[] drs = drs(10, 20, 30);
+
+    cache.putFileData(fn1, drs, buffs, baseOffset, Priority.NORMAL, null, null);
+    for (int i = 0; i < buffs.length; i++) {
+      assertEquals(drs[i].getOffset() + baseOffset, buffs[i].getStart());
+    }
+  }
+
+  @Test
   public void testDeclaredLengthUnsetForCollidedBuffer() throws Exception {
     LowLevelCacheImpl cache = new LowLevelCacheImpl(
         LlapDaemonCacheMetrics.create("test", "1"), new DummyCachePolicy(),
@@ -269,6 +294,15 @@ Example code to test specific scenarios:
 
   @Test
   public void testProactiveEvictionMark() {
+    _testProactiveEvictionMark(false);
+  }
+
+  @Test
+  public void testProactiveEvictionMarkInstantDeallocation() {
+    _testProactiveEvictionMark(true);
+  }
+
+  private void _testProactiveEvictionMark(boolean isInstantDeallocation) {
     LowLevelCacheImpl cache = new LowLevelCacheImpl(
         LlapDaemonCacheMetrics.create("test", "1"), new DummyCachePolicy(),
         new DummyAllocator(), true, -1); // no cleanup thread
@@ -277,24 +311,24 @@ Example code to test specific scenarios:
 
     LlapDataBuffer[] buffs1 = IntStream.range(0, 4).mapToObj(i -> fb()).toArray(LlapDataBuffer[]::new);
     DiskRange[] drs1 = drs(IntStream.range(1, 5).toArray());
-    CacheTag tag1 = CacheTag.build("default.table1");
+    CacheTag tag1 = CacheTag.build(Warehouse.DEFAULT_CATALOG_NAME, "default.table1");
 
     LlapDataBuffer[] buffs2 = IntStream.range(0, 41).mapToObj(i -> fb()).toArray(LlapDataBuffer[]::new);
     DiskRange[] drs2 = drs(IntStream.range(1, 42).toArray());
-    CacheTag tag2 = CacheTag.build("default.table2");
+    CacheTag tag2 = CacheTag.build(Warehouse.DEFAULT_CATALOG_NAME, "default.table2");
 
-    Predicate<CacheTag> predicate = tag -> "default.table1".equals(tag.getTableName());
+    Predicate<CacheTag> predicate = tag ->
+        (Warehouse.DEFAULT_CATALOG_NAME + "." + "default.table1").equals(tag.getTableName());
 
     cache.putFileData(fn1, drs1, buffs1, 0, Priority.NORMAL, null, tag1);
     cache.putFileData(fn2, drs2, buffs2, 0, Priority.NORMAL, null, tag2);
+    Arrays.stream(buffs1).forEach(b -> {b.decRef(); b.decRef();});
 
-    // Simulating eviction on some buffers
-    buffs1[2].decRef();
-    buffs1[2].decRef();
+    // Simulating eviction on a buffer
     assertEquals(INVALIDATE_OK, buffs1[2].invalidate());
 
     //buffs1[0,1,3] should be marked, as 2 is already invalidated
-    assertEquals(3, cache.markBuffersForProactiveEviction(predicate));
+    assertEquals(3, cache.markBuffersForProactiveEviction(predicate, isInstantDeallocation));
 
     for (int i = 0; i < buffs1.length; ++i) {
       LlapDataBuffer buffer = buffs1[i];
@@ -302,6 +336,7 @@ Example code to test specific scenarios:
         assertFalse(buffer.isMarkedForEviction());
       } else {
         assertTrue(buffer.isMarkedForEviction());
+        assertEquals(isInstantDeallocation, buffer.isInvalid());
       }
     }
 

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.partition.show;
@@ -38,6 +39,7 @@ import org.apache.hadoop.hive.ql.hooks.ReadEntity;
 import org.apache.hadoop.hive.ql.metadata.Table;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.BaseSemanticAnalyzer;
+import org.apache.hadoop.hive.ql.parse.ColumnAccessInfo;
 import org.apache.hadoop.hive.ql.parse.HiveParser;
 import org.apache.hadoop.hive.ql.parse.HiveTableName;
 import org.apache.hadoop.hive.ql.parse.RowResolver;
@@ -76,6 +78,8 @@ public  class ShowPartitionAnalyzer extends BaseSemanticAnalyzer {
 
     Table table = getTable(HiveTableName.of(tableName));
     inputs.add(new ReadEntity(table));
+    setColumnAccessInfo(new ColumnAccessInfo());
+    table.getPartColNames().forEach(col -> getColumnAccessInfo().add(table.getCompleteName(), col));
 
     ExprNodeDesc filter = getShowPartitionsFilter(table, ast);
     String orderBy = getShowPartitionsOrder(table, ast);
@@ -116,7 +120,7 @@ public  class ShowPartitionAnalyzer extends BaseSemanticAnalyzer {
         }
 
         showFilter = replaceDefaultPartNameAndCastType(target, colTypes,
-            HiveConf.getVar(conf, HiveConf.ConfVars.DEFAULTPARTITIONNAME));
+            HiveConf.getVar(conf, HiveConf.ConfVars.DEFAULT_PARTITION_NAME));
       }
     }
     return showFilter;

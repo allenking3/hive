@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.constraint.add;
@@ -35,6 +36,8 @@ import org.apache.hadoop.hive.ql.ddl.table.AbstractAlterTableAnalyzer;
 import org.apache.hadoop.hive.ql.ddl.table.constraint.Constraints;
 import org.apache.hadoop.hive.ql.ddl.table.constraint.ConstraintsUtils;
 import org.apache.hadoop.hive.ql.exec.TaskFactory;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.ql.metadata.Table;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.HiveParser;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
@@ -58,7 +61,7 @@ public class AlterTableAddConstraintAnalyzer extends AbstractAlterTableAnalyzer 
     List<SQLUniqueConstraint> uniqueConstraints = new ArrayList<>();
     List<SQLCheckConstraint> checkConstraints = new ArrayList<>();
 
-    ASTNode constraintNode = (ASTNode)command.getChild(0);
+    ASTNode constraintNode = (ASTNode) command.getChild(0);
     switch (constraintNode.getToken().getType()) {
     case HiveParser.TOK_UNIQUE:
       ConstraintsUtils.processUniqueConstraints(tableName, constraintNode, uniqueConstraints);
@@ -77,9 +80,15 @@ public class AlterTableAddConstraintAnalyzer extends AbstractAlterTableAnalyzer 
       throw new SemanticException(ErrorMsg.NOT_RECOGNIZED_CONSTRAINT.getMsg(constraintNode.getToken().getText()));
     }
 
-    Constraints constraints = new Constraints(primaryKeys, foreignKeys, null, uniqueConstraints, null,
-        checkConstraints);
+    Constraints constraints =
+        new Constraints(primaryKeys, foreignKeys, null, uniqueConstraints, null, checkConstraints);
     AlterTableAddConstraintDesc desc = new AlterTableAddConstraintDesc(tableName, null, constraints);
+
+    Table table = getTable(tableName);
+    if (AcidUtils.isTransactionalTable(table)) {
+      setAcidDdlDesc(desc);
+    }
+    addInputsOutputsAlterTable(tableName, partitionSpec, desc, desc.getType(), false);
     rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(), desc)));
   }
 }

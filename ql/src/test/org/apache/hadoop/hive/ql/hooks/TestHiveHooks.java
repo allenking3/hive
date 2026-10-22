@@ -6,14 +6,15 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.hooks;
@@ -58,31 +59,21 @@ public class TestHiveHooks {
     }
   }
 
-  public static class OomRunner implements Runnable {
-    @Override public void run() {
-      // no op
-    }
-  }
-
   @Test
   public void testLoadHooksFromConf() throws Exception {
     HiveConf hiveConf = new HiveConf();
-    hiveConf.setVar(HiveConf.ConfVars.PREEXECHOOKS,
+    hiveConf.setVar(HiveConf.ConfVars.PRE_EXEC_HOOKS,
         PreExecHook.class.getName() + "," + PreExecHook.class.getName());
-    hiveConf.setVar(HiveConf.ConfVars.POSTEXECHOOKS,
+    hiveConf.setVar(HiveConf.ConfVars.POST_EXEC_HOOKS,
         PostExecHook.class.getName());
     hiveConf.setVar(HiveConf.ConfVars.SEMANTIC_ANALYZER_HOOK,
         SemanticAnalysisHook.class.getName());
-    hiveConf.setVar(HiveConf.ConfVars.HIVE_SERVER2_OOM_HOOKS,
-        OomRunner.class.getName() + "," + OomRunner.class.getName() + "," + OomRunner.class.getName());
 
     HiveHooks loader = new HiveHooks(hiveConf);
-    verify(HookContext.HookType.HIVE_SERVER2_OOM_HOOKS, loader, OomRunner.class, 0, 3);
     verify(HookContext.HookType.PRE_EXEC_HOOK, loader, PreExecHook.class, 0,2);
     verify(HookContext.HookType.POST_EXEC_HOOK, loader, PostExecHook.class, 0, 1);
     verify(HookContext.HookType.SEMANTIC_ANALYZER_HOOK, loader, SemanticAnalysisHook.class, 0,1);
     // load again
-    verify(HookContext.HookType.HIVE_SERVER2_OOM_HOOKS, loader, OomRunner.class, 3, 3);
     verify(HookContext.HookType.PRE_EXEC_HOOK, loader, PreExecHook.class, 2, 2);
     verify(HookContext.HookType.POST_EXEC_HOOK, loader, PostExecHook.class, 1,1);
     verify(HookContext.HookType.SEMANTIC_ANALYZER_HOOK, loader, SemanticAnalysisHook.class, 1,1);
@@ -109,7 +100,6 @@ public class TestHiveHooks {
   public void testAddHooks() throws Exception {
     HiveConf hiveConf = new HiveConf();
     HiveHooks loader = new HiveHooks(hiveConf);
-    verify(HookContext.HookType.HIVE_SERVER2_OOM_HOOKS, loader, Runnable.class, OomRunner.class);
     verify(HookContext.HookType.PRE_EXEC_HOOK, loader, ExecuteWithHookContext.class, PreExecHook.class);
     verify(HookContext.HookType.POST_EXEC_HOOK, loader, ExecuteWithHookContext.class, PostExecHook.class);
     verify(HookContext.HookType.SEMANTIC_ANALYZER_HOOK, loader, HiveSemanticAnalyzerHook.class, SemanticAnalysisHook.class);

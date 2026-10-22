@@ -9,15 +9,15 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.load.message;
 
-import org.apache.hadoop.hive.metastore.ReplChangeManager;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.messaging.AlterDatabaseMessage;
 import org.apache.hadoop.hive.ql.ddl.DDLWork;
@@ -27,12 +27,9 @@ import org.apache.hadoop.hive.ql.ddl.database.alter.poperties.AlterDatabaseSetPr
 import org.apache.hadoop.hive.ql.ddl.privilege.PrincipalDesc;
 import org.apache.hadoop.hive.ql.exec.Task;
 import org.apache.hadoop.hive.ql.exec.TaskFactory;
-import org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils;
-import org.apache.hadoop.hive.ql.parse.ReplicationSpec;
+import org.apache.hadoop.hive.ql.metadata.HiveUtils;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
-import org.apache.hadoop.hive.ql.parse.repl.dump.Utils;
 
-import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -61,21 +58,15 @@ public class AlterDatabaseHandler extends AbstractMessageHandler {
         Map<String, String> dbProps = newDb.getParameters();
 
         for (Map.Entry<String, String> entry : dbProps.entrySet()) {
-          String key = entry.getKey();
-          // Ignore the keys which are local to source warehouse
-          if (key.startsWith(Utils.BOOTSTRAP_DUMP_STATE_KEY_PREFIX)
-                  || key.equals(ReplicationSpec.KEY.CURR_STATE_ID.toString())
-                  || key.equals(ReplUtils.REPL_CHECKPOINT_KEY)
-                  || key.equals(ReplChangeManager.SOURCE_OF_REPLICATION)
-                  || key.equals(ReplUtils.REPL_FIRST_INC_PENDING_FLAG)) {
-            continue;
-          }
-          newDbProps.put(key, entry.getValue());
+          newDbProps.put(entry.getKey(), entry.getValue());
         }
-        alterDbDesc = new AlterDatabaseSetPropertiesDesc(actualDbName, newDbProps, context.eventOnlyReplicationSpec());
+        // TODO catalog. Need to double check the actual catalog here. Depend on HIVE-29278
+        alterDbDesc = new AlterDatabaseSetPropertiesDesc(HiveUtils.getCurrentCatalogOrDefault(context.hiveConf),
+                actualDbName, newDbProps, context.eventOnlyReplicationSpec());
       } else {
-        alterDbDesc = new AlterDatabaseSetOwnerDesc(actualDbName, new PrincipalDesc(newDb.getOwnerName(),
-            newDb.getOwnerType()), context.eventOnlyReplicationSpec());
+        // TODO catalog. Need to double the actual catalog here. Depend on HIVE-29278
+        alterDbDesc = new AlterDatabaseSetOwnerDesc(HiveUtils.getCurrentCatalogOrDefault(context.hiveConf), actualDbName,
+                new PrincipalDesc(newDb.getOwnerName(), newDb.getOwnerType()), context.eventOnlyReplicationSpec());
       }
 
       Task<DDLWork> alterDbTask = TaskFactory.get(new DDLWork(readEntitySet, writeEntitySet,

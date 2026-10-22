@@ -1,11 +1,15 @@
 PREHOOK: query: drop table if exists char_part_tbl1
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists char_part_tbl1
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop table if exists char_part_tbl2
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists char_part_tbl2
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table studenttab(name string, age int, gpa double) clustered by (age) into 2 buckets stored as orc tblproperties('transactional'='true')
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -154,15 +158,15 @@ STAGE PLANS:
                       Statistics: Num rows: 2 Data size: 268 Basic stats: COMPLETE Column stats: COMPLETE
                       Group By Operator
                         keys: _col0 (type: char(50))
-                        minReductionHashAggr: 0.5
+                        minReductionHashAggr: 0.4
                         mode: hash
                         outputColumnNames: _col0
-                        Statistics: Num rows: 1 Data size: 134 Basic stats: COMPLETE Column stats: COMPLETE
+                        Statistics: Num rows: 2 Data size: 268 Basic stats: COMPLETE Column stats: COMPLETE
                         Dynamic Partitioning Event Operator
                           Target column: gpa (char(5))
                           Target Input: c2
                           Partition key expr: gpa
-                          Statistics: Num rows: 1 Data size: 134 Basic stats: COMPLETE Column stats: COMPLETE
+                          Statistics: Num rows: 2 Data size: 268 Basic stats: COMPLETE Column stats: COMPLETE
                           Target Vertex: Map 3
             Execution mode: vectorized
             Map Vectorization:

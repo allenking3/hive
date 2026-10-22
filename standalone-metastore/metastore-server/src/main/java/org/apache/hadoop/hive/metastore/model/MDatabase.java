@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 /**
@@ -21,7 +22,7 @@
  */
 package org.apache.hadoop.hive.metastore.model;
 
-import org.apache.hadoop.hive.metastore.ReplChangeManager;
+import org.apache.hadoop.hive.common.repl.ReplConst;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,6 +43,9 @@ public class MDatabase {
   private String ownerType;
   private String catalogName;
   private int createTime;
+  private String type;
+  private String connectorName;
+  private String remoteDatabaseName;
 
   /**
    * Default construction to keep jpox/jdo happy
@@ -72,12 +76,28 @@ public class MDatabase {
    */
   public MDatabase(String catalogName, String name, String locationUri, String description,
       Map<String, String> parameters, String managedLocationUri) {
+    this(catalogName, name, locationUri, description, parameters, null, "NATIVE", null);
+  }
+
+    /**
+     * To create a database object
+     * @param catalogName Name of the catalog, the database belongs to.
+     * @param name of the database
+     * @param locationUri Default external Location of the database
+     * @param description Comment describing the database
+     * @param parameters Parameters for the database
+     * @param managedLocationUri Default location for managed tables in database in the warehouse
+     */
+  public MDatabase(String catalogName, String name, String locationUri, String description,
+        Map<String, String> parameters, String managedLocationUri, String type, String dcName) {
     this.name = name;
     this.locationUri = locationUri;
     this.managedLocationUri = managedLocationUri;
     this.description = description;
     this.parameters = parameters;
     this.catalogName = catalogName;
+    this.type = type;
+    this.connectorName = dcName;
   }
 
   /**
@@ -155,9 +175,9 @@ public class MDatabase {
     Set<String> keys = new HashSet<>(parameters.keySet());
     for(String key : keys) {
       // Normalize the case for source of replication parameter
-      if (ReplChangeManager.SOURCE_OF_REPLICATION.equalsIgnoreCase(key)) {
+      if (ReplConst.SOURCE_OF_REPLICATION.equalsIgnoreCase(key)) {
         // TODO :  Some extra validation can also be added as this is a user provided parameter.
-        this.parameters.put(ReplChangeManager.SOURCE_OF_REPLICATION, parameters.get(key));
+        this.parameters.put(ReplConst.SOURCE_OF_REPLICATION, parameters.get(key));
       } else {
         this.parameters.put(key, parameters.get(key));
       }
@@ -195,4 +215,47 @@ public class MDatabase {
   public void setCreateTime(int createTime) {
     this.createTime = createTime;
   }
+
+  /**
+   * @return the name
+   */
+  public String getType() {
+    return type;
+  }
+
+  /**
+   * @param type the type of the database to set
+   */
+  public void setType(String type) {
+    this.type = type;
+  }
+
+  /**
+   * @return the name
+   */
+  public String getDataConnectorName() {
+    return connectorName;
+  }
+
+  /**
+   * @param dcName the name of the dataconnector to set
+   */
+  public void setDataConnectorName(String dcName) {
+    this.connectorName = dcName;
+  }
+
+  /**
+   * @return the remote database name this db maps to
+   */
+  public String getRemoteDatabaseName() {
+    return remoteDatabaseName;
+  }
+
+  /**
+   * @param remoteDBName the name of the dataconnector to set
+   */
+  public void setRemoteDatabaseName(String remoteDBName) {
+    this.remoteDatabaseName = remoteDBName;
+  }
+
 }

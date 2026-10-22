@@ -9,31 +9,40 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.parquet.convert;
 
+import static org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory.getPrimitiveTypeInfo;
+import static org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory.stringTypeInfo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
+import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.common.type.Timestamp;
 import org.apache.hadoop.hive.ql.io.parquet.convert.ETypeConverter.BinaryConverter;
 import org.apache.hadoop.hive.ql.io.parquet.timestamp.NanoTime;
 import org.apache.hadoop.hive.ql.io.parquet.timestamp.NanoTimeUtils;
+import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
+import org.apache.hadoop.hive.serde2.io.HiveVarcharWritable;
 import org.apache.hadoop.hive.serde2.io.TimestampWritableV2;
+import org.apache.hadoop.hive.serde2.typeinfo.CharTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 import org.apache.hadoop.io.BooleanWritable;
 import org.apache.hadoop.io.BytesWritable;
@@ -111,25 +120,89 @@ public class TestETypeConverter {
   }
 
   @Test
-  public void testGetSmallBigIntConverter() {
-    Timestamp timestamp = Timestamp.valueOf("1998-10-03 09:58:31.231");
-    long msTime = timestamp.toEpochMilli();
-    ByteBuffer buf = ByteBuffer.allocate(12);
-    buf.order(ByteOrder.LITTLE_ENDIAN);
-    buf.putLong(msTime);
-    buf.flip();
-    // Need TimeStamp logicalType annotation here
-    PrimitiveType primitiveType = createInt64TimestampType(false, TimeUnit.MILLIS);
-    Writable writable = getWritableFromBinaryConverter(createHiveTypeInfo("bigint"), primitiveType, Binary.fromByteBuffer(buf));
-    // Retrieve as BigInt
-    LongWritable longWritable = (LongWritable) writable;
-    assertEquals(msTime, longWritable.get());
+  public void testGetInt64TimestampConverterTinyIntHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "tinyint", 5);
   }
 
   @Test
-  public void testGetBigIntConverter() {
+  public void testGetInt64TimestampConverterSmallIntHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "smallint", 5);
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterIntHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "int", 5);
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterBigIntHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1998-10-03 09:58:31.231", "bigint", 907408711231L);
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterFloatHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "float", 5.0f);
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterDoubleHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "double", 5.0d);
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterDecimalHiveType() {
+    testGetInt64TimestampConverterNumericHiveType("1970-01-01 00:00:00.005", "decimal(1,0)", HiveDecimal.create(5));
+  }
+
+  @Test
+  public void testGetInt64TimestampConverterNoHiveType() {
+    Timestamp ts = Timestamp.valueOf("2022-10-24 11:35:00.005");
+    PrimitiveType primitiveType = createInt64TimestampType(false, TimeUnit.MILLIS);
+    Writable writable = getWritableFromPrimitiveConverter(null, primitiveType, ts.toEpochMilli());
+    assertEquals("2022-10-24 11:35:00.005", ((TimestampWritableV2) writable).getTimestamp().toString());
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testGetInt64NoLogicalAnnotationTimestampHiveType() {
+    Timestamp ts = Timestamp.valueOf("2022-10-24 11:43:00.005");
+    PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.INT64).named("int64");
+    getWritableFromPrimitiveConverter(TypeInfoFactory.timestampTypeInfo, primitiveType, ts.toEpochMilli());
+  }
+  
+  private void testGetInt64TimestampConverterNumericHiveType(String timestamp, String type, Object expected) {
+    Timestamp ts = Timestamp.valueOf(timestamp);
+    PrimitiveType primitiveType = createInt64TimestampType(false, TimeUnit.MILLIS);
+    PrimitiveTypeInfo info = getPrimitiveTypeInfo(type);
+    Writable writable = getWritableFromPrimitiveConverter(info, primitiveType, ts.toEpochMilli());
+    final Object actual;
+    switch (info.getPrimitiveCategory()) {
+    case BYTE:
+    case SHORT:
+    case INT:
+      actual = ((IntWritable) writable).get();
+      break;
+    case LONG:
+      actual = ((LongWritable) writable).get();
+      break;
+    case FLOAT:
+      actual = ((FloatWritable) writable).get();
+      break;
+    case DOUBLE:
+      actual = ((DoubleWritable) writable).get();
+      break;
+    case DECIMAL:
+      actual = ((HiveDecimalWritable) writable).getHiveDecimal();
+      break;
+    default:
+      throw new IllegalStateException(info.toString());
+    }
+    assertEquals(expected, actual);
+  }
+
+  @Test
+  public void testGetInt96TimestampConverterBigIntHiveType() {
     Timestamp timestamp = Timestamp.valueOf("1998-10-03 09:58:31.231");
-    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, true);
+    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, ZoneOffset.UTC, false);
     PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.INT96).named("value");
     Writable writable = getWritableFromBinaryConverter(createHiveTypeInfo("bigint"), primitiveType, nanoTime.toBinary());
     // Retrieve as BigInt
@@ -140,7 +213,7 @@ public class TestETypeConverter {
   @Test
   public void testGetTimestampConverter() throws Exception {
     Timestamp timestamp = Timestamp.valueOf("2018-06-15 15:12:20.0");
-    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, true);
+    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, ZoneOffset.UTC, false);
     PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.INT96).named("value");
     Writable writable = getWritableFromBinaryConverter(null, primitiveType, nanoTime.toBinary());
     TimestampWritableV2 timestampWritable = (TimestampWritableV2) writable;
@@ -150,7 +223,7 @@ public class TestETypeConverter {
   @Test
   public void testGetTimestampProlepticConverter() throws Exception {
     Timestamp timestamp = Timestamp.valueOf("1572-06-15 15:12:20.0");
-    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, true);
+    NanoTime nanoTime = NanoTimeUtils.getNanoTime(timestamp, ZoneOffset.UTC, false);
     PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.INT96).named("value");
     Writable writable = getWritableFromBinaryConverter(null, primitiveType, nanoTime.toBinary());
     TimestampWritableV2 timestampWritable = (TimestampWritableV2) writable;
@@ -211,23 +284,62 @@ public class TestETypeConverter {
   }
 
   @Test
-  public void testGetTextConverter() throws Exception {
+  public void testGetTextConverterForString() throws Exception {
     PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
-        .as(LogicalTypeAnnotation.stringType()).named("value");
-    Writable writable = getWritableFromBinaryConverter(new VarcharTypeInfo(), primitiveType,
-        Binary.fromString("this_is_a_value"));
-    Text textWritable = (Text) writable;
-    assertEquals("this_is_a_value", textWritable.toString());
+            .as(LogicalTypeAnnotation.stringType()).named("value");
+    String value = "this_is_a_value";
+    Text textWritable = (Text) getWritableFromBinaryConverter(stringTypeInfo, primitiveType,
+            Binary.fromString(value));
+    assertEquals(value, textWritable.toString());
   }
 
   @Test
-  public void testGetTextConverterNoHiveTypeInfo() throws Exception {
+  public void testGetTextConverterForCharPadsValueWithSpacesTillLen() {
+    PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
+            .as(LogicalTypeAnnotation.stringType()).named("value");
+    String value = "this_is_a_value";
+    HiveCharWritable textWritable = (HiveCharWritable) getWritableFromBinaryConverter(
+            new CharTypeInfo(value.length() + 2), primitiveType, Binary.fromString(value));
+    assertEquals(value + "  ", textWritable.toString());
+  }
+
+  @Test
+  public void testGetTextConverterForCharTruncatesValueExceedingLen() {
+    PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
+            .as(LogicalTypeAnnotation.stringType()).named("value");
+    String value = "this_is_a_value";
+    HiveCharWritable textWritable = (HiveCharWritable) getWritableFromBinaryConverter(
+            new CharTypeInfo(6), primitiveType, Binary.fromString(value));
+    assertEquals(value.substring(0, 6), textWritable.toString());
+  }
+
+  @Test
+  public void testGetTextConverterForVarcharTruncatesValueExceedingLen() {
+    PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
+            .as(LogicalTypeAnnotation.stringType()).named("value");
+    String value = "this_is_a_value";
+    HiveVarcharWritable textWritable = (HiveVarcharWritable) getWritableFromBinaryConverter(
+            new VarcharTypeInfo(6), primitiveType, Binary.fromString(value));
+    assertEquals(value.substring(0, 6), textWritable.toString());
+  }
+
+  @Test
+  public void testGetTextConverterForVarchar() {
+    PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
+            .as(LogicalTypeAnnotation.stringType()).named("value");
+    String value = "this_is_a_value";
+    HiveVarcharWritable textWritable = (HiveVarcharWritable) getWritableFromBinaryConverter(
+            new VarcharTypeInfo(34), primitiveType, Binary.fromString(value));
+    assertEquals(value, textWritable.toString());
+  }
+
+  @Test
+  public void testGetTextConverterNoHiveTypeInfo() {
     PrimitiveType primitiveType = Types.optional(PrimitiveTypeName.BINARY)
         .as(LogicalTypeAnnotation.stringType()).named("value");
-    Writable writable =
-        getWritableFromBinaryConverter(null, primitiveType, Binary.fromString("this_is_a_value"));
-    Text textWritable = (Text) writable;
-    assertEquals("this_is_a_value", textWritable.toString());
+    String value = "this_is_a_value";
+    Text textWritable = (Text) getWritableFromBinaryConverter(null, primitiveType, Binary.fromString(value));
+    assertEquals(value, textWritable.toString());
   }
 
   @Test

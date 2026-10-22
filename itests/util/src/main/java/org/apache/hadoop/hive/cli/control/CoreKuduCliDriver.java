@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.cli.control;
 
@@ -26,8 +27,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-
-import java.io.File;
 
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -45,60 +44,36 @@ public class CoreKuduCliDriver extends CliAdapter {
 
   @Override
   @BeforeClass
-  public void beforeClass() {
-    try {
-      qt = new QTestUtil(QTestArguments.QTestArgumentsBuilder.instance()
-          .withOutDir(cliConfig.getResultsDir())
-          .withLogDir(cliConfig.getLogDir())
-          .withClusterType(cliConfig.getClusterType())
-          .withConfDir(cliConfig.getHiveConfDir())
-          .withInitScript(cliConfig.getInitScript())
-          .withCleanupScript(cliConfig.getCleanupScript())
-          .withLlapIo(true)
-          .withQTestSetup(new KuduTestSetup())
-          .build());
-    } catch (Exception e) {
-      throw new RuntimeException("Unexpected exception in setUp", e);
-    }
+  public void beforeClass() throws Exception {
+    qt = new QTestUtil(QTestArguments.QTestArgumentsBuilder.instance()
+        .withOutDir(cliConfig.getResultsDir())
+        .withLogDir(cliConfig.getLogDir())
+        .withClusterType(cliConfig.getClusterType())
+        .withConfDir(cliConfig.getHiveConfDir())
+        .withInitScript(cliConfig.getInitScript())
+        .withCleanupScript(cliConfig.getCleanupScript())
+        .withLlapIo(true)
+        .withQTestSetup(new KuduTestSetup())
+        .build());
   }
 
   @Override
   @AfterClass
-  public void shutdown() {
-    try {
-      qt.shutdown();
-    } catch (Exception e) {
-      throw new RuntimeException("Unexpected exception in tearDown", e);
-    }
+  public void shutdown() throws Exception {
+    qt.shutdown();
   }
 
   @Override
   @Before
-  public void setUp() {
-    try {
-      qt.newSession();
-
-    } catch (Exception e) {
-      System.err.println("Exception: " + e.getMessage());
-      e.printStackTrace();
-      System.err.flush();
-      fail("Unexpected exception in setup");
-    }
+  public void setUp() throws Exception {
+    qt.newSession();
   }
 
   @Override
   @After
-  public void tearDown() {
-    try {
-      qt.clearPostTestEffects();
-      qt.clearTestSideEffects();
-
-    } catch (Exception e) {
-      System.err.println("Exception: " + e.getMessage());
-      e.printStackTrace();
-      System.err.flush();
-      fail("Unexpected exception in tearDown");
-    }
+  public void tearDown() throws Exception {
+    qt.clearPostTestEffects();
+    qt.clearTestSideEffects();
   }
 
   @Override
@@ -112,16 +87,16 @@ public class CoreKuduCliDriver extends CliAdapter {
     try {
       System.err.println("Begin query: " + fname);
 
-      qt.addFile(fpath);
-      qt.cliInit(new File(fpath));
+      qt.setInputFile(fpath);
+      qt.cliInit();
 
       try {
-        qt.executeClient(fname);
+        qt.executeClient();
       } catch (CommandProcessorException e) {
         qt.failedQuery(e.getCause(), e.getResponseCode(), fname, null);
       }
 
-      QTestProcessExecResult result = qt.checkCliDriverResults(fname);
+      QTestProcessExecResult result = qt.checkCliDriverResults();
       if (result.getReturnCode() != 0) {
         qt.failedDiff(result.getReturnCode(), fname, result.getCapturedOutput());
       }

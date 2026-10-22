@@ -9,20 +9,24 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.database.create;
 
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.DatabaseType;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
+import org.apache.hadoop.hive.metastore.utils.StringUtils;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.ddl.DDLOperation;
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
@@ -44,16 +48,29 @@ public class CreateDatabaseOperation extends DDLOperation<CreateDatabaseDesc> {
   public int execute() throws HiveException {
     Database database = new Database(desc.getName(), desc.getComment(), desc.getLocationUri(),
         desc.getDatabaseProperties());
+    database.setCatalogName(desc.getCatalogName());
     database.setOwnerName(SessionState.getUserFromAuthenticator());
     database.setOwnerType(PrincipalType.USER);
-    if (desc.getManagedLocationUri() != null) {
-      database.setManagedLocationUri(desc.getManagedLocationUri());
-    }
-
+    database.setType(desc.getDatabaseType());
     try {
-      makeLocationQualified(database);
-      if (database.getLocationUri().equalsIgnoreCase(database.getManagedLocationUri())) {
-        throw new HiveException("Managed and external locations for database cannot be the same");
+      if (desc.getDatabaseType() == DatabaseType.NATIVE) {
+        if (desc.getManagedLocationUri() != null) {
+          database.setManagedLocationUri(desc.getManagedLocationUri());
+        }
+        makeLocationQualified(database); // TODO catalog. Add catalog prefix for db location. Depend on HIVE-29241.
+        if (database.getLocationUri().equalsIgnoreCase(database.getManagedLocationUri())) {
+          throw new HiveException("Managed and external locations for database cannot be the same");
+        }
+      } else if (desc.getDatabaseType() == DatabaseType.REMOTE) {
+        makeLocationQualified(database); // TODO catalog. Add catalog prefix for db location. Depend on HIVE-29241.
+        database.setConnector_name(desc.getConnectorName());
+        database.setRemote_dbname(desc.getRemoteDbName());
+      } else { // should never be here
+        throw new HiveException("Unsupported database type " + database.getType() + " for " + database.getName());
+      }
+      String defaultCatalog = MetastoreConf.get(context.getConf(), MetastoreConf.ConfVars.CATALOG_DEFAULT.getVarname());
+      if (!StringUtils.isEmpty(defaultCatalog) && !defaultCatalog.equals(Warehouse.DEFAULT_CATALOG_NAME)) {
+        database.setCatalogName(defaultCatalog);
       }
       context.getDb().createDatabase(database, desc.getIfNotExists());
     } catch (AlreadyExistsException ex) {
@@ -83,9 +100,16 @@ public class CreateDatabaseOperation extends DDLOperation<CreateDatabaseDesc> {
     }
 
     if (database.isSetManagedLocationUri()) {
-      // TODO should we enforce a location check here?
       database.setManagedLocationUri(Utilities.getQualifiedPath(context.getConf(),
           new Path(database.getManagedLocationUri())));
+    } else {
+      // ManagedLocation is not set we utilize WAREHOUSE together with database name 
+      String rootDir = MetastoreConf.getVar(context.getConf(), MetastoreConf.ConfVars.WAREHOUSE);
+      Path path = new Path(rootDir, database.getName().toLowerCase() + DATABASE_PATH_SUFFIX);
+      String qualifiedPath = Utilities.getQualifiedPath(context.getConf(), path);
+      if (!qualifiedPath.equals(database.getLocationUri())) {
+        database.setManagedLocationUri(qualifiedPath);
+      }
     }
   }
 }

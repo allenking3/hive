@@ -9,19 +9,19 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
-import org.apache.hadoop.hive.common.JavaUtils;
-import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.hooks.HookContext;
@@ -46,26 +46,28 @@ public final class DriverUtils {
     throw new UnsupportedOperationException("DriverUtils should not be instantiated!");
   }
 
-  public static void runOnDriver(HiveConf conf, String user, SessionState sessionState,
-      String query) throws HiveException {
-    runOnDriver(conf, user, sessionState, query, null, -1);
+  @FunctionalInterface
+  private interface DriverCreator {
+    Driver createDriver(QueryState qs);
   }
 
   /**
    * For Query Based compaction to run the query to generate the compacted data.
    */
-  public static void runOnDriver(HiveConf conf, String user,
-      SessionState sessionState, String query, ValidWriteIdList writeIds, long compactorTxnId)
-      throws HiveException {
-    if(writeIds != null && compactorTxnId < 0) {
-      throw new IllegalArgumentException(JavaUtils.txnIdToString(compactorTxnId) +
-          " is not valid. Context: " + query);
-    }
+  public static void runOnDriver(HiveConf conf, SessionState sessionState, String query) throws HiveException {
+    runOnDriverInternal(query, conf, sessionState, Driver::new);
+  }
+
+  private static void runOnDriverInternal(String query, HiveConf conf, SessionState sessionState, DriverCreator creator) throws HiveException {
     SessionState.setCurrentSessionState(sessionState);
     boolean isOk = false;
     try {
-      QueryState qs = new QueryState.Builder().withHiveConf(conf).withGenerateNewQueryId(true).nonIsolated().build();
-      Driver driver = new Driver(qs, null, null, writeIds, compactorTxnId);
+      Driver driver = creator.createDriver(
+          new QueryState.Builder()
+              .withHiveConf(conf)
+              .withGenerateNewQueryId(true)
+              .nonIsolated()
+              .build());
       try {
         try {
           driver.run(query);
@@ -90,6 +92,14 @@ public final class DriverUtils {
     }
   }
 
+  public static SessionState setUpAndStartSessionState(HiveConf conf) {
+    return setUpAndStartSessionState(conf, null);
+  }
+
+  public static SessionState setUpAndStartSessionState(HiveConf conf, String user) {
+    return setUpSessionState(conf, user, true);
+  }
+
   public static SessionState setUpSessionState(HiveConf conf, String user, boolean doStart) {
     SessionState sessionState = SessionState.get();
     if (sessionState == null) {
@@ -102,6 +112,8 @@ public final class DriverUtils {
         SessionState.start(sessionState);
       }
       SessionState.setCurrentSessionState(sessionState);
+    } else {
+      sessionState.setConf(conf);
     }
     return sessionState;
   }
@@ -170,5 +182,12 @@ public final class DriverUtils {
       CONSOLE.printError(errorMessage, "\n" + StringUtils.stringifyException(e));
       throw createProcessorException(driverContext, 10, errorMessage, ErrorMsg.findSQLState(e.getMessage()), e);
     }
+  }
+  
+  public static boolean isOtelExportTezCountersEnabled(DriverContext driverContext) {
+    return driverContext.getRuntimeContext() != null && 
+        driverContext.getConf().getTimeVar(HiveConf.ConfVars.HIVE_OTEL_METRICS_FREQUENCY_SECONDS, 
+            TimeUnit.MILLISECONDS) > 0 && 
+        driverContext.getConf().getBoolVar(HiveConf.ConfVars.HIVE_OTEL_EXPORT_TEZ_COUNTERS);
   }
 }

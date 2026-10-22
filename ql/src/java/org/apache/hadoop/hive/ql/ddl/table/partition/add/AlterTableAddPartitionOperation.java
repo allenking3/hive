@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.partition.add;
@@ -21,6 +22,7 @@ package org.apache.hadoop.hive.ql.ddl.table.partition.add;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.StatsSetupConst;
@@ -172,12 +174,12 @@ public class AlterTableAddPartitionOperation extends DDLOperation<AlterTableAddP
     List<Partition> partitionsToAdd = new ArrayList<>();
     List<Partition> partitionsToAlter = new ArrayList<>();
     List<String> partitionNames = new ArrayList<>();
-    for (Partition partition : partitions){
+    Map<String, String> dbParams = context.getDb().getDatabase(desc.getDbName()).getParameters();
+    for (Partition partition : partitions) {
       partitionNames.add(getPartitionName(table, partition));
       try {
         Partition p = context.getDb().getPartition(table, desc.getDbName(), desc.getTableName(), partition.getValues());
-        if (desc.getReplicationSpec().allowReplacementInto(p.getParameters())){
-          ReplicationSpec.copyLastReplId(p.getParameters(), partition.getParameters());
+        if (desc.getReplicationSpec().allowReplacementInto(dbParams)) {
           partitionsToAlter.add(partition);
         } // else ptn already exists, but we do nothing with it.
       } catch (HiveException e){
@@ -191,22 +193,33 @@ public class AlterTableAddPartitionOperation extends DDLOperation<AlterTableAddP
     }
 
     List<org.apache.hadoop.hive.ql.metadata.Partition> outPartitions = new ArrayList<>();
-    for (Partition outPartition : context.getDb().addPartitions(partitionsToAdd, desc.isIfNotExists(), true)) {
-      outPartitions.add(new org.apache.hadoop.hive.ql.metadata.Partition(table, outPartition));
+    if (!partitionsToAdd.isEmpty()) {
+      LOG.debug("Calling AddPartition for {}", partitionsToAdd);
+      for (Partition outPartition : context.getDb()
+          .addPartitions(partitionsToAdd, desc.isIfNotExists(), true)) {
+        outPartitions.add(
+            new org.apache.hadoop.hive.ql.metadata.Partition(table,
+                outPartition));
+      }
     }
-
     // In case of replication, statistics is obtained from the source, so do not update those on replica.
-    EnvironmentContext ec = new EnvironmentContext();
-    ec.putToProperties(StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
-    String validWriteIdList = getValidWriteIdList(table, writeId);
-    context.getDb().alterPartitions(desc.getDbName(), desc.getTableName(), partitionsToAlter, ec, validWriteIdList,
-        writeId);
+    if (!partitionsToAlter.isEmpty()) {
+      LOG.debug("Calling AlterPartition for {}", partitionsToAlter);
+      EnvironmentContext ec = new EnvironmentContext();
+      ec.putToProperties(StatsSetupConst.DO_NOT_UPDATE_STATS,
+          StatsSetupConst.TRUE);
+      String validWriteIdList = getValidWriteIdList(table, writeId);
+      context.getDb().alterPartitions(desc.getDbName(), desc.getTableName(),
+          partitionsToAlter, ec, validWriteIdList, writeId);
 
-    for (Partition outPartition : context.getDb().getPartitionsByNames(desc.getDbName(), desc.getTableName(),
-        partitionNames)){
-      outPartitions.add(new org.apache.hadoop.hive.ql.metadata.Partition(table, outPartition));
+      for (Partition outPartition : context.getDb()
+          .getPartitionsByNames(desc.getDbName(), desc.getTableName(),
+              partitionNames, table)) {
+        outPartitions.add(
+            new org.apache.hadoop.hive.ql.metadata.Partition(table,
+                outPartition));
+      }
     }
-
     return outPartitions;
   }
 

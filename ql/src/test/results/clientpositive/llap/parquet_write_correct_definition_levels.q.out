@@ -9,13 +9,13 @@ POSTHOOK: type: CREATETABLE
 POSTHOOK: Output: database:default
 POSTHOOK: Output: default@text_tbl
 PREHOOK: query: INSERT OVERWRITE TABLE text_tbl
-SELECT IF(false, named_struct("b", named_struct("c", 1)), NULL)
+SELECT NULLIF(named_struct("b", named_struct("c", 1)),named_struct("b", named_struct("c", 1)))
 FROM src LIMIT 1
 PREHOOK: type: QUERY
 PREHOOK: Input: default@src
 PREHOOK: Output: default@text_tbl
 POSTHOOK: query: INSERT OVERWRITE TABLE text_tbl
-SELECT IF(false, named_struct("b", named_struct("c", 1)), NULL)
+SELECT NULLIF(named_struct("b", named_struct("c", 1)),named_struct("b", named_struct("c", 1)))
 FROM src LIMIT 1
 POSTHOOK: type: QUERY
 POSTHOOK: Input: default@src
@@ -57,16 +57,20 @@ NULL
 PREHOOK: query: DROP TABLE text_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@text_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@text_tbl
 POSTHOOK: query: DROP TABLE text_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@text_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@text_tbl
 PREHOOK: query: DROP TABLE parq_tbl
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@parq_tbl
+PREHOOK: Output: database:default
 PREHOOK: Output: default@parq_tbl
 POSTHOOK: query: DROP TABLE parq_tbl
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@parq_tbl
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@parq_tbl

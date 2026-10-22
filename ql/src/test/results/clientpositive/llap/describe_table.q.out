@@ -182,7 +182,7 @@ Table Parameters:
 	numPartitions       	4                   
 	numRows             	2000                
 	rawDataSize         	21248               
-	totalSize           	23248               
+	totalSize           	#Masked#
 #### A masked pattern was here ####
 	 	 
 # Storage Information	 	 
@@ -239,7 +239,7 @@ Partition Parameters:
 	numFiles            	1                   
 	numRows             	500                 
 	rawDataSize         	5312                
-	totalSize           	5812                
+	totalSize           	#Masked#
 #### A masked pattern was here ####
 	 	 
 # Storage Information	 	 
@@ -280,7 +280,7 @@ Table Parameters:
 	numPartitions       	4                   
 	numRows             	2000                
 	rawDataSize         	21248               
-	totalSize           	23248               
+	totalSize           	#Masked#
 #### A masked pattern was here ####
 	 	 
 # Storage Information	 	 
@@ -337,7 +337,7 @@ Partition Parameters:
 	numFiles            	1                   
 	numRows             	500                 
 	rawDataSize         	5312                
-	totalSize           	5812                
+	totalSize           	#Masked#
 #### A masked pattern was here ####
 	 	 
 # Storage Information	 	 
@@ -457,7 +457,7 @@ Table Parameters:
 	numPartitions       	0                   
 	numRows             	0                   
 	rawDataSize         	0                   
-	totalSize           	0                   
+	totalSize           	#Masked#
 #### A masked pattern was here ####
 	 	 
 # Storage Information	 	 
@@ -477,11 +477,117 @@ Storage Desc Params:
 PREHOOK: query: drop table srcpart_serdeprops
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@srcpart_serdeprops
+PREHOOK: Output: database:default
 PREHOOK: Output: default@srcpart_serdeprops
 POSTHOOK: query: drop table srcpart_serdeprops
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@srcpart_serdeprops
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@srcpart_serdeprops
+PREHOOK: query: CREATE TABLE IF NOT EXISTS desc_parttable_stats (somenumber int) PARTITIONED BY (yr int)
+PREHOOK: type: CREATETABLE
+PREHOOK: Output: database:default
+PREHOOK: Output: default@desc_parttable_stats
+POSTHOOK: query: CREATE TABLE IF NOT EXISTS desc_parttable_stats (somenumber int) PARTITIONED BY (yr int)
+POSTHOOK: type: CREATETABLE
+POSTHOOK: Output: database:default
+POSTHOOK: Output: default@desc_parttable_stats
+PREHOOK: query: INSERT INTO desc_parttable_stats values(0,1),(0,2),(0,3)
+PREHOOK: type: QUERY
+PREHOOK: Input: _dummy_database@_dummy_table
+PREHOOK: Output: default@desc_parttable_stats
+POSTHOOK: query: INSERT INTO desc_parttable_stats values(0,1),(0,2),(0,3)
+POSTHOOK: type: QUERY
+POSTHOOK: Input: _dummy_database@_dummy_table
+POSTHOOK: Output: default@desc_parttable_stats
+POSTHOOK: Output: default@desc_parttable_stats@yr=1
+POSTHOOK: Output: default@desc_parttable_stats@yr=2
+POSTHOOK: Output: default@desc_parttable_stats@yr=3
+POSTHOOK: Lineage: desc_parttable_stats PARTITION(yr=1).somenumber SCRIPT []
+POSTHOOK: Lineage: desc_parttable_stats PARTITION(yr=2).somenumber SCRIPT []
+POSTHOOK: Lineage: desc_parttable_stats PARTITION(yr=3).somenumber SCRIPT []
+PREHOOK: query: describe formatted desc_parttable_stats
+PREHOOK: type: DESCTABLE
+PREHOOK: Input: default@desc_parttable_stats
+POSTHOOK: query: describe formatted desc_parttable_stats
+POSTHOOK: type: DESCTABLE
+POSTHOOK: Input: default@desc_parttable_stats
+# col_name            	data_type           	comment             
+somenumber          	int                 	                    
+	 	 
+# Partition Information	 	 
+# col_name            	data_type           	comment             
+yr                  	int                 	                    
+	 	 
+# Detailed Table Information	 	 
+Database:           	default             	 
+#### A masked pattern was here ####
+Retention:          	0                   	 
+#### A masked pattern was here ####
+Table Type:         	MANAGED_TABLE       	 
+Table Parameters:	 	 
+	bucketing_version   	2                   
+#### A masked pattern was here ####
+	 	 
+# Storage Information	 	 
+SerDe Library:      	org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe	 
+InputFormat:        	org.apache.hadoop.mapred.TextInputFormat	 
+OutputFormat:       	org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat	 
+Compressed:         	No                  	 
+Num Buckets:        	-1                  	 
+Bucket Columns:     	[]                  	 
+Sort Columns:       	[]                  	 
+Storage Desc Params:	 	 
+	serialization.format	1                   
+PREHOOK: query: describe formatted desc_parttable_stats
+PREHOOK: type: DESCTABLE
+PREHOOK: Input: default@desc_parttable_stats
+POSTHOOK: query: describe formatted desc_parttable_stats
+POSTHOOK: type: DESCTABLE
+POSTHOOK: Input: default@desc_parttable_stats
+# col_name            	data_type           	comment             
+somenumber          	int                 	                    
+	 	 
+# Partition Information	 	 
+# col_name            	data_type           	comment             
+yr                  	int                 	                    
+	 	 
+# Detailed Table Information	 	 
+Database:           	default             	 
+#### A masked pattern was here ####
+Retention:          	0                   	 
+#### A masked pattern was here ####
+Table Type:         	MANAGED_TABLE       	 
+Table Parameters:	 	 
+	COLUMN_STATS_ACCURATE	{\"BASIC_STATS\":\"true\"}
+	bucketing_version   	2                   
+	numFiles            	3                   
+	numPartitions       	3                   
+	numRows             	3                   
+	rawDataSize         	3                   
+	totalSize           	#Masked#
+#### A masked pattern was here ####
+	 	 
+# Storage Information	 	 
+SerDe Library:      	org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe	 
+InputFormat:        	org.apache.hadoop.mapred.TextInputFormat	 
+OutputFormat:       	org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat	 
+Compressed:         	No                  	 
+Num Buckets:        	-1                  	 
+Bucket Columns:     	[]                  	 
+Sort Columns:       	[]                  	 
+Storage Desc Params:	 	 
+	serialization.format	1                   
+PREHOOK: query: DROP TABLE IF EXISTS desc_parttable_stats
+PREHOOK: type: DROPTABLE
+PREHOOK: Input: default@desc_parttable_stats
+PREHOOK: Output: database:default
+PREHOOK: Output: default@desc_parttable_stats
+POSTHOOK: query: DROP TABLE IF EXISTS desc_parttable_stats
+POSTHOOK: type: DROPTABLE
+POSTHOOK: Input: default@desc_parttable_stats
+POSTHOOK: Output: database:default
+POSTHOOK: Output: default@desc_parttable_stats
 PREHOOK: query: CREATE DATABASE IF NOT EXISTS name1
 PREHOOK: type: CREATEDATABASE
 PREHOOK: Output: database:name1
@@ -801,10 +907,12 @@ COLUMN_STATS_ACCURATE	{\"BASIC_STATS\":\"true\",\"COLUMN_STATS\":{\"col1\":\"tru
 PREHOOK: query: DROP TABLE IF EXISTS table1_n18
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: name2@table1_n18
+PREHOOK: Output: database:name2
 PREHOOK: Output: name2@table1_n18
 POSTHOOK: query: DROP TABLE IF EXISTS table1_n18
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: name2@table1_n18
+POSTHOOK: Output: database:name2
 POSTHOOK: Output: name2@table1_n18
 PREHOOK: query: use name1
 PREHOOK: type: SWITCHDATABASE
@@ -815,18 +923,22 @@ POSTHOOK: Input: database:name1
 PREHOOK: query: DROP TABLE IF EXISTS name1
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: name1@name1
+PREHOOK: Output: database:name1
 PREHOOK: Output: name1@name1
 POSTHOOK: query: DROP TABLE IF EXISTS name1
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: name1@name1
+POSTHOOK: Output: database:name1
 POSTHOOK: Output: name1@name1
 PREHOOK: query: DROP TABLE IF EXISTS name2
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: name1@name2
+PREHOOK: Output: database:name1
 PREHOOK: Output: name1@name2
 POSTHOOK: query: DROP TABLE IF EXISTS name2
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: name1@name2
+POSTHOOK: Output: database:name1
 POSTHOOK: Output: name1@name2
 PREHOOK: query: use name2
 PREHOOK: type: SWITCHDATABASE
@@ -836,8 +948,10 @@ POSTHOOK: type: SWITCHDATABASE
 POSTHOOK: Input: database:name2
 PREHOOK: query: DROP TABLE IF EXISTS table1_n18
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:name2
 POSTHOOK: query: DROP TABLE IF EXISTS table1_n18
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:name2
 PREHOOK: query: DROP DATABASE IF EXISTS name1
 PREHOOK: type: DROPDATABASE
 PREHOOK: Input: database:name1

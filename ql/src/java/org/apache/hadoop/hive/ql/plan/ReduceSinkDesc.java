@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -22,11 +23,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import java.util.function.ToIntFunction;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.io.AcidUtils;
 import org.apache.hadoop.hive.ql.optimizer.signature.Signature;
@@ -34,9 +38,10 @@ import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.plan.Explain.Level;
 import org.apache.hadoop.hive.ql.plan.Explain.Vectorization;
 import org.apache.hadoop.hive.ql.plan.VectorReduceSinkDesc.ReduceSinkKeyType;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 
 
 /**
@@ -46,6 +51,8 @@ import org.slf4j.LoggerFactory;
 @Explain(displayName = "Reduce Output Operator", explainLevels = { Level.USER, Level.DEFAULT, Level.EXTENDED })
 public class ReduceSinkDesc extends AbstractOperatorDesc {
   private static final long serialVersionUID = 1L;
+  private static final Logger LOG = LoggerFactory.getLogger(ReduceSinkDesc.class);
+
   /**
    * Key columns are passed to reducer in the "key".
    */
@@ -88,6 +95,12 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
    * Partition columns are not passed to reducer.
    */
   private List<ExprNodeDesc> partitionCols;
+  /**
+   * The hash function that generates custom hash codes for partitioning. This is configured when Partition-Aware
+   * Optimization requires a special hash function, e.g. the bucket function of Apache Iceberg. Otherwise, this is NULL
+   * and this operator uses the standard hash function of Hive.
+   */
+  private CustomBucketFunction customBucketFunction;
 
   private int numReducers;
 
@@ -126,10 +139,8 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
   // whether this RS is deduplicated
   private transient boolean isDeduplicated = false;
 
-  // used by spark mode to decide whether global order is needed
+  // used to decide whether global order is needed
   private transient boolean hasOrderBy = false;
-
-  private static transient Logger LOG = LoggerFactory.getLogger(ReduceSinkDesc.class);
 
   private AcidUtils.Operation writeType;
 
@@ -165,6 +176,7 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
     desc.setKeyCols(new ArrayList<ExprNodeDesc>(getKeyCols()));
     desc.setValueCols(new ArrayList<ExprNodeDesc>(getValueCols()));
     desc.setOutputKeyColumnNames(new ArrayList<String>(getOutputKeyColumnNames()));
+    desc.setColumnExprMap(new HashMap<>(getColumnExprMap()));
     List<List<Integer>> distinctColumnIndicesClone = new ArrayList<List<Integer>>();
     for (List<Integer> distinctColumnIndex : getDistinctColumnIndices()) {
       List<Integer> tmp = new ArrayList<Integer>();
@@ -293,6 +305,28 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
       return true;
     }
     return false;
+  }
+
+  public void setCustomPartitionFunction(CustomBucketFunction customBucketFunction) {
+    this.customBucketFunction = customBucketFunction;
+  }
+
+  public ToIntFunction<Object[]> getPartitionFunction(ObjectInspector[] objectInspectors) {
+    // acidOp flag has to be checked to use JAVA hash which works like
+    // identity function for integers, necessary to read RecordIdentifier
+    // incase of ACID updates/deletes.
+    final boolean acidOp = writeType == AcidUtils.Operation.UPDATE || writeType == AcidUtils.Operation.DELETE;
+    if (customBucketFunction != null) {
+      LOG.info("Use {} for partitioning", customBucketFunction);
+      customBucketFunction.initialize(objectInspectors);
+      return customBucketFunction::getBucketHashCode;
+    } else if (getBucketingVersion() == 2 && !acidOp) {
+      LOG.info("Use v2 hash for partitioning");
+      return fields -> ObjectInspectorUtils.getBucketHashCode(fields, objectInspectors);
+    } else {
+      LOG.info("Use v1 hash for partitioning");
+      return fields -> ObjectInspectorUtils.getBucketHashCodeOld(fields, objectInspectors);
+    }
   }
 
   @Signature
@@ -433,6 +467,18 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
     this.distinctColumnIndices = distinctColumnIndices;
   }
 
+  public boolean hasADistinctColumnIndex() {
+    if (this.distinctColumnIndices == null) {
+      return false;
+    }
+    for (List<Integer> distinctColumnIndex : this.distinctColumnIndices) {
+      if (CollectionUtils.isNotEmpty(distinctColumnIndex)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @Explain(displayName = "outputname", explainLevels = { Level.USER })
   public String getOutputName() {
     return outputName;
@@ -545,7 +591,7 @@ public class ReduceSinkDesc extends AbstractOperatorDesc {
 
   // Use LinkedHashSet to give predictable display order.
   private static final Set<String> vectorizableReduceSinkNativeEngines =
-      new LinkedHashSet<String>(Arrays.asList("tez", "spark"));
+      new LinkedHashSet<String>(Arrays.asList("tez"));
 
   public class ReduceSinkOperatorExplainVectorization extends OperatorExplainVectorization {
 

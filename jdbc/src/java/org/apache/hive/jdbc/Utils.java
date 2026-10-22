@@ -9,15 +9,17 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.jdbc;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -31,8 +33,9 @@ import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
+import org.apache.hadoop.hive.common.IPStackUtils;
 import org.apache.hive.service.cli.HiveSQLException;
 import org.apache.hive.service.rpc.thrift.TStatus;
 import org.apache.hive.service.rpc.thrift.TStatusCode;
@@ -47,11 +50,6 @@ public class Utils {
     * The required prefix for the connection URL.
     */
   public static final String URL_PREFIX = "jdbc:hive2://";
-
-  /**
-    * If host is provided, without a port.
-    */
-  static final String DEFAULT_PORT = "10000";
 
   // To parse the intermediate URI as a Java URI, we'll give a dummy authority(dummyhost:00000).
   // Later, we'll substitute the dummy authority for a resolved authority.
@@ -86,7 +84,7 @@ public class Utils {
     // Client param names:
 
     // Retry setting
-    static final String RETRIES = "retries";
+    public static final String RETRIES = "retries";
     public static final String RETRY_INTERVAL = "retryInterval";
 
     public static final String AUTH_TYPE = "auth";
@@ -100,6 +98,24 @@ public class Utils {
     public static final String AUTH_PASSWD = "password";
     public static final String AUTH_KERBEROS_AUTH_TYPE = "kerberosAuthType";
     public static final String AUTH_KERBEROS_AUTH_TYPE_FROM_SUBJECT = "fromSubject";
+    public static final String AUTH_KERBEROS_ENABLE_CANONICAL_HOSTNAME_CHECK = "kerberosEnableCanonicalHostnameCheck";
+    public static final String AUTH_TYPE_JWT = "jwt";
+    public static final String AUTH_TYPE_JWT_KEY = "jwt";
+    public static final String AUTH_JWT_ENV = "JWT";
+    // JdbcConnection param which specifies if we need to use a browser to do
+    // authentication.
+    // JdbcConnectionParam which specifies if the authMode is done via a browser
+    public static final String AUTH_SSO_BROWSER_MODE = "browser";
+    public static final String AUTH_SSO_TOKEN_MODE = "token";
+    // connection parameter used to specify a port number to listen on in case of
+    // browser mode.
+    public static final String AUTH_BROWSER_RESPONSE_PORT = "browserResponsePort";
+    // connection parameter used to specify the timeout in seconds for the browser mode
+    public static final String AUTH_BROWSER_RESPONSE_TIMEOUT_SECS = "browserResponseTimeout";
+    // connection parameter to optionally disable the SSL validation done when using
+    // browser based authentication. Useful mostly for testing/dev purposes.
+    // By default, SSL validation is done unless this parameter is set to true.
+    public static final String AUTH_BROWSER_DISABLE_SSL_VALIDATION = "browserDisableSslCheck";
     public static final String ANONYMOUS_USER = "anonymous";
     public static final String ANONYMOUS_PASSWD = "anonymous";
     public static final String USE_SSL = "ssl";
@@ -127,8 +143,10 @@ public class Utils {
     public static final String ZOOKEEPER_SSL_ENABLE = "zooKeeperSSLEnable";
     public static final String ZOOKEEPER_KEYSTORE_LOCATION = "zooKeeperKeystoreLocation";
     public static final String ZOOKEEPER_KEYSTORE_PASSWORD= "zooKeeperKeystorePassword";
+    public static final String ZOOKEEPER_KEYSTORE_TYPE= "zooKeeperKeystoreType";
     public static final String ZOOKEEPER_TRUSTSTORE_LOCATION  = "zooKeeperTruststoreLocation";
     public static final String ZOOKEEPER_TRUSTSTORE_PASSWORD = "zooKeeperTruststorePassword";
+    public static final String ZOOKEEPER_TRUSTSTORE_TYPE = "zooKeeperTruststoreType";
     // Default namespace value on ZooKeeper.
     // This value is used if the param "zooKeeperNamespace" is not specified in the JDBC Uri.
     static final String ZOOKEEPER_DEFAULT_NAMESPACE = "hiveserver2";
@@ -140,14 +158,19 @@ public class Utils {
     static final String DEFAULT_COOKIE_NAMES_HS2 = "hive.server2.auth";
     // The http header prefix for additional headers which have to be appended to the request
     static final String HTTP_HEADER_PREFIX = "http.header.";
+    // Request tracking
+    static final String JDBC_PARAM_REQUEST_TRACK = "requestTrack";
     // Set the fetchSize
     static final String FETCH_SIZE = "fetchSize";
     static final String INIT_FILE = "initFile";
+    static final String FETCH_THREADS = "fetchThreads";
     static final String WM_POOL = "wmPool";
     // Cookie prefix
     static final String HTTP_COOKIE_PREFIX = "http.cookie.";
     // Create external purge table by default
     static final String CREATE_TABLE_AS_EXTERNAL = "hiveCreateAsExternalLegacy";
+    public static final String SOCKET_TIMEOUT = "socketTimeout";
+    static final String THRIFT_CLIENT_MAX_MESSAGE_SIZE = "thrift.client.max.message.size";
 
     // We support ways to specify application name modeled after some existing DBs, since
     // there's no standard approach.
@@ -162,10 +185,12 @@ public class Utils {
     static final String TRUE = "true";
     static final String SSL_KEY_STORE = "sslKeyStore";
     static final String SSL_KEY_STORE_PASSWORD = "keyStorePassword";
-    static final String SSL_KEY_STORE_TYPE = "JKS";
+    static final String SSL_KEY_STORE_TYPE = "keyStoreType";
     static final String SUNX509_ALGORITHM_STRING = "SunX509";
     static final String SUNJSSE_ALGORITHM_STRING = "SunJSSE";
    // --------------- End 2 way ssl options ----------------------------
+
+    static final String SSL_STORE_PASSWORD_PATH = "storePasswordPath";
 
     private static final String HIVE_VAR_PREFIX = "hivevar:";
     public static final String HIVE_CONF_PREFIX = "hiveconf:";
@@ -182,14 +207,33 @@ public class Utils {
     private boolean zooKeeperSslEnabled = false;
     private String zookeeperKeyStoreLocation = "";
     private String zookeeperKeyStorePassword = "";
+    private String zookeeperKeyStoreType;
     private String zookeeperTrustStoreLocation = "";
     private String zookeeperTrustStorePassword = "";
+    private String zookeeperTrustStoreType;
     private String currentHostZnodePath;
     private final List<String> rejectedHostZnodePaths = new ArrayList<String>();
 
     // HiveConf parameters
+    private static String getNullsLastVarname() {
+      try {
+        return HiveConf.ConfVars.HIVE_DEFAULT_NULLS_LAST.varname;
+      } catch(java.lang.NoSuchFieldError e) {
+        return "hive.default.nulls.last";
+      }
+    }
     public static final String HIVE_DEFAULT_NULLS_LAST_KEY =
-        HIVE_CONF_PREFIX + HiveConf.ConfVars.HIVE_DEFAULT_NULLS_LAST.varname;
+        HIVE_CONF_PREFIX + getNullsLastVarname();
+
+    private static String getFetchThreadsVarname() {
+      try {
+        return HiveConf.ConfVars.HIVE_JDBC_FETCH_THREADS.varname;
+      } catch(java.lang.NoSuchFieldError e) {
+        return "hive.jdbc.fetch.threads";
+      }
+    }
+    public static final String HIVE_HIVE_JDBC_FETCH_THREADS_KEY =
+        HIVE_CONF_PREFIX + getFetchThreadsVarname();
 
     public JdbcConnectionParams() {
     }
@@ -208,8 +252,10 @@ public class Utils {
       this.zooKeeperSslEnabled = params.zooKeeperSslEnabled;
       this.zookeeperKeyStoreLocation = params.zookeeperKeyStoreLocation;
       this.zookeeperKeyStorePassword = params.zookeeperKeyStorePassword;
+      this.zookeeperKeyStoreType = params.zookeeperKeyStoreType;
       this.zookeeperTrustStoreLocation = params.zookeeperTrustStoreLocation;
       this.zookeeperTrustStorePassword = params.zookeeperTrustStorePassword;
+      this.zookeeperTrustStoreType = params.zookeeperTrustStoreType;
 
       this.currentHostZnodePath = params.currentHostZnodePath;
       this.rejectedHostZnodePaths.addAll(rejectedHostZnodePaths);
@@ -266,12 +312,20 @@ public class Utils {
       return zookeeperKeyStorePassword;
     }
 
+    public String getZookeeperKeyStoreType() {
+      return zookeeperKeyStoreType;
+    }
+
     public String getZookeeperTrustStoreLocation() {
       return zookeeperTrustStoreLocation;
     }
 
     public String getZookeeperTrustStorePassword() {
       return zookeeperTrustStorePassword;
+    }
+
+    public String getZookeeperTrustStoreType() {
+      return zookeeperTrustStoreType;
     }
 
     public List<String> getRejectedHostZnodePaths() {
@@ -334,12 +388,20 @@ public class Utils {
       this.zookeeperKeyStorePassword = zookeeperKeyStorePassword;
     }
 
+    public void setZookeeperKeyStoreType(String zookeeperKeyStoreType) {
+      this.zookeeperKeyStoreType = zookeeperKeyStoreType;
+    }
+
     public void setZookeeperTrustStoreLocation(String zookeeperTrustStoreLocation) {
       this.zookeeperTrustStoreLocation = zookeeperTrustStoreLocation;
     }
 
     public void setZookeeperTrustStorePassword(String zookeeperTrustStorePassword) {
       this.zookeeperTrustStorePassword = zookeeperTrustStorePassword;
+    }
+
+    public void setZookeeperTrustStoreType(String zookeeperTrustStoreType) {
+      this.zookeeperTrustStoreType = zookeeperTrustStoreType;
     }
 
     public void setCurrentHostZnodePath(String currentHostZnodePath) {
@@ -475,6 +537,13 @@ public class Utils {
       }
     }
 
+    Pattern fullPasswordPattern = Pattern.compile("(?i)(?<=;|^)password=([^;]+)");
+    Matcher fullPwdMatcher = fullPasswordPattern.matcher(uri);
+    if (fullPwdMatcher.find()) {
+        String fullPassword = fullPwdMatcher.group(1);
+        connParams.getSessionVars().put(JdbcConnectionParams.AUTH_PASSWD, fullPassword);
+    }
+
     // parse hive conf settings
     String confStr = jdbcURI.getQuery();
     if (confStr != null) {
@@ -568,13 +637,13 @@ public class Utils {
           // Set the port to default value; we do support jdbc url like:
           // jdbc:hive2://localhost/db
           if (port <= 0) {
-            port = Integer.parseInt(Utils.DEFAULT_PORT);
+            port = Integer.parseInt(Utils.getDefaultPort(connParams));
           }
-          connParams.setHost(jdbcBaseURI.getHost());
-          connParams.setPort(jdbcBaseURI.getPort());
+          connParams.setHost(host);
+          connParams.setPort(port);
         }
         // We check for invalid host, port while configuring connParams with configureConnParams()
-        authorityStr = connParams.getHost() + ":" + connParams.getPort();
+        authorityStr = IPStackUtils.concatHostPort(connParams.getHost(), connParams.getPort());
         LOG.debug("Resolved authority: " + authorityStr);
         uri = uri.replace(dummyAuthorityString, authorityStr);
       }
@@ -587,7 +656,7 @@ public class Utils {
   static void configureConnParamsFromZooKeeper(JdbcConnectionParams connParams)
       throws ZooKeeperHiveClientException, JdbcUriParseException {
     ZooKeeperHiveClientHelper.configureConnParams(connParams);
-    String authorityStr = connParams.getHost() + ":" + connParams.getPort();
+    String authorityStr = IPStackUtils.concatHostPort(connParams.getHost(), connParams.getPort());
     LOG.debug("Resolved authority: " + authorityStr);
     String jdbcUriString = connParams.getJdbcUriString();
     // Replace ZooKeeper ensemble from the authority component of the JDBC Uri provided by the
@@ -659,8 +728,7 @@ public class Utils {
      */
     int fromIndex = Utils.URL_PREFIX.length();
     int toIndex = -1;
-    ArrayList<String> toIndexChars = new ArrayList<String>(Arrays.asList("/", "?", "#"));
-    for (String toIndexChar : toIndexChars) {
+    for (String toIndexChar : Arrays.asList("/", "?", "#")) {
       toIndex = uri.indexOf(toIndexChar, fromIndex);
       if (toIndex > 0) {
         break;
@@ -783,4 +851,53 @@ public class Utils {
     }
   }
 
+  /**
+   * Method to get the password from the credential provider
+   * @param providerPath provider path
+   * @param key alias name
+   * @return password
+   */
+  private static String getPasswordFromCredentialProvider(String providerPath, String key) {
+    try {
+      if (providerPath != null) {
+        Configuration conf = new Configuration();
+        conf.set("hadoop.security.credential.provider.path", providerPath);
+        char[] password = conf.getPassword(key);
+        if (password != null) {
+          return new String(password);
+        }
+      }
+    } catch(IOException exception) {
+      LOG.warn("Could not retrieve password for " + key, exception);
+    }
+    return null;
+  }
+
+  /**
+   * Method to get the password from the configuration map if available. Otherwise, get it from the credential provider
+   * @param confMap configuration map
+   * @param key param
+   * @return password
+   */
+  public static String getPassword(Map<String, String> confMap, String key) {
+    String password = confMap.get(key);
+    if (password == null) {
+      password = getPasswordFromCredentialProvider(confMap.get(JdbcConnectionParams.SSL_STORE_PASSWORD_PATH), key);
+    }
+    return password;
+  }
+
+  /**
+   * Method to get the default port based on the transport mode.
+   * @param connectionParams JDBC connection parameters
+   * @return defaultPort
+   */
+  public static String getDefaultPort(JdbcConnectionParams connectionParams) {
+    String port = HiveConf.ConfVars.HIVE_SERVER2_THRIFT_PORT.getDefaultValue();
+    String transportMode = connectionParams.getSessionVars().get(JdbcConnectionParams.TRANSPORT_MODE);
+    if ("http".equalsIgnoreCase(transportMode)) {
+      port = HiveConf.ConfVars.HIVE_SERVER2_THRIFT_HTTP_PORT.getDefaultValue();
+    }
+    return port;
+  }
 }

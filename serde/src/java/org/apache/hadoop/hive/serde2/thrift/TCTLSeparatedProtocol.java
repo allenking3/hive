@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2.thrift;
@@ -182,7 +183,7 @@ public class TCTLSeparatedProtocol extends TProtocol implements
   protected final TTransport innerTransport;
 
   /**
-   * Strings used to lookup the various configurable paramaters of this
+   * Strings used to lookup the various configurable parameters of this
    * protocol.
    */
   public static final String ReturnNullsKey = "separators.return_nulls";
@@ -306,6 +307,11 @@ public class TCTLSeparatedProtocol extends TProtocol implements
   public TCTLSeparatedProtocol(TTransport trans) {
     this(trans, defaultPrimarySeparator, defaultSecondarySeparator,
         defaultMapSeparator, defaultRowSeparator, true, 4096);
+  }
+
+  @Override
+  public int getMinSerializedSize(byte b) throws TException {
+    return -1;
   }
 
   public TCTLSeparatedProtocol(TTransport trans, int buffer_size) {

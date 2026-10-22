@@ -9,48 +9,39 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.kudu;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.kudu.KuduOutputFormat.KuduRecordWriter;
-import org.apache.hadoop.hive.metastore.HiveMetaHook;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.metadata.DefaultStorageHandler;
-import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.HiveStoragePredicateHandler;
-import org.apache.hadoop.hive.ql.metadata.StorageHandlerInfo;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
-import org.apache.hadoop.hive.ql.security.authorization.DefaultHiveAuthorizationProvider;
-import org.apache.hadoop.hive.ql.security.authorization.HiveAuthorizationProvider;
+import org.apache.hadoop.hive.ql.security.authorization.HiveCustomStorageHandlerUtils;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
 import org.apache.hadoop.security.UserGroupInformation;
-import org.apache.hadoop.util.StringUtils;
 import org.apache.kudu.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +53,7 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
 
   private static final Logger LOG = LoggerFactory.getLogger(KuduStorageHandler.class);
 
+  private static final String KUDU_PREFIX = "kudu:";
   private static final String KUDU_PROPERTY_PREFIX = "kudu.";
 
   /** Table Properties. Used in the hive table definition when creating a new table. */
@@ -70,8 +62,6 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
   public static final String KUDU_MASTER_ADDRS_KEY = KUDU_PROPERTY_PREFIX + "master_addresses";
   public static final List<String> KUDU_TABLE_PROPERTIES =
       Arrays.asList(KUDU_TABLE_ID_KEY, KUDU_TABLE_NAME_KEY, KUDU_MASTER_ADDRS_KEY);
-
-  private Configuration conf;
 
   @Override
   public Class<? extends InputFormat> getInputFormatClass() {
@@ -86,26 +76,6 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
   @Override
   public Class<? extends AbstractSerDe> getSerDeClass() {
     return KuduSerDe.class;
-  }
-
-  @Override
-  public HiveMetaHook getMetaHook() {
-    return null;
-  }
-
-  @Override
-  public HiveAuthorizationProvider getAuthorizationProvider() throws HiveException {
-    return new DefaultHiveAuthorizationProvider();
-  }
-
-  @Override
-  public Configuration getConf() {
-    return conf;
-  }
-
-  @Override
-  public void setConf(Configuration conf) {
-    this.conf = conf;
   }
 
   @Override
@@ -132,41 +102,15 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
     if (UserGroupInformation.isSecurityEnabled()) {
       // AM can not do Kerberos Auth so will do the input split generation in the HS2
       LOG.debug("Setting {} to {} to enable split generation on HS2",
-          HiveConf.ConfVars.HIVE_AM_SPLIT_GENERATION.toString(),
-          Boolean.FALSE.toString());
+          HiveConf.ConfVars.HIVE_AM_SPLIT_GENERATION,
+          Boolean.FALSE);
       jobConf.set(HiveConf.ConfVars.HIVE_AM_SPLIT_GENERATION.toString(), Boolean.FALSE.toString());
     }
     try {
-      addDependencyJars(jobConf, KuduStorageHandler.class);
+      Utilities.addDependencyJars(jobConf, KuduStorageHandler.class);
     } catch (IOException e) {
       Throwables.propagate(e);
     }
-  }
-
-  // Copied from the DruidStorageHandler.
-  private static void addDependencyJars(Configuration conf, Class<?>... classes)
-      throws IOException {
-    FileSystem localFs = FileSystem.getLocal(conf);
-    Set<String> jars = new HashSet<>(conf.getStringCollection("tmpjars"));
-    for (Class<?> clazz : classes) {
-      if (clazz == null) {
-        continue;
-      }
-      final String path = Utilities.jarFinderGetJar(clazz);
-      if (path == null) {
-        throw new RuntimeException("Could not find jar for class " + clazz +
-            " in order to ship it to the cluster.");
-      }
-      if (!localFs.exists(new Path(path))) {
-        throw new RuntimeException("Could not validate jar file " + path + " for class " + clazz);
-      }
-      jars.add(path);
-    }
-    if (jars.isEmpty()) {
-      return;
-    }
-    //noinspection ToArrayCallWithZeroLengthArrayArgument
-    conf.set("tmpjars", StringUtils.arrayToString(jars.toArray(new String[jars.size()])));
   }
 
   private void configureJobProperties(TableDesc tableDesc,
@@ -184,6 +128,17 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
         jobProperties.put(propToCopy, value);
       }
     }
+  }
+
+  @Override
+  public URI getURIForAuth(Table table) throws URISyntaxException {
+    Map<String, String> tableProperties = HiveCustomStorageHandlerUtils.getTableProperties(table);
+    String host_name = tableProperties.get(KUDU_MASTER_ADDRS_KEY) != null ?
+            tableProperties.get(KUDU_MASTER_ADDRS_KEY) : conf.get(KUDU_MASTER_ADDRS_KEY);
+    Preconditions.checkNotNull(host_name, "Set Table property " + conf);
+    String table_name = tableProperties.get(KUDU_TABLE_NAME_KEY);
+    Preconditions.checkNotNull(table_name, "Set Table property " + KUDU_TABLE_NAME_KEY);
+    return new URI(KUDU_PREFIX+"//"+host_name+"/"+table_name);
   }
 
   /**
@@ -206,11 +161,4 @@ public class KuduStorageHandler extends DefaultStorageHandler implements HiveSto
     return KuduPredicateHandler.decompose(predicate, schema);
   }
 
-  /**
-   * Used to fetch runtime information about storage handler during DESCRIBE EXTENDED statement.
-   */
-  @Override
-  public StorageHandlerInfo getStorageHandlerInfo(Table table) throws MetaException {
-    return null;
-  }
 }

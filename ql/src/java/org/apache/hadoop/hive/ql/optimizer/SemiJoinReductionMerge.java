@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer;
 
@@ -43,6 +44,7 @@ import org.apache.hadoop.hive.ql.plan.DynamicValue;
 import org.apache.hadoop.hive.ql.plan.ExprNodeColumnDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeConstantDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
+import org.apache.hadoop.hive.ql.plan.ExprNodeDescUtils;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDynamicValueDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
 import org.apache.hadoop.hive.ql.plan.FilterDesc;
@@ -57,7 +59,6 @@ import org.apache.hadoop.hive.ql.udf.generic.GenericUDAFMax;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDAFMin;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFBetween;
 import org.apache.hadoop.hive.ql.udf.generic.GenericUDFInBloomFilter;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDFMurmurHash;
 import org.apache.hadoop.hive.ql.util.NullOrdering;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
@@ -76,6 +77,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import static com.google.common.base.Preconditions.checkState;
+import static org.apache.hadoop.hive.ql.exec.FunctionRegistry.BLOOM_FILTER_FUNCTION;
 import static org.apache.hadoop.hive.ql.plan.ExprNodeDescUtils.and;
 
 /**
@@ -86,21 +88,19 @@ import static org.apache.hadoop.hive.ql.plan.ExprNodeDescUtils.and;
  *   <li>Filter creation from the source relation and broadcast: SOURCE - SEL - GB1 - RS1 - GB2 - RS2</li>
  *   <li>Filter application on the target relation: TS - FIL[in_bloom(col)]</li>
  * </ul>
- * </p>
  * <p>
  * An example of the transformation on three single column semi join reducers is shown below. The plan is simplified for
  * presentation purposes.
- * <h3>BEFORE:</h3>
+ * <h2>BEFORE:</h2>
  * <pre>
  *        / SEL[fname] - GB1 - RS1 - GB2 - RS2  \
- * SOURCE - SEL[lname] - GB1 - RS1 - GB2 - RS2  -> TS[Author] - FIL[in_bloom(fname) ^ in_bloom(lname) ^ in_bloom(age)]
+ * SOURCE - SEL[lname] - GB1 - RS1 - GB2 - RS2  -&gt; TS[Author] - FIL[in_bloom(fname) ^ in_bloom(lname) ^ in_bloom(age)]
  *        \ SEL[age]   - GB1 - RS1 - GB2 - RS2  /
  * </pre>
  * <h3>AFTER:</h3>
  * <pre>
- * SOURCE - SEL[fname, lname, age] - GB1 - RS1 - GB2 - RS2 -> TS[Author] - FIL[in_bloom(hash(fname,lname,age)]
+ * SOURCE - SEL[fname, lname, age] - GB1 - RS1 - GB2 - RS2 -&gt; TS[Author] - FIL[in_bloom(hash(fname,lname,age)]
  * </pre>
- * </p>
  */
 public class SemiJoinReductionMerge extends Transform {
 
@@ -242,8 +242,7 @@ public class SemiJoinReductionMerge extends Transform {
       hashArgs.add(targetColumn);
     }
 
-    ExprNodeDesc hashExp =
-        new ExprNodeGenericFuncDesc(TypeInfoFactory.intTypeInfo, new GenericUDFMurmurHash(), "hash", hashArgs);
+    ExprNodeDesc hashExp = ExprNodeDescUtils.murmurHash(hashArgs);
 
     assert dynamicIds.size() == 1 : "There should be one column left untreated the one with the bloom filter";
     DynamicValue bloomDynamic = new DynamicValue(dynamicIds.poll(), TypeInfoFactory.binaryTypeInfo);
@@ -302,8 +301,7 @@ public class SemiJoinReductionMerge extends Transform {
       colDescs.add(col);
       selectColumnExprMap.put(colName, col);
     }
-    ExprNodeDesc hashExp =
-        new ExprNodeGenericFuncDesc(TypeInfoFactory.intTypeInfo, new GenericUDFMurmurHash(), "hash", colDescs);
+    ExprNodeDesc hashExp = ExprNodeDescUtils.murmurHash(colDescs);
     String hashName = HiveConf.getColumnInternalName(colDescs.size() + 1);
     colNames.add(hashName);
     columnInfos.add(new ColumnInfo(hashName, hashExp.getTypeInfo(), "", false));
@@ -402,12 +400,14 @@ public class SemiJoinReductionMerge extends Transform {
       gbColInfos.add(new ColumnInfo(colName, colType, "", false));
     }
 
-    float groupByMemoryUsage = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVEMAPAGGRHASHMEMORY);
-    float memoryThreshold = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVEMAPAGGRMEMORYTHRESHOLD);
-    float minReductionHashAggr = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVEMAPAGGRHASHMINREDUCTION);
+    float groupByMemoryUsage = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVE_MAP_AGGR_HASH_MEMORY);
+    float memoryThreshold = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVE_MAP_AGGR_MEMORY_THRESHOLD);
+    float minReductionHashAggr = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVE_MAP_AGGR_HASH_MIN_REDUCTION);
+    float minReductionHashAggrLowerBound = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVE_MAP_AGGR_HASH_MIN_REDUCTION_LOWER_BOUND);
+    float hashAggrFlushPercent = HiveConf.getFloatVar(hiveConf, HiveConf.ConfVars.HIVE_MAP_AGGR_HASH_FLUSH_SIZE_PERCENT);
     GroupByDesc groupBy =
         new GroupByDesc(gbMode, gbOutputNames, Collections.emptyList(), gbAggs, false, groupByMemoryUsage,
-            memoryThreshold, minReductionHashAggr, null, false, -1, false);
+            memoryThreshold, minReductionHashAggr, minReductionHashAggrLowerBound, hashAggrFlushPercent, null, false, -1, false);
     groupBy.setColumnExprMap(Collections.emptyMap());
     return (GroupByOperator) OperatorFactory.getAndMakeChild(groupBy, new RowSchema(gbColInfos), parentOp);
   }
@@ -454,8 +454,24 @@ public class SemiJoinReductionMerge extends Transform {
     bloomFilterEval.setMinEntries(conf.getLongVar(HiveConf.ConfVars.TEZ_MIN_BLOOM_FILTER_ENTRIES));
     bloomFilterEval.setFactor(conf.getFloatVar(HiveConf.ConfVars.TEZ_BLOOM_FILTER_FACTOR));
     bloomFilterEval.setHintEntries(numEntriesHint);
-    List<ExprNodeDesc> p = Collections.singletonList(col);
-    AggregationDesc bloom = new AggregationDesc("bloom_filter", bloomFilterEval, p, false, mode);
+
+    List<ExprNodeDesc> params;
+
+    // numThreads is available only for VectorUDAFBloomFilterMerge, which only supports
+    // these two modes, don't add numThreads otherwise
+    switch(mode) {
+      case PARTIAL2:
+      case FINAL:
+        int numThreads = conf.getIntVar(HiveConf.ConfVars.TEZ_BLOOM_FILTER_MERGE_THREADS);
+        TypeInfo intTypeInfo = TypeInfoFactory.getPrimitiveTypeInfoFromJavaPrimitive(Integer.TYPE);
+        params = Arrays.asList(col, new ExprNodeConstantDesc(intTypeInfo, numThreads));
+        break;
+    default:
+      params = Collections.singletonList(col);
+      break;
+    }
+
+    AggregationDesc bloom = new AggregationDesc(BLOOM_FILTER_FUNCTION, bloomFilterEval, params, false, mode);
     // It is necessary to set the bloom filter evaluator otherwise there are runtime failures see HIVE-24018
     bloom.setGenericUDAFWritableEvaluator(bloomFilterEval);
     return bloom;

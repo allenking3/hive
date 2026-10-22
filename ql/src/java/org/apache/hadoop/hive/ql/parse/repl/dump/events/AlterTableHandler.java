@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl.dump.events;
 
@@ -85,8 +86,8 @@ class AlterTableHandler extends AbstractEventHandler<AlterTableMessage> {
 
   private Scenario scenarioType(org.apache.hadoop.hive.metastore.api.Table before,
       org.apache.hadoop.hive.metastore.api.Table after) {
-    if (before.getDbName().equals(after.getDbName())
-        && before.getTableName().equals(after.getTableName())) {
+    if (before.getDbName().equalsIgnoreCase(after.getDbName())
+        && before.getTableName().equalsIgnoreCase(after.getTableName())) {
       return isTruncateOp ? Scenario.TRUNCATE : Scenario.ALTER;
     } else {
       return Scenario.RENAME;
@@ -210,7 +211,7 @@ class AlterTableHandler extends AbstractEventHandler<AlterTableMessage> {
       String oldName = before.getTableName();
       String newName = after.getTableName();
       boolean needDump = true;
-      if (withinContext.oldReplScope != null) {
+      if (withinContext.oldReplScope != null && !withinContext.oldReplScope.equals(withinContext.replScope)) {
         needDump = handleRenameForReplacePolicy(withinContext, oldName, newName);
       } else if (!withinContext.replScope.includeAllTables()) {
         needDump = handleRenameForTableLevelReplication(withinContext, oldName, newName);

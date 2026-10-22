@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.plan;
@@ -31,6 +32,7 @@ import org.apache.hadoop.hive.ql.plan.Explain.Level;
 import org.apache.hadoop.hive.ql.plan.Explain.Vectorization;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
+import org.apache.hadoop.mapred.TextInputFormat;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -59,6 +61,9 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
    * Set by the semantic analyzer only in case of the analyze command.
    */
   private List<String> partColumns;
+
+  private List<String> groupingPartitionColumns;
+  private Integer groupingNumBuckets;
 
   /**
    * Used for split sampling (row count per split)
@@ -102,6 +107,27 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
   public static final String FILTER_OBJECT_CONF_STR =
       "hive.io.filter.object";
 
+  public static final String PARTITION_PRUNING_FILTER =
+      "hive.io.pruning.filter";
+
+  public static final String GROUPING_PARTITION_COLUMNS =
+      "hive.io.grouping.partition.columns";
+
+  public static final String GROUPING_NUM_BUCKETS =
+      "hive.io.grouping.num.buckets";
+
+  public static final String AS_OF_TIMESTAMP =
+      "hive.io.as.of.timestamp";
+
+  public static final String AS_OF_VERSION =
+      "hive.io.as.of.version";
+
+  public static final String FROM_VERSION =
+      "hive.io.version.from";
+
+  public static final String SNAPSHOT_REF =
+      "hive.io.snapshot.ref";
+
   // input file name (big) to bucket number
   private Map<String, Integer> bucketFileNameMapping;
 
@@ -125,6 +151,13 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
   private BitSet includedBuckets;
 
   private int numBuckets = -1;
+
+  private String asOfVersion = null;
+  private String versionIntervalFrom = null;
+
+  private String asOfTimestamp = null;
+
+  private String snapshotRef = null;
 
   public TableScanDesc() {
     this(null, null);
@@ -153,6 +186,10 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
       dbName = tblMetadata.getDbName();
       tableName = tblMetadata.getTableName();
       numBuckets = tblMetadata.getNumBuckets();
+      asOfTimestamp = tblMetadata.getAsOfTimestamp();
+      asOfVersion = tblMetadata.getAsOfVersion();
+      versionIntervalFrom = tblMetadata.getVersionIntervalFrom();
+      snapshotRef = tblMetadata.getSnapshotRef();
     }
     isTranscationalTable = AcidUtils.isTransactionalTable(this.tableMetadata);
     if (isTranscationalTable) {
@@ -323,6 +360,26 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
     return partColumns;
   }
 
+  public void setGroupingPartitionColumns(List<String> groupingPartitionColumns) {
+    this.groupingPartitionColumns = groupingPartitionColumns;
+  }
+
+  @Explain(displayName = "Grouping Partition Columns", explainLevels = { Level.USER, Level.EXTENDED })
+  @Signature
+  public List<String> getGroupingPartitionColumns() {
+    return groupingPartitionColumns;
+  }
+
+  public void setGroupingNumBuckets(int groupingNumBuckets) {
+    this.groupingNumBuckets = groupingNumBuckets;
+  }
+
+  @Explain(displayName = "Grouping Num Buckets", explainLevels = { Level.USER, Level.EXTENDED })
+  @Signature
+  public Integer getGroupingNumBuckets() {
+    return groupingNumBuckets;
+  }
+
   public void setGatherStats(boolean gatherStats) {
     this.gatherStats = gatherStats;
   }
@@ -480,7 +537,9 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
 
   public boolean isNeedSkipHeaderFooters() {
     boolean rtn = false;
-    if (tableMetadata != null && tableMetadata.getTTable() != null) {
+    if (tableMetadata != null && tableMetadata.getTTable() != null
+        && TextInputFormat.class
+        .isAssignableFrom(tableMetadata.getInputFormatClass())) {
       Map<String, String> params = tableMetadata.getTTable().getParameters();
       if (params != null) {
         String skipHVal = params.get(serdeConstants.HEADER_COUNT);
@@ -503,6 +562,26 @@ public class TableScanDesc extends AbstractOperatorDesc implements IStatsGatherD
     return storageHandler == null
             ? opProps
             : storageHandler.getOperatorDescProperties(this, opProps);
+  }
+
+  @Explain(displayName = "As of version")
+  public String getAsOfVersion() {
+    return asOfVersion;
+  }
+
+  @Explain(displayName = "Version interval from")
+  public String getVersionIntervalFrom() {
+    return versionIntervalFrom;
+  }
+
+  @Explain(displayName = "As of timestamp")
+  public String getAsOfTimestamp() {
+    return asOfTimestamp;
+  }
+
+  @Explain(displayName = "Snapshot ref")
+  public String getSnapshotRef() {
+    return snapshotRef;
   }
 
   public class TableScanOperatorExplainVectorization extends OperatorExplainVectorization {

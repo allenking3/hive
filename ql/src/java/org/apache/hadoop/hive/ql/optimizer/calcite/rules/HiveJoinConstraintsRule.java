@@ -1,18 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to you under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.rules;
 
@@ -79,7 +81,7 @@ public class HiveJoinConstraintsRule extends RelOptRule {
   public void onMatch(RelOptRuleCall call) {
     final Project project = call.rel(0);
     final RexBuilder rexBuilder = project.getCluster().getRexBuilder();
-    List<RexNode> topProjExprs = project.getChildExps();
+    List<RexNode> topProjExprs = project.getProjects();
     Join join = call.rel(1);
     final JoinRelType joinType = join.getJoinType();
     final RelNode leftInput = join.getLeft();
@@ -163,7 +165,7 @@ public class HiveJoinConstraintsRule extends RelOptRule {
         }
         // Then, we start by trying to reference only left side in top projections
         List<RexNode> swappedTopProjExprs = topProjExprs.stream()
-            .map(projExpr -> projExpr.accept(new RexPermuteInputsShuttle(mappingRL, call.rel(1))))
+            .map(projExpr -> projExpr.accept(new RexPermuteInputsShuttle(mappingRL, false, call.rel(1))))
             .collect(Collectors.toList());
         rightInputPotentialFK = RelOptUtil.InputFinder.bits(swappedTopProjExprs, null).intersects(rightBits);
         if (!rightInputPotentialFK) {
@@ -171,7 +173,7 @@ public class HiveJoinConstraintsRule extends RelOptRule {
         } else {
           // If it did not work, we try to reference only right side in top projections
           swappedTopProjExprs = topProjExprs.stream()
-              .map(projExpr -> projExpr.accept(new RexPermuteInputsShuttle(mappingLR, call.rel(1))))
+              .map(projExpr -> projExpr.accept(new RexPermuteInputsShuttle(mappingLR, false, call.rel(1))))
               .collect(Collectors.toList());
           leftInputPotentialFK = RelOptUtil.InputFinder.bits(swappedTopProjExprs, null).intersects(leftBits);
           if (!leftInputPotentialFK) {
@@ -274,7 +276,8 @@ public class HiveJoinConstraintsRule extends RelOptRule {
           }
         }
 
-        if (!call.getMetadataQuery().areColumnsUnique(nonFkInput, fkJoinColBuilder.build())) {
+        final Boolean isUnique = call.getMetadataQuery().areColumnsUnique(nonFkInput, fkJoinColBuilder.build());
+        if (isUnique == null || !isUnique) {
           return;
         }
 
@@ -288,7 +291,7 @@ public class HiveJoinConstraintsRule extends RelOptRule {
 
 
   private void rewrite(final Mode mode, final RelNode inputToKeep, final RelNode inputToRemove,
-      final Join join, List<RexNode> topProjExprs, RelOptRuleCall call, final RelNode project, List<RexNode> nullableNodes) {
+      final Join join, List<RexNode> topProjExprs, RelOptRuleCall call, final Project project, List<RexNode> nullableNodes) {
     RexBuilder rexBuilder = join.getCluster().getRexBuilder();
 
     final RelNode leftInput = join.getLeft();
@@ -338,7 +341,7 @@ public class HiveJoinConstraintsRule extends RelOptRule {
           .push(leftInput).push(rightInput)
           .join(JoinRelType.INNER, join.getCondition())
           .convert(call.rel(1).getRowType(), false) // Preserve nullability
-          .project(project.getChildExps())
+          .project(project.getProjects())
           .build());
     }
   }

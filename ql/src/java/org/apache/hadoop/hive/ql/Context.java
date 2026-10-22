@@ -9,32 +9,34 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql;
 
 import java.io.DataInput;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.antlr.runtime.TokenRewriteStream;
+import org.apache.commons.compress.utils.Lists;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.FileStatus;
@@ -43,7 +45,10 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.common.BlobStorageUtils;
 import org.apache.hadoop.hive.common.FileUtils;
+import org.apache.hadoop.hive.common.TableName;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.ql.cleanup.CleanupService;
+import org.apache.hadoop.hive.ql.cleanup.SyncCleanupService;
 import org.apache.hadoop.hive.ql.exec.TaskRunner;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
@@ -59,13 +64,13 @@ import org.apache.hadoop.hive.ql.parse.ExplainConfiguration.AnalyzeState;
 import org.apache.hadoop.hive.ql.parse.HiveParser;
 import org.apache.hadoop.hive.ql.parse.QB;
 import org.apache.hadoop.hive.ql.plan.LoadTableDesc;
+import org.apache.hadoop.hive.ql.plan.Statistics;
 import org.apache.hadoop.hive.ql.plan.mapper.EmptyStatsSource;
 import org.apache.hadoop.hive.ql.plan.mapper.PlanMapper;
 import org.apache.hadoop.hive.ql.plan.mapper.StatsSource;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.hive.ql.wm.WmContext;
 import org.apache.hadoop.hive.shims.ShimLoader;
-import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,6 +110,7 @@ public class Context {
 
   private Configuration conf;
   protected int pathid = 10000;
+  private int moveTaskId = 0;
   protected ExplainConfiguration explainConfig = null;
   protected String cboInfo;
   protected boolean cboSucceeded;
@@ -121,7 +127,9 @@ public class Context {
   // Some statements, e.g., UPDATE, DELETE, or MERGE, get rewritten into different
   // subqueries that create new contexts. We keep them here so we can clean them
   // up when we are done.
-  private final Set<Context> subContexts;
+  private final List<Context> subContexts;
+
+  private String replPolicy;
 
   // List of Locks for this query
   protected List<HiveLock> hiveLocks;
@@ -134,6 +142,7 @@ public class Context {
   private AtomicInteger sequencer = new AtomicInteger();
 
   private final Map<String, Table> cteTables = new HashMap<String, Table>();
+  private final Map<TableName, Statistics> cteTableStats = new HashMap<>();
 
   // Keep track of the mapping from load table desc to the output and the lock
   private final Map<LoadTableDesc, WriteEntity> loadTableOutputMap =
@@ -161,7 +170,9 @@ public class Context {
    * different prefixes to encode the purpose of different Insert branches
    */
   private Map<Integer, DestClausePrefix> insertBranchToNamePrefix = new HashMap<>();
+  private int deleteBranchOfUpdateIdx = -1;
   private Operation operation = Operation.OTHER;
+  private boolean splitUpdate = false;
   private WmContext wmContext;
 
   private boolean isExplainPlan = false;
@@ -176,9 +187,26 @@ public class Context {
    * After enabling unparsing before analysis - a valid query unparse can be done.
    */
   private boolean enableUnparse;
+  /**
+   * true if this Context belongs to a statement which is analyzed by {@link org.apache.hadoop.hive.ql.parse.ScheduledQueryAnalyzer}.
+   * If the goal of the statement is to schedule an alter materialized view rebuild command we need the the fully qualified name
+   * if the materialized view only which is done by {@link org.apache.hadoop.hive.ql.parse.UnparseTranslator} and the query
+   * shouldn't be rewritten.
+   * See {@link org.apache.hadoop.hive.ql.ddl.view.materialized.alter.rebuild.AlterMaterializedViewRebuildAnalyzer}.
+   */
+  private boolean scheduledQuery;
+
+  private List<Pair<String, String>> parsedTables = new ArrayList<>();
+
+  private Path location;
 
   public void setOperation(Operation operation) {
     this.operation = operation;
+  }
+
+  public void setOperation(Operation operation, boolean splitUpdate) {
+    setOperation(operation);
+    this.splitUpdate = splitUpdate;
   }
 
   public Operation getOperation() {
@@ -193,13 +221,29 @@ public class Context {
     this.wmContext = wmContext;
   }
 
+  public void setReplPolicy(String replPolicy) {
+    this.replPolicy = replPolicy;
+  }
+
+  public String getReplPolicy() {
+    return this.replPolicy;
+  }
+
+  public Path getLocation() {
+    return location;
+  }
+
+  public void setLocation(Path location) {
+    this.location = location;
+  }
+
   /**
    * These ops require special handling in various places
    * (note that Insert into Acid table is in OTHER category)
    */
-  public enum Operation {UPDATE, DELETE, MERGE, OTHER}
+  public enum Operation {UPDATE, DELETE, MERGE, IOW, OTHER}
   public enum DestClausePrefix {
-    INSERT("insclause-"), UPDATE("updclause-"), DELETE("delclause-");
+    INSERT("insclause-"), UPDATE("updclause-"), DELETE("delclause-"), MERGE("mergeclause-");
     private final String prefix;
     DestClausePrefix(String prefix) {
       this.prefix = prefix;
@@ -207,6 +251,28 @@ public class Context {
     @Override
     public String toString() {
       return prefix;
+    }
+  }
+  public enum RewritePolicy {
+
+    DEFAULT,
+    PARTITION,
+    FULL_TABLE;
+
+    public static RewritePolicy fromString(String rewritePolicy) {
+      if (rewritePolicy == null) {
+        return DEFAULT;
+      }
+
+      try {
+        return valueOf(rewritePolicy.toUpperCase(Locale.ENGLISH));
+      } catch (IllegalArgumentException var2) {
+        throw new IllegalArgumentException(String.format("Invalid rewrite policy: %s", rewritePolicy), var2);
+      }
+    }
+
+    public static RewritePolicy get(HiveConf conf) {
+      return fromString(conf.get(HiveConf.ConfVars.REWRITE_POLICY.varname));
     }
   }
   private String getMatchedText(ASTNode n) {
@@ -270,39 +336,56 @@ public class Context {
       case OTHER:
         return DestClausePrefix.INSERT;
       case UPDATE:
+        if (splitUpdate) {
+          return getMergeDestClausePrefix(curNode);
+        }
         return DestClausePrefix.UPDATE;
       case DELETE:
         return DestClausePrefix.DELETE;
       case MERGE:
-      /* This is the structure expected here
-        HiveParser.TOK_QUERY;
-          HiveParser.TOK_FROM
-          HiveParser.TOK_INSERT;
-            HiveParser.TOK_INSERT_INTO;
-          HiveParser.TOK_INSERT;
-            HiveParser.TOK_INSERT_INTO;
-          .....*/
-        ASTNode insert = (ASTNode) curNode.getParent();
-        assert insert != null && insert.getType() == HiveParser.TOK_INSERT;
-        ASTNode query = (ASTNode) insert.getParent();
-        assert query != null && query.getType() == HiveParser.TOK_QUERY;
-
-        for(int childIdx = 1; childIdx < query.getChildCount(); childIdx++) {//1st child is TOK_FROM
-          assert query.getChild(childIdx).getType() == HiveParser.TOK_INSERT;
-          if(insert == query.getChild(childIdx)) {
-            DestClausePrefix prefix = insertBranchToNamePrefix.get(childIdx);
-            if(prefix == null) {
-              throw new IllegalStateException("Found a node w/o branch mapping: '" +
-                getMatchedText(insert) + "'");
-            }
-            return prefix;
-          }
-        }
-        throw new IllegalStateException("Could not locate '" + getMatchedText(insert) + "'");
+        return getMergeDestClausePrefix(curNode);
       default:
         throw new IllegalStateException("Unexpected operation: " + operation);
     }
   }
+
+  private DestClausePrefix getMergeDestClausePrefix(ASTNode curNode) {
+    /* This is the structure expected here
+      HiveParser.TOK_QUERY;
+        HiveParser.TOK_FROM
+        HiveParser.TOK_INSERT;
+          HiveParser.TOK_INSERT_INTO;
+        HiveParser.TOK_INSERT;
+          HiveParser.TOK_INSERT_INTO;
+        .....*/
+    ASTNode insert = (ASTNode) curNode.getParent();
+    assert insert != null && insert.getType() == HiveParser.TOK_INSERT;
+    ASTNode query = (ASTNode) insert.getParent();
+    assert query != null && query.getType() == HiveParser.TOK_QUERY;
+    ASTNode from = (ASTNode) query.getFirstChildWithType(HiveParser.TOK_FROM);
+    
+    if (from == null) {
+      // We are here when TOK_FROM is missing from the AST.
+      // This can happen for merge queries with a predicate like `<joining_column> is null`
+      // in the matched clause.
+      return DestClausePrefix.MERGE;
+    }
+    
+    int tokFromIdx = from.getChildIndex();
+    for (int childIdx = tokFromIdx + 1; childIdx < query.getChildCount(); childIdx++) {
+      assert query.getChild(childIdx).getType() == HiveParser.TOK_INSERT;
+      if (insert == query.getChild(childIdx)) {
+        DestClausePrefix prefix = insertBranchToNamePrefix.get(childIdx - tokFromIdx);
+        if (prefix == null) {
+          throw new IllegalStateException("Found a node w/o branch mapping: '" +
+            getMatchedText(insert) + "'");
+        }
+        return prefix;
+      }
+    }
+    throw new IllegalStateException("Could not locate '" + getMatchedText(insert) + "'");
+  }
+
   /**
    * Will make SemanticAnalyzer.Phase1Ctx#dest in subtree rooted at 'tree' use 'prefix'.  This to
    * handle multi-insert stmt that represents Merge stmt and has insert branches representing
@@ -314,7 +397,13 @@ public class Context {
     return insertBranchToNamePrefix.put(pos, prefix);
   }
 
-  public Context(Configuration conf) throws IOException {
+  public DestClausePrefix addDeleteOfUpdateDestNamePrefix(int pos, DestClausePrefix prefix) {
+    DestClausePrefix destClausePrefix = addDestNamePrefix(pos, prefix);
+    deleteBranchOfUpdateIdx = pos;
+    return destClausePrefix;
+  }
+
+  public Context(Configuration conf) {
     this(conf, generateExecutionId());
   }
 
@@ -322,20 +411,27 @@ public class Context {
    * Create a Context with a given executionId.  ExecutionId, together with
    * user name and conf, will determine the temporary directory locations.
    */
-  private Context(Configuration conf, String executionId)  {
+  private Context(Configuration conf, String executionId) {
     this.conf = conf;
     this.executionId = executionId;
-    this.subContexts = new HashSet<>();
+    this.subContexts = Lists.newArrayList();
 
     // local & non-local tmp location is configurable. however it is the same across
     // all external file systems
     nonLocalScratchPath = new Path(SessionState.getHDFSSessionPath(conf), executionId);
     localScratchDir = new Path(SessionState.getLocalSessionPath(conf), executionId).toUri().getPath();
-    scratchDirPermission = HiveConf.getVar(conf, HiveConf.ConfVars.SCRATCHDIRPERMISSION);
-    stagingDir = HiveConf.getVar(conf, HiveConf.ConfVars.STAGINGDIR);
+    scratchDirPermission = HiveConf.getVar(conf, HiveConf.ConfVars.SCRATCH_DIR_PERMISSION);
+    stagingDir = HiveConf.getVar(conf, HiveConf.ConfVars.STAGING_DIR);
     opContext = new CompilationOpContext();
 
     viewsTokenRewriteStreams = new HashMap<>();
+    // Sql text based materialized view auto rewriting compares the extended query text (contains fully qualified
+    // identifiers) to the stored Materialized view query definitions. We have to enable unparsing for generating
+    // the extended query text when auto rewriting is enabled.
+    enableUnparse =
+        HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_MATERIALIZED_VIEW_ENABLE_AUTO_REWRITING_SQL) ||
+        HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_MATERIALIZED_VIEW_ENABLE_AUTO_REWRITING_SUBQUERY_SQL);
+    scheduledQuery = false;
   }
 
   protected Context(Context ctx) {
@@ -373,13 +469,16 @@ public class Context {
     this.isUpdateDeleteMerge = ctx.isUpdateDeleteMerge;
     this.isLoadingMaterializedView = ctx.isLoadingMaterializedView;
     this.operation = ctx.operation;
+    this.splitUpdate = ctx.splitUpdate;
     this.wmContext = ctx.wmContext;
     this.isExplainPlan = ctx.isExplainPlan;
     this.statsSource = ctx.statsSource;
     this.executionIndex = ctx.executionIndex;
     this.viewsTokenRewriteStreams = new HashMap<>();
-    this.subContexts = new HashSet<>();
+    this.subContexts = Lists.newArrayList();
     this.opContext = new CompilationOpContext();
+    this.enableUnparse = ctx.enableUnparse;
+    this.scheduledQuery = ctx.scheduledQuery;
   }
 
   public Map<String, Path> getFsScratchDirs() {
@@ -404,7 +503,7 @@ public class Context {
 
   /**
    * Find whether we should execute the current query due to explain
-   * @return true if the query needs to be executed, false if not
+   * @return true if the query skips execution, false if does execute
    */
   public boolean isExplainSkipExecution() {
     return (explainConfig != null && explainConfig.getAnalyze() != AnalyzeState.RUNNING);
@@ -590,7 +689,7 @@ public class Context {
    *
    */
   public Path getMRScratchDir() {
-    return getMRScratchDir(!isExplainSkipExecution());
+    return getMRScratchDir(!isExplainSkipExecution() && !isLoadingMaterializedView());
   }
 
   /**
@@ -659,8 +758,7 @@ public class Context {
         fs.delete(p, true);
         fs.cancelDeleteOnExit(p);
       } catch (Exception e) {
-        LOG.warn("Error Removing result cache dir: "
-                     + StringUtils.stringifyException(e));
+        LOG.warn("Error Removing result cache dir:", e);
       }
     }
   }
@@ -687,11 +785,13 @@ public class Context {
           // because that will be taken care by removeResultCacheDir
           FileSystem fs = p.getFileSystem(conf);
           LOG.info("Deleting scratch dir: {}", p);
-          sessionState.getCleanupService().deleteRecursive(p, fs);
+          CleanupService cleanupService = sessionState != null
+              ? sessionState.getCleanupService()
+              : SyncCleanupService.INSTANCE;
+          cleanupService.deleteRecursive(p, fs);
         }
       } catch (Exception e) {
-        LOG.warn("Error Removing Scratch: "
-            + StringUtils.stringifyException(e));
+        LOG.warn("Error Removing Scratch", e);
       }
     }
     fsScratchDirs.clear();
@@ -720,8 +820,7 @@ public class Context {
             + materializedTable.getTableName() + ", status=" + status);
       } catch (IOException e) {
         // ignore
-        LOG.warn("Error removing " + location + " for materialized " + materializedTable.getTableName() +
-                ": " + StringUtils.stringifyException(e));
+        LOG.warn("Error removing " + location + " for materialized " + materializedTable.getTableName(), e);
       }
     }
     cteTables.clear();
@@ -731,6 +830,9 @@ public class Context {
     return Integer.toString(pathid++);
   }
 
+  private String nextMoveTaskId() {
+    return Integer.toString(moveTaskId++);
+  }
 
   private static final String MR_PREFIX = "-mr-";
   public static final String EXT_PREFIX = "-ext-";
@@ -763,7 +865,9 @@ public class Context {
   }
 
   public Path getMRTmpPath(URI uri) {
-    return new Path(getStagingDir(new Path(uri), !isExplainSkipExecution()), MR_PREFIX + nextPathId());
+    return new Path(getStagingDir(new Path(uri),
+        !isExplainSkipExecution() && !isLoadingMaterializedView()),
+        MR_PREFIX + nextPathId());
   }
 
   public Path getMRTmpPath(boolean mkDir) {
@@ -813,6 +917,11 @@ public class Context {
    */
   public Path getExtTmpPathRelTo(Path path) {
     return new Path(getStagingDir(path, !isExplainSkipExecution()), EXT_PREFIX + nextPathId());
+  }
+
+  public String getMoveTaskId() {
+    String moveTaskId = this.executionId + "_" + nextMoveTaskId();
+    return moveTaskId;
   }
 
   /**
@@ -868,7 +977,7 @@ public class Context {
           LOG.debug("Deleting result dir: {}", resDir);
           fs.delete(resDir, true);
         } catch (IOException e) {
-          LOG.info("Context clear error: " + StringUtils.stringifyException(e));
+          LOG.info("Context clear error", e);
         }
       }
 
@@ -878,7 +987,7 @@ public class Context {
         LOG.debug("Deleting result file: {}",  resFile);
         fs.delete(resFile, false);
       } catch (IOException e) {
-        LOG.info("Context clear error: " + StringUtils.stringifyException(e));
+        LOG.info("Context clear error", e);
       }
     }
     if(deleteResultDir) {
@@ -926,13 +1035,10 @@ public class Context {
       } else {
         return getNextStream();
       }
-    } catch (FileNotFoundException e) {
-      LOG.info("getStream error: " + StringUtils.stringifyException(e));
-      return null;
     } catch (IOException e) {
-      LOG.info("getStream error: " + StringUtils.stringifyException(e));
-      return null;
+      LOG.info("getStream error", e);
     }
+    return null;
   }
 
   private DataInput getNextStream() {
@@ -941,14 +1047,9 @@ public class Context {
           && (resDirPaths[resDirFilesNum] != null)) {
         return resFs.open(resDirPaths[resDirFilesNum++]);
       }
-    } catch (FileNotFoundException e) {
-      LOG.info("getNextStream error: " + StringUtils.stringifyException(e));
-      return null;
     } catch (IOException e) {
-      LOG.info("getNextStream error: " + StringUtils.stringifyException(e));
-      return null;
+      LOG.info("getNextStream error", e);
     }
-
     return null;
   }
 
@@ -977,7 +1078,8 @@ public class Context {
    *          the stream being used
    */
   public void setTokenRewriteStream(TokenRewriteStream tokenRewriteStream) {
-    assert (this.tokenRewriteStream == null || this.getExplainAnalyze() == AnalyzeState.RUNNING);
+    assert (this.tokenRewriteStream == null || this.getExplainAnalyze() == AnalyzeState.RUNNING ||
+        skipTableMasking);
     this.tokenRewriteStream = tokenRewriteStream;
   }
 
@@ -1021,13 +1123,6 @@ public class Context {
    * Today this translates into running hadoop jobs locally
    */
   public boolean isLocalOnlyExecutionMode() {
-    // Always allow spark to run in a cluster mode. Without this, depending on
-    // user's local hadoop settings, true may be returned, which causes plan to be
-    // stored in local path.
-    if (HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_EXECUTION_ENGINE).equals("spark")) {
-      return false;
-    }
-
     return ShimLoader.getHadoopShims().isLocalMode(conf);
   }
 
@@ -1150,8 +1245,14 @@ public class Context {
     return cteTables.get(cteName);
   }
 
-  public void addMaterializedTable(String cteName, Table table) {
+  public void addMaterializedTable(String cteName, Table table, Statistics statistics) {
     cteTables.put(cteName, table);
+    cteTables.put(table.getFullyQualifiedName(), table);
+    cteTableStats.put(table.getFullTableName(), statistics);
+  }
+
+  public Statistics getMaterializedTableStats(TableName tableName) {
+    return cteTableStats.get(tableName);
   }
 
   public AtomicInteger getSequencer() {
@@ -1277,4 +1378,37 @@ public class Context {
     this.enableUnparse = enableUnparse;
   }
 
+  public boolean isScheduledQuery() {
+    return scheduledQuery;
+  }
+
+  public void setScheduledQuery(boolean scheduledQuery) {
+    this.scheduledQuery = scheduledQuery;
+  }
+
+  public void setParsedTables(List<Pair<String, String>> parsedTables) {
+    this.parsedTables = parsedTables;
+  }
+
+  public List<Pair<String, String>> getParsedTables() {
+    return parsedTables;
+  }
+
+  public boolean isDeleteBranchOfUpdate(String dest) {
+    if (!splitUpdate) {
+      return false;
+    }
+
+    if (deleteBranchOfUpdateIdx > 0) {
+      return dest.endsWith(Integer.toString(deleteBranchOfUpdateIdx - 1));
+    }
+
+    for (Context subContext : subContexts) {
+      if (subContext.isDeleteBranchOfUpdate(dest)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 }

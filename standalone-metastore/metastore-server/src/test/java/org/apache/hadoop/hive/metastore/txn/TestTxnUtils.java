@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.txn;
 
@@ -24,6 +25,7 @@ import org.apache.hadoop.hive.metastore.annotation.MetastoreUnitTest;
 import org.apache.hadoop.hive.metastore.tools.SQLGenerator;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf.ConfVars;
+import org.apache.hadoop.hive.metastore.utils.TestTxnDbUtil;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -62,6 +64,7 @@ public class TestTxnUtils {
     //          The first query happens to have 2 full batches.
     MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_QUERY_LENGTH, 1);
     MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_ELEMENTS_IN_CLAUSE, 10);
+    MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_PARAMETERS, 2000);
     List<Long> inList = new ArrayList<>();
     for (long i = 1; i <= 189; i++) {
       inList.add(i);
@@ -149,10 +152,32 @@ public class TestTxnUtils {
     ret = TxnUtils.buildQueryWithINClause(conf, queries, prefix, suffix, inList, "TXN_ID", false, false);
     Assert.assertEquals(3, queries.size());
     Assert.assertEquals(queries.size(), ret.size());
-    Assert.assertEquals(2255L, ret.get(0).longValue());
-    Assert.assertEquals(2033L, ret.get(1).longValue());
-    Assert.assertEquals(33L, ret.get(2).longValue());
+    Assert.assertEquals(2000L, ret.get(0).longValue());
+    Assert.assertEquals(2000L, ret.get(1).longValue());
+    Assert.assertEquals(321L, ret.get(2).longValue());
     runAgainstDerby(queries);
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testBuildQueryWithNOTINClauseFailure() throws Exception {
+    MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_QUERY_LENGTH, 10);
+    MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_ELEMENTS_IN_CLAUSE, 100);
+    MetastoreConf.setLongVar(conf, ConfVars.DIRECT_SQL_MAX_PARAMETERS, 1000);
+    List<String> queries = new ArrayList<>();
+    List<Long> deleteSet = new ArrayList<>();
+    for (long i=0; i < 2000; i++) {
+      deleteSet.add(i+1);
+    }
+    StringBuilder prefix = new StringBuilder();
+    StringBuilder suffix = new StringBuilder();
+
+    prefix.append("select count(*) from TXNS where ");
+
+    List<String> questions = new ArrayList<>(deleteSet.size());
+    for (int  i = 0; i < deleteSet.size(); i++) {
+      questions.add("?");
+    }
+    TxnUtils.buildQueryWithINClauseStrings(conf, queries, prefix, suffix, questions, "cc_id", false, true);
   }
 
   /** Verify queries can run against Derby DB.
@@ -164,14 +189,14 @@ public class TestTxnUtils {
     ResultSet rs = null;
 
     try {
-      conn = TxnDbUtil.getConnection(conf);
+      conn = TestTxnDbUtil.getConnection(conf);
       stmt = conn.createStatement();
       for (String query : queries) {
         rs = stmt.executeQuery(query);
         Assert.assertTrue("The query is not valid", rs.next());
       }
     } finally {
-      TxnDbUtil.closeResources(conn, stmt, rs);
+      TestTxnDbUtil.closeResources(conn, stmt, rs);
     }
   }
   @Test
@@ -250,14 +275,14 @@ public class TestTxnUtils {
   @Before
   public void setUp() throws Exception {
     conf = MetastoreConf.newMetastoreConf();
-    TxnDbUtil.setConfValues(conf);
+    TestTxnDbUtil.setConfValues(conf);
     DatabaseProduct.reset();
-    TxnDbUtil.prepDb(conf);
+    TestTxnDbUtil.prepDb(conf);
   }
 
   @After
   public void tearDown() throws Exception {
     DatabaseProduct.reset();
-    TxnDbUtil.cleanDb(conf);
+    TestTxnDbUtil.cleanDb(conf);
   }
 }

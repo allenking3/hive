@@ -6,34 +6,37 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.metastore.dbinstall.rules;
+
+import org.testcontainers.containers.OracleContainer;
+import org.testcontainers.utility.DockerImageName;
 
 /**
  * JUnit TestRule for Oracle.
  */
 public class Oracle extends DatabaseRule {
+  private final DockerImageName name =
+      DockerImageName.parse("abstractdog/oracle-xe:18.4.0-slim").asCompatibleSubstituteFor("gvenzl/oracle-xe");
+  private final OracleContainer container = new OracleContainer(name).withEnv("ORACLE_PASSWORD", "oracle");
 
   @Override
-  public String getDockerImageName() {
-    return "pvargacl/oracle-xe-18.4.0";
+  public void before() {
+    container.start();
   }
 
   @Override
-  public String[] getDockerAdditionalArgs() {
-    return buildArray(
-        "-p",
-        "1521:1521",
-        "-d"
-    );
+  public void after() {
+    container.stop();
   }
 
   @Override
@@ -48,36 +51,26 @@ public class Oracle extends DatabaseRule {
 
   @Override
   public String getDbRootPassword() {
-    return "oracle";
+    return container.getPassword();
   }
 
   @Override
   public String getJdbcDriver() {
-    return "oracle.jdbc.OracleDriver";
+    return container.getDriverClassName();
   }
 
   @Override
   public String getJdbcUrl() {
-    return "jdbc:oracle:thin:@//localhost:1521/xe";
+    return container.getJdbcUrl();
   }
 
   @Override
   public String getInitialJdbcUrl() {
-    return "jdbc:oracle:thin:@//localhost:1521/xe";
-  }
-
-  @Override
-  public boolean isContainerReady(String logOutput) {
-    return logOutput.contains("DATABASE IS READY TO USE!");
+    return container.getJdbcUrl();
   }
 
   @Override
   public String getHivePassword() {
     return HIVE_PASSWORD;
-  }
-
-  @Override
-  public String getHiveUser() {
-    return "c##"+ super.getHiveUser();
   }
 }

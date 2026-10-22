@@ -71,7 +71,7 @@ STAGE PLANS:
                     Statistics: Num rows: 1 Data size: 4 Basic stats: COMPLETE Column stats: COMPLETE
                     Group By Operator
                       aggregations: count(key)
-                      minReductionHashAggr: 0.0
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0
                       Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
@@ -135,10 +135,12 @@ STAGE PLANS:
 PREHOOK: query: drop table stats_nonpart
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats_nonpart
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_nonpart
 POSTHOOK: query: drop table stats_nonpart
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats_nonpart
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_nonpart
 PREHOOK: query: create table stats_part(key int,value string) partitioned by (p int) tblproperties ("transactional"="true", "transactional_properties"="insert_only")
 PREHOOK: type: CREATETABLE
@@ -250,11 +252,11 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: stats_part
-                  Statistics: Num rows: 3 Data size: 12 Basic stats: PARTIAL Column stats: COMPLETE
+                  Statistics: Num rows: 2 Data size: 8 Basic stats: PARTIAL Column stats: COMPLETE
                   Select Operator
                     expressions: key (type: int)
                     outputColumnNames: key
-                    Statistics: Num rows: 3 Data size: 12 Basic stats: PARTIAL Column stats: COMPLETE
+                    Statistics: Num rows: 2 Data size: 8 Basic stats: PARTIAL Column stats: COMPLETE
                     Group By Operator
                       aggregations: count(key)
                       minReductionHashAggr: 0.99
@@ -368,11 +370,11 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: stats_part
-                  Statistics: Num rows: 2 Data size: 8 Basic stats: PARTIAL Column stats: COMPLETE
+                  Statistics: Num rows: 1 Data size: 4 Basic stats: PARTIAL Column stats: COMPLETE
                   Select Operator
                     expressions: key (type: int)
                     outputColumnNames: key
-                    Statistics: Num rows: 2 Data size: 8 Basic stats: PARTIAL Column stats: COMPLETE
+                    Statistics: Num rows: 1 Data size: 4 Basic stats: PARTIAL Column stats: COMPLETE
                     Group By Operator
                       aggregations: count(key)
                       minReductionHashAggr: 0.99
@@ -411,8 +413,10 @@ STAGE PLANS:
 PREHOOK: query: drop table stats_part
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@stats_part
+PREHOOK: Output: database:default
 PREHOOK: Output: default@stats_part
 POSTHOOK: query: drop table stats_part
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@stats_part
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@stats_part

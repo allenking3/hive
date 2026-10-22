@@ -9,28 +9,30 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.service.servlet;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hive.ql.QueryInfo;
 import org.apache.hive.service.cli.operation.OperationManager;
 import org.apache.hive.service.cli.session.HiveSession;
 import org.apache.hive.service.cli.session.SessionManager;
-import org.codehaus.jackson.JsonGenerator;
-import org.codehaus.jackson.JsonProcessingException;
-import org.codehaus.jackson.Version;
-import org.codehaus.jackson.map.JsonSerializer;
-import org.codehaus.jackson.map.ObjectMapper;
-import org.codehaus.jackson.map.SerializerProvider;
-import org.codehaus.jackson.map.module.SimpleModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.Version;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
@@ -47,7 +49,7 @@ import java.util.Collection;
  */
 public class QueriesRESTfulAPIServlet extends HttpServlet {
   private static final long serialVersionUID = 1L;
-  private static final Log LOG = LogFactory.getLog(QueriesRESTfulAPIServlet.class);
+  private static final Logger LOG = LoggerFactory.getLogger(QueriesRESTfulAPIServlet.class);
 
   private static final String API_V1 = "v1";
   private static final String REQ_QUERIES = "queries";
@@ -140,7 +142,7 @@ public class QueriesRESTfulAPIServlet extends HttpServlet {
     response.setContentType("application/json");
     response.setStatus(HttpServletResponse.SC_OK);
     ObjectMapper mapper = new ObjectMapper();
-    SimpleModule module = new SimpleModule("CustomSessionModule", new Version(1, 0, 0, null));
+    SimpleModule module = new SimpleModule("CustomSessionModule", new Version(1, 0, 0, null, null, null));
     module.addSerializer(HiveSession.class, new HiveSessionSerializer());
     mapper.registerModule(module);
 

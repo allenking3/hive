@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.database.drop;
@@ -40,25 +41,25 @@ public class DropDatabaseOperation extends DDLOperation<DropDatabaseDesc> {
   @Override
   public int execute() throws HiveException {
     try {
+      String catName = desc.getCatalogName();
       String dbName = desc.getDatabaseName();
       ReplicationSpec replicationSpec = desc.getReplicationSpec();
       if (replicationSpec.isInReplicationScope()) {
-        Database database = context.getDb().getDatabase(dbName);
+        Database database = context.getDb().getDatabase(catName, dbName);
         if (database == null || !replicationSpec.allowEventReplacementInto(database.getParameters())) {
           return 0;
         }
       }
-
-      context.getDb().dropDatabase(dbName, true, desc.getIfExists(), desc.isCasdade());
+      context.getDb().dropDatabase(desc);
 
       if (LlapHiveUtils.isLlapMode(context.getConf())) {
         ProactiveEviction.Request.Builder llapEvictRequestBuilder = ProactiveEviction.Request.Builder.create();
-        llapEvictRequestBuilder.addDb(dbName);
+        llapEvictRequestBuilder.addDb(catName, dbName);
         ProactiveEviction.evict(context.getConf(), llapEvictRequestBuilder.build());
       }
       // Unregister the functions as well
-      if (desc.isCasdade()) {
-        FunctionRegistry.unregisterPermanentFunctions(dbName);
+      if (desc.isCascade()) {
+        FunctionRegistry.unregisterPermanentFunctions(dbName); // TODO catalog. add catalog for unregistering functions. Depend on HIVE-29282
       }
     } catch (NoSuchObjectException ex) {
       throw new HiveException(ex, ErrorMsg.DATABASE_NOT_EXISTS, desc.getDatabaseName());

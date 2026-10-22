@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.protobuf;
@@ -65,10 +66,13 @@ public abstract class ProtobufSerDe extends AbstractSerDe {
   private Set<String> mapTypes;
 
   @Override
-  public void initialize(Configuration conf, Properties tbl) throws SerDeException {
-    this.mapTypes = Sets.newHashSet(tbl.getProperty(MAP_TYPES, "").trim().split("\\s*,\\s*"));
+  public void initialize(Configuration configuration, Properties tableProperties, Properties partitionProperties)
+      throws SerDeException {
+    super.initialize(configuration, tableProperties, partitionProperties);
 
-    protoMessageClass = loadClass(tbl.getProperty(PROTO_CLASS));
+    this.mapTypes = Sets.newHashSet(properties.getProperty(MAP_TYPES, "").trim().split("\\s*,\\s*"));
+
+    protoMessageClass = loadClass(properties.getProperty(PROTO_CLASS));
     Descriptor descriptor = loadDescriptor(protoMessageClass);
 
     Map<Descriptor, ObjectInspector> cache = new HashMap<>();

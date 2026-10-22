@@ -7,13 +7,14 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.txn.compactor;
 
@@ -42,6 +43,7 @@ public class CompactorTestUtilities {
 
   private static final Charset UTF8 = Charset.forName("UTF-8");
   private static final int ORC_ACID_VERSION_DEFAULT = 0;
+  public enum CompactorThreadType {INITIATOR, WORKER, CLEANER}
 
   /**
    * This is smart enough to handle streaming ingest where there could be a
@@ -52,16 +54,17 @@ public class CompactorTestUtilities {
    */
   private static int getAcidVersionFromDataFile(Path dataFile, FileSystem fs) throws IOException {
     FileStatus fileStatus = fs.getFileStatus(dataFile);
-    Reader orcReader = OrcFile.createReader(dataFile,
+    try (Reader orcReader = OrcFile.createReader(dataFile,
         OrcFile.readerOptions(fs.getConf())
             .filesystem(fs)
             //make sure to check for side file in case streaming ingest died
-            .maxLength(AcidUtils.getLogicalLength(fs, fileStatus)));
-    if (orcReader.hasMetadataValue(AcidUtils.OrcAcidVersion.ACID_VERSION_KEY)) {
-      char[] versionChar =
-          UTF8.decode(orcReader.getMetadataValue(AcidUtils.OrcAcidVersion.ACID_VERSION_KEY)).array();
-      String version = new String(versionChar);
-      return Integer.valueOf(version);
+            .maxLength(AcidUtils.getLogicalLength(fs, fileStatus)))) {
+      if (orcReader.hasMetadataValue(AcidUtils.OrcAcidVersion.ACID_VERSION_KEY)) {
+        char[] versionChar =
+            UTF8.decode(orcReader.getMetadataValue(AcidUtils.OrcAcidVersion.ACID_VERSION_KEY)).array();
+        String version = new String(versionChar);
+        return Integer.valueOf(version);
+      }
     }
     return ORC_ACID_VERSION_DEFAULT;
   }

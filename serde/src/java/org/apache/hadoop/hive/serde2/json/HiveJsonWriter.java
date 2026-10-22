@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2.json;
@@ -171,7 +172,7 @@ public class HiveJsonWriter {
   /**
    * Visit a vertex in the graph that is a Java Map.
    *
-   * @param oi The map's OjectInspector
+   * @param oi The map's ObjectInspector
    * @param o The Map object
    * @return A JsonNode representation of the Map
    * @throws SerDeException The Map cannot be parsed
@@ -199,7 +200,7 @@ public class HiveJsonWriter {
   /**
    * Visit a vertex in the graph that is a Java List.
    *
-   * @param oi The list's OjectInspector
+   * @param oi The list's ObjectInspector
    * @param o The List object
    * @return A JsonNode representation of the List
    * @throws SerDeException The List cannot be parsed
@@ -225,7 +226,7 @@ public class HiveJsonWriter {
    * represented as a Java List where the name associated with each element in
    * the list is stored in the ObjectInspector.
    *
-   * @param oi The struct's OjectInspector
+   * @param oi The struct's ObjectInspector
    * @param o The List object
    * @param fieldNames List of names to override the default field names
    * @return A JsonNode representation of the List
@@ -256,7 +257,7 @@ public class HiveJsonWriter {
   /**
    * Visit a vertex in the graph that is a union data type.
    *
-   * @param oi The union's OjectInspector
+   * @param oi The union's ObjectInspector
    * @param o The Union object
    * @return A JsonNode representation of the union
    * @throws SerDeException The union cannot be parsed

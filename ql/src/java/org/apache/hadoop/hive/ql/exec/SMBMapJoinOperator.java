@@ -1,19 +1,20 @@
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.See the NOTICE file
+ * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
- * regarding copyright ownership.The ASF licenses this file
+ * regarding copyright ownership.  The ASF licenses this file
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
- * with the License.You may obtain a copy of the License at
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec;
 
@@ -47,8 +48,6 @@ import org.apache.hadoop.hive.ql.plan.api.OperatorType;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.InspectableObject;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.io.WritableComparable;
-import org.apache.hadoop.io.WritableComparator;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.PriorityQueue;
@@ -134,13 +133,13 @@ public class SMBMapJoinOperator extends AbstractMapJoinOperator<SMBJoinDesc> imp
     int bucketSize;
 
     // For backwards compatibility reasons we honor the older
-    // HIVEMAPJOINBUCKETCACHESIZE if set different from default.
+    // HIVE_MAPJOIN_BUCKET_CACHE_SIZE if set different from default.
     // By hive 0.13 we should remove this code.
-    int oldVar = HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVEMAPJOINBUCKETCACHESIZE);
+    int oldVar = HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVE_MAPJOIN_BUCKET_CACHE_SIZE);
     if (oldVar != 100) {
       bucketSize = oldVar;
     } else {
-      bucketSize = HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVESMBJOINCACHEROWS);
+      bucketSize = HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVE_SMBJOIN_CACHE_ROWS);
     }
 
     for (byte pos = 0; pos < order.length; pos++) {
@@ -204,10 +203,10 @@ public class SMBMapJoinOperator extends AbstractMapJoinOperator<SMBJoinDesc> imp
 
       TableScanOperator ts = (TableScanOperator)aliasToWork.get(alias);
       // push down projections
-      ColumnProjectionUtils.appendReadColumns(
-          jobClone, ts.getNeededColumnIDs(), ts.getNeededColumns(), ts.getNeededNestedColumnPaths());
-      // push down filters
-      HiveInputFormat.pushFilters(jobClone, ts, null);
+      ColumnProjectionUtils.appendReadColumns(jobClone, ts.getNeededColumnIDs(), ts.getNeededColumns(),
+              ts.getNeededNestedColumnPaths(), ts.conf.hasVirtualCols());
+      // push down filters and as of information
+      HiveInputFormat.pushFiltersAndAsOf(jobClone, ts, null);
 
       AcidUtils.setAcidOperationalProperties(jobClone, ts.getConf().isTranscationalTable(),
           ts.getConf().getAcidOperationalProperties());
@@ -469,16 +468,8 @@ public class SMBMapJoinOperator extends AbstractMapJoinOperator<SMBJoinDesc> imp
     }
 
     for (int i = 0; i < k1.size(); i++) {
-      WritableComparable key_1 = (WritableComparable) k1.get(i);
-      WritableComparable key_2 = (WritableComparable) k2.get(i);
-      if (key_1 == null && key_2 == null) {
-        return nullsafes != null && nullsafes[i] ? 0 : -1; // just return k1 is smaller than k2
-      } else if (key_1 == null) {
-        return -1;
-      } else if (key_2 == null) {
-        return 1;
-      }
-      ret = WritableComparator.get(key_1.getClass()).compare(key_1, key_2);
+      ret = WritableComparatorFactory.get(k1.get(i), nullsafes == null ? false : nullsafes[i], null)
+              .compare(k1.get(i), k2.get(i));
       if(ret != 0) {
         return ret;
       }
@@ -544,9 +535,7 @@ public class SMBMapJoinOperator extends AbstractMapJoinOperator<SMBJoinDesc> imp
     BucketMatcher bucketMatcher = ReflectionUtil.newInstance(bucketMatcherCls, null);
 
     getExecContext().setFileId(bucketMatcherCxt.createFileId(currentInputPath.toString()));
-    if (LOG.isInfoEnabled()) {
-      LOG.info("set task id: " + getExecContext().getFileId());
-    }
+    LOG.info("set task id: " + getExecContext().getFileId());
 
     bucketMatcher.setAliasBucketFileNameMapping(bucketMatcherCxt
         .getAliasBucketFileNameMapping());
@@ -770,9 +759,7 @@ public class SMBMapJoinOperator extends AbstractMapJoinOperator<SMBJoinDesc> imp
       }
       Integer current = top();
       if (current == null) {
-        if (LOG.isInfoEnabled()) {
-          LOG.info("MergeQueue forwarded " + counter + " rows");
-        }
+        LOG.info("MergeQueue forwarded " + counter + " rows");
         return null;
       }
       counter++;

@@ -9,24 +9,24 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
 import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
-import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
 import org.apache.hadoop.hive.metastore.events.AlterTableEvent;
 import org.apache.hadoop.hive.metastore.events.CreateDatabaseEvent;
 import org.apache.hadoop.hive.metastore.events.CreateTableEvent;
 import org.apache.hadoop.hive.metastore.events.DropTableEvent;
 import org.apache.hadoop.hive.shims.Utils;
-
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.rules.TestName;
@@ -44,7 +44,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.hadoop.hive.metastore.ReplChangeManager.SOURCE_OF_REPLICATION;
+import static org.apache.hadoop.hive.common.repl.ReplConst.SOURCE_OF_REPLICATION;
 
 /**
  * TestMetaStoreEventListenerInRepl - Test metastore events created by replication.
@@ -62,11 +62,11 @@ public class TestMetaStoreEventListenerInRepl {
 
   @BeforeClass
   public static void internalBeforeClassSetup() throws Exception {
-    TestMetaStoreEventListenerInRepl.conf = new HiveConf(TestMetaStoreEventListenerInRepl.class);
+    TestMetaStoreEventListenerInRepl.conf = new HiveConfForTest(TestMetaStoreEventListenerInRepl.class);
     TestMetaStoreEventListenerInRepl.conf.set("dfs.client.use.datanode.hostname", "true");
     TestMetaStoreEventListenerInRepl.conf.set("hadoop.proxyuser." + Utils.getUGI().getShortUserName() + ".hosts", "*");
     MiniDFSCluster miniDFSCluster =
-        new MiniDFSCluster.Builder(TestMetaStoreEventListenerInRepl.conf).numDataNodes(1).format(true).build();
+        new MiniDFSCluster.Builder(TestMetaStoreEventListenerInRepl.conf).numDataNodes(2).format(true).build();
 
     Map<String, String> conf = new HashMap<String, String>() {{
 	      put("fs.defaultFS", miniDFSCluster.getFileSystem().getUri().toString());
@@ -122,9 +122,6 @@ public class TestMetaStoreEventListenerInRepl {
     // Add expected events with associated tables, if any.
     Map<String, Set<String>> eventsMap = new HashMap<>();
     eventsMap.put(CreateDatabaseEvent.class.getName(), null);
-    // Replication causes many implicit alter database operations, so metastore will see some
-    // alter table events as well.
-    eventsMap.put(AlterDatabaseEvent.class.getName(), null);
     eventsMap.put(CreateTableEvent.class.getName(), new HashSet<>(Arrays.asList("t1", "t2", "t4")));
     eventsMap.put(AlterTableEvent.class.getName(), new HashSet<>(Arrays.asList("t1", "t2", "t4")));
     return eventsMap;
@@ -142,9 +139,6 @@ public class TestMetaStoreEventListenerInRepl {
 
     // Add expected events with associated tables, if any.
     Map<String, Set<String>> eventsMap = new HashMap<>();
-    // Replication causes many implicit alter database operations, so metastore will see some
-    // alter table events as well.
-    eventsMap.put(AlterDatabaseEvent.class.getName(), null);
     eventsMap.put(CreateTableEvent.class.getName(), new HashSet<>(Arrays.asList("t6")));
     eventsMap.put(AlterTableEvent.class.getName(), new HashSet<>(Arrays.asList("t1", "t2", "t6")));
     eventsMap.put(DropTableEvent.class.getName(), new HashSet<>(Arrays.asList("t2")));
@@ -160,9 +154,6 @@ public class TestMetaStoreEventListenerInRepl {
             .run("drop table t1");
     // Add expected events with associated tables, if any.
     Map<String, Set<String>> eventsMap = new HashMap<>();
-    // Replication causes many implicit alter database operations, so metastore will see some
-    // alter table events as well.
-    eventsMap.put(AlterDatabaseEvent.class.getName(), null);
     eventsMap.put(CreateTableEvent.class.getName(), new HashSet<>(Arrays.asList("t7")));
     eventsMap.put(AlterTableEvent.class.getName(), new HashSet<>(Arrays.asList("t4", "t7")));
     eventsMap.put(DropTableEvent.class.getName(), new HashSet<>(Arrays.asList("t1")));

@@ -32,13 +32,14 @@ LOCATION
 #### A masked pattern was here ####
 TBLPROPERTIES (
   'bucketing_version'='2', 
-  'discover.partitions'='true', 
 #### A masked pattern was here ####
 PREHOOK: query: DROP TABLE tmp_showcrt1_n2
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@tmp_showcrt1_n2
+PREHOOK: Output: database:default
 PREHOOK: Output: default@tmp_showcrt1_n2
 POSTHOOK: query: DROP TABLE tmp_showcrt1_n2
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@tmp_showcrt1_n2
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@tmp_showcrt1_n2

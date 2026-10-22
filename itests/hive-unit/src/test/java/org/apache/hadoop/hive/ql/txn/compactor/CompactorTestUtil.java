@@ -7,13 +7,14 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.txn.compactor;
 
@@ -34,6 +35,7 @@ import org.apache.hadoop.hive.metastore.txn.TxnUtils;
 import org.apache.hadoop.hive.ql.IDriver;
 import org.apache.hadoop.hive.ql.io.AcidInputFormat;
 import org.apache.hadoop.hive.ql.io.AcidUtils;
+import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.ql.io.IOConstants;
 import org.apache.hadoop.hive.ql.io.RecordIdentifier;
 import org.apache.hadoop.hive.ql.io.orc.OrcInputFormat;
@@ -50,11 +52,17 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 
@@ -105,8 +113,61 @@ class CompactorTestUtil {
       throws IOException {
     Path path = partitionName == null ? new Path(table.getSd().getLocation(), deltaName) : new Path(
         new Path(table.getSd().getLocation()), new Path(partitionName, deltaName));
-    return Arrays.stream(fs.listStatus(path, AcidUtils.hiddenFileFilter)).map(FileStatus::getPath).map(Path::getName).sorted()
+    return Arrays.stream(fs.listStatus(path,  FileUtils.HIDDEN_FILES_PATH_FILTER)).map(FileStatus::getPath).map(Path::getName).sorted()
         .collect(Collectors.toList());
+  }
+
+  static List<String> getBucketFileNamesWithoutAttemptId(FileSystem fs, Table table, String partitionName,
+      List<String> deltaDirs) throws IOException {
+    Set<String> bucketFiles = new HashSet<>();
+    for (String deltaDir : deltaDirs) {
+      bucketFiles.addAll(getBucketFileNames(fs, table, partitionName, deltaDir));
+    }
+    Pattern p = Pattern.compile("(bucket_[0-9]+)(_[0-9]+)?");
+    List<String> bucketFilesWithoutAttemptId = new ArrayList<>();
+    for (String bucketFile : bucketFiles) {
+      Matcher m = p.matcher(bucketFile);
+      if (m.matches()) {
+        bucketFilesWithoutAttemptId.add(m.group(1));
+      }
+    }
+    Collections.sort(bucketFilesWithoutAttemptId);
+    return bucketFilesWithoutAttemptId;
+  }
+
+  /**
+   * Trigger a compaction run.
+   * @param conf hive configuration
+   * @param dbName database name
+   * @param tblName table name
+   * @param compactionType major/minor
+   * @param isQueryBased true, if query based compaction should be run
+   * @param properties compaction request properties
+   * @param partNames partition names
+   * @throws Exception compaction cannot be started.
+   */
+  static void runCompaction(HiveConf conf, String dbName, String tblName, CompactionType compactionType,
+                            boolean isQueryBased, Map<String, String> properties, String... partNames) throws  Exception {
+    HiveConf hiveConf = new HiveConf(conf);
+    hiveConf.setBoolVar(HiveConf.ConfVars.COMPACTOR_CRUD_QUERY_BASED, isQueryBased);
+    TxnStore txnHandler = TxnUtils.getTxnStore(hiveConf);
+    Worker t = new Worker();
+    t.setConf(hiveConf);
+    t.init(new AtomicBoolean(true));
+    CompactionRequest cr = new CompactionRequest(dbName, tblName, compactionType);
+    if (properties != null) {
+      cr.setProperties(properties);
+    }
+    if (partNames.length == 0) {
+      txnHandler.compact(cr);
+      t.run();
+    } else {
+      for (String partName : partNames) {
+        cr.setPartitionname(partName);
+        txnHandler.compact(cr);
+        t.run();
+      }
+    }
   }
 
   /**
@@ -121,24 +182,7 @@ class CompactorTestUtil {
    */
   static void runCompaction(HiveConf conf, String dbName, String tblName, CompactionType compactionType,
       boolean isQueryBased, String... partNames) throws Exception {
-    HiveConf hiveConf = new HiveConf(conf);
-    hiveConf.setBoolVar(HiveConf.ConfVars.COMPACTOR_CRUD_QUERY_BASED, isQueryBased);
-    TxnStore txnHandler = TxnUtils.getTxnStore(hiveConf);
-    Worker t = new Worker();
-    t.setThreadId((int) t.getId());
-    t.setConf(hiveConf);
-    t.init(new AtomicBoolean(true));
-    if (partNames.length == 0) {
-      txnHandler.compact(new CompactionRequest(dbName, tblName, compactionType));
-      t.run();
-    } else {
-      for (String partName : partNames) {
-        CompactionRequest cr = new CompactionRequest(dbName, tblName, compactionType);
-        cr.setPartitionname(partName);
-        txnHandler.compact(cr);
-        t.run();
-      }
-    }
+    runCompaction(conf, dbName, tblName, compactionType, isQueryBased, null, partNames);
   }
 
   /**
@@ -152,7 +196,6 @@ class CompactorTestUtil {
 
     HiveConf hiveConf = new HiveConf(hConf);
     Cleaner t = new Cleaner();
-    t.setThreadId((int) t.getId());
     t.setConf(hiveConf);
     t.init(new AtomicBoolean(true));
     t.run();
@@ -288,7 +331,7 @@ class CompactorTestUtil {
     conf.setBoolean("orc.schema.evolution.case.sensitive", false);
     HiveConf.setBoolVar(conf, HiveConf.ConfVars.HIVE_TRANSACTIONAL_TABLE_SCAN, true);
     AcidInputFormat.RawReader<OrcStruct> reader =
-        aif.getRawReader(conf, true, bucket, writeIdList, base, deltas, new HashMap<String, String>());
+        aif.getRawReader(conf, true, bucket, writeIdList, base, deltas, new HashMap<String, Integer>());
     RecordIdentifier identifier = reader.createKey();
     OrcStruct value = reader.createValue();
     long currentTxn = min;

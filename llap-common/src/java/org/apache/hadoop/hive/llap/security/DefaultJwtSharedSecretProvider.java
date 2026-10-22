@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.security;
@@ -43,7 +44,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.LLAP_EXTERNAL_CLIENT
  *
  * If secret is not found even after 1) and 2), {@link #init(Configuration)} methods throws {@link IllegalStateException}.
  *
- * Length of shared secret provided in 1) or 2) should be > 32 bytes.
+ * Length of shared secret provided in 1) or 2) should be &gt; 32 bytes.
  *
  * It uses the same encryption and decryption secret which can be used to sign and verify JWT.
  */

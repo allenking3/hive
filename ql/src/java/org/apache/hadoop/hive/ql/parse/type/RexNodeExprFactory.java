@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.type;
 
@@ -23,8 +24,11 @@ import java.nio.charset.Charset;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
 import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.rel.RelNode;
@@ -37,12 +41,17 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexSubQuery;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlCollation;
+import org.apache.calcite.sql.SqlFunction;
+import org.apache.calcite.sql.SqlFunctionCategory;
 import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlQuantifyOperator;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.sql.type.ArraySqlType;
 import org.apache.calcite.util.ConversionUtil;
 import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
@@ -59,21 +68,20 @@ import org.apache.hadoop.hive.common.type.TimestampTZ;
 import org.apache.hadoop.hive.common.type.TimestampTZUtil;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.ColumnInfo;
-import org.apache.hadoop.hive.ql.exec.Description;
 import org.apache.hadoop.hive.ql.exec.FunctionInfo;
 import org.apache.hadoop.hive.ql.optimizer.calcite.CalciteSemanticException;
 import org.apache.hadoop.hive.ql.optimizer.calcite.CalciteSemanticException.UnsupportedFeature;
 import org.apache.hadoop.hive.ql.optimizer.calcite.CalciteSubquerySemanticException;
 import org.apache.hadoop.hive.ql.optimizer.calcite.HiveCalciteUtil;
 import org.apache.hadoop.hive.ql.optimizer.calcite.reloperators.HiveRexExprList;
+import org.apache.hadoop.hive.ql.optimizer.calcite.reloperators.HiveComponentAccess;
 import org.apache.hadoop.hive.ql.optimizer.calcite.translator.TypeConverter;
 import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.HiveParser;
+import org.apache.hadoop.hive.ql.parse.QBSubQueryParseInfo;
 import org.apache.hadoop.hive.ql.parse.RowResolver;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.plan.SubqueryType;
-import org.apache.hadoop.hive.ql.udf.SettableUDF;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDF;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ConstantObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -129,7 +137,7 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
       throw new CalciteSemanticException("Unexpected error: Cannot find column");
     }
     return rexBuilder.makeInputRef(
-        TypeConverter.convert(colInfo.getType(), rexBuilder.getTypeFactory()), index + offset);
+        TypeConverter.convert(colInfo.getType(), colInfo.isNullable(), rexBuilder.getTypeFactory()), index + offset);
   }
 
   private static RexNode toPrimitiveConstDesc(
@@ -165,22 +173,23 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
 
   private int getPosition(ColumnInfo colInfo, List<RowResolver> rowResolverList)
       throws SemanticException {
-    ColumnInfo tmp;
-    ColumnInfo cInfoToRet = null;
     int position = 0;
-    for (RowResolver rr : rowResolverList) {
-      tmp = rr.get(colInfo.getTabAlias(), colInfo.getAlias());
-      if (tmp != null) {
-        if (cInfoToRet != null) {
-          throw new CalciteSemanticException("Could not resolve column name");
-        }
-        cInfoToRet = tmp;
-        position += rr.getPosition(cInfoToRet.getInternalName());
-      } else if (cInfoToRet == null) {
+
+    for (RowResolver rr: rowResolverList) {
+      ColumnInfo tmp = rr.get(colInfo.getTabAlias(), colInfo.getAlias());
+      if (tmp == null) {
+        // if column is not present in the RR, increment position by size of RR
         position += rr.getColumnInfos().size();
+      } else {
+        // if column is present, increment position by the position of the column in RR
+        // and return early.
+        position += rr.getPosition(tmp.getInternalName());
+        return position;
       }
     }
-    return position;
+
+    // If we are out of the for loop, then the column is not present in any RR
+    throw new CalciteSemanticException("Could not resolve column name");
   }
 
   /**
@@ -291,33 +300,34 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
     if (!allowNullValueConstantExpr && hd == null) {
       return null;
     }
-    DecimalTypeInfo type = adjustType(hd);
+    BigDecimal bd = hd != null ? hd.bigDecimalValue() : null;
+    DecimalTypeInfo type = adjustType(bd);
     return rexBuilder.makeExactLiteral(
-        hd != null ? hd.bigDecimalValue() : null,
-        TypeConverter.convert(type, rexBuilder.getTypeFactory()));
+        bd, TypeConverter.convert(type, rexBuilder.getTypeFactory()));
   }
 
   @Override
   protected TypeInfo adjustConstantType(PrimitiveTypeInfo targetType, Object constantValue) {
-    if (constantValue instanceof HiveDecimal) {
-      return adjustType((HiveDecimal) constantValue);
+    if (PrimitiveObjectInspectorUtils.decimalTypeEntry.equals(targetType.getPrimitiveTypeEntry())) {
+      return adjustType((BigDecimal) constantValue);
     }
     return targetType;
   }
 
-  private DecimalTypeInfo adjustType(HiveDecimal hd) {
-    // Note: the normalize() call with rounding in HiveDecimal will currently reduce the
-    //       precision and scale of the value by throwing away trailing zeroes. This may or may
-    //       not be desirable for the literals; however, this used to be the default behavior
-    //       for explicit decimal literals (e.g. 1.0BD), so we keep this behavior for now.
+  private DecimalTypeInfo adjustType(BigDecimal bd) {
     int prec = 1;
     int scale = 0;
-    if (hd != null) {
-      prec = hd.precision();
-      scale = hd.scale();
+    if (bd != null) {
+      prec = bd.precision();
+      scale = bd.scale();
+      if (prec < scale) {
+        // This can happen for numbers less than 0.1
+        // For 0.001234: prec=4, scale=6
+        // In this case, we'll set the type to have the same precision as the scale.
+        prec = scale;
+      }
     }
-    DecimalTypeInfo typeInfo = TypeInfoFactory.getDecimalTypeInfo(prec, scale);
-    return typeInfo;
+    return TypeInfoFactory.getDecimalTypeInfo(prec, scale);
   }
 
   /**
@@ -325,7 +335,7 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
    */
   @Override
   protected Object interpretConstantAsPrimitive(PrimitiveTypeInfo targetType, Object constantValue,
-      PrimitiveTypeInfo sourceType) {
+      PrimitiveTypeInfo sourceType, boolean isEqual) {
     // Extract string value if necessary
     Object constantToInterpret = constantValue;
     if (constantValue instanceof NlsString) {
@@ -340,9 +350,9 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
         } else if (PrimitiveObjectInspectorUtils.longTypeEntry.equals(primitiveTypeEntry)) {
           return toBigDecimal(constantToInterpret.toString()).longValueExact();
         } else if (PrimitiveObjectInspectorUtils.doubleTypeEntry.equals(primitiveTypeEntry)) {
-          return Double.valueOf(constantToInterpret.toString());
+          return toBigDecimal(constantToInterpret.toString());
         } else if (PrimitiveObjectInspectorUtils.floatTypeEntry.equals(primitiveTypeEntry)) {
-          return Float.valueOf(constantToInterpret.toString());
+          return toBigDecimal(constantToInterpret.toString());
         } else if (PrimitiveObjectInspectorUtils.byteTypeEntry.equals(primitiveTypeEntry)) {
           return toBigDecimal(constantToInterpret.toString()).byteValueExact();
         } else if (PrimitiveObjectInspectorUtils.shortTypeEntry.equals(primitiveTypeEntry)) {
@@ -352,22 +362,20 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
           return decimal != null ? decimal.bigDecimalValue() : null;
         }
       } catch (NumberFormatException | ArithmeticException nfe) {
+        if (!isEqual && (constantToInterpret instanceof Number ||
+            NumberUtils.isNumber(constantToInterpret.toString()))) {
+          // The target is a number, if constantToInterpret can be interpreted as a number,
+          // return the constantToInterpret directly, GenericUDFBaseCompare will do
+          // type conversion for us.
+          return constantToInterpret;
+        }
         LOG.trace("Failed to narrow type of constant", nfe);
         return null;
       }
     }
 
-    // Comparision of decimal and float/double happens in float/double.
     if (constantToInterpret instanceof BigDecimal) {
-      BigDecimal bigDecimal = (BigDecimal) constantToInterpret;
-
-      PrimitiveTypeEntry primitiveTypeEntry = targetType.getPrimitiveTypeEntry();
-      if (PrimitiveObjectInspectorUtils.doubleTypeEntry.equals(primitiveTypeEntry)) {
-        return bigDecimal.doubleValue();
-      } else if (PrimitiveObjectInspectorUtils.floatTypeEntry.equals(primitiveTypeEntry)) {
-        return bigDecimal.floatValue();
-      }
-      return bigDecimal;
+      return constantToInterpret;
     }
 
     String constTypeInfoName = sourceType.getTypeName();
@@ -609,8 +617,9 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
           SqlStdOperatorTable.ROW,
           operands);
     }
-    return rexBuilder.makeLiteral(constantValue,
-        TypeConverter.convert(typeInfo, rexBuilder.getTypeFactory()), false);
+    RelDataType finalType = TypeConverter.convert(typeInfo, rexBuilder.getTypeFactory());
+    boolean allowCast = finalType.getFamily() == SqlTypeFamily.CHARACTER;
+    return rexBuilder.makeLiteral(constantValue, finalType, allowCast);
   }
 
   /**
@@ -622,11 +631,13 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
     if (expr.getType().isStruct()) {
       // regular case of accessing nested field in a column
       return rexBuilder.makeFieldAccess(expr, fieldName, true);
+    } else if (expr.getType().getComponentType() != null) {
+      RexNode wrap = rexBuilder.makeCall(expr.getType().getComponentType(), HiveComponentAccess.COMPONENT_ACCESS,
+                  Collections.singletonList(expr));
+      return createNestedColumnRefExpr(typeInfo, wrap, fieldName,
+              expr.getType().getComponentType() instanceof ArraySqlType);
     } else {
-      // This may happen for schema-less tables, where columns are dynamically
-      // supplied by serdes.
-      throw new CalciteSemanticException("Unexpected rexnode : "
-          + expr.getClass().getCanonicalName(), UnsupportedFeature.Schema_less_table);
+      throw new CalciteSemanticException("Unexpected rexnode : " + expr.getClass().getCanonicalName());
     }
   }
 
@@ -906,6 +917,11 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
     return functionHelper.isEqualFunction(fi);
   }
 
+  @Override
+  protected boolean isNSCompareFunction(FunctionInfo fi) {
+    return functionHelper.isNSCompareFunction(fi);
+  }
+
   /**
    * {@inheritDoc}
    */
@@ -924,7 +940,7 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
     // subqueryToRelNode might be null if subquery expression anywhere other than
     //  as expected in filter (where/having). We should throw an appropriate error
     // message
-    Map<ASTNode, RelNode> subqueryToRelNode = ctx.getSubqueryToRelNode();
+    Map<ASTNode, QBSubQueryParseInfo> subqueryToRelNode = ctx.getSubqueryToRelNode();
     if (subqueryToRelNode == null) {
       throw new CalciteSubquerySemanticException(ErrorMsg.UNSUPPORTED_SUBQUERY_EXPRESSION.getMsg(
           " Currently SubQuery expressions are only allowed as " +
@@ -932,11 +948,14 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
     }
 
     ASTNode subqueryOp = (ASTNode) expr.getChild(0);
-    RelNode subqueryRel = subqueryToRelNode.get(expr);
+    RelNode subqueryRel = subqueryToRelNode.get(expr).getSubQueryRelNode();
     // For now because subquery is only supported in filter
     // we will create subquery expression of boolean type
     switch (subqueryType) {
       case EXISTS: {
+        if (subqueryToRelNode.get(expr).hasFullAggregate()) {
+          return createConstantExpr(TypeInfoFactory.booleanTypeInfo, true);
+        }
         return RexSubQuery.exists(subqueryRel);
       }
       case IN: {
@@ -986,6 +1005,18 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
   @Override
   protected FunctionInfo getFunctionInfo(String funcName) throws SemanticException {
     return functionHelper.getFunctionInfo(funcName);
+  }
+
+  @Override
+  protected RexNode replaceFieldNamesInStruct(RexNode expr, List<String> newFieldNames) {
+    if (newFieldNames.isEmpty()) {
+      return expr;
+    }
+
+    RexCall structCall = (RexCall) expr;
+    List<RelDataType> newTypes = structCall.operands.stream().map(RexNode::getType).collect(Collectors.toList());
+    RelDataType newType = rexBuilder.getTypeFactory().createStructType(newTypes, newFieldNames);
+    return rexBuilder.makeCall(newType, structCall.op, structCall.operands);
   }
 
   private static void throwInvalidSubqueryError(final ASTNode comparisonOp) throws SemanticException {
@@ -1053,5 +1084,4 @@ public class RexNodeExprFactory extends ExprFactory<RexNode> {
   public static NlsString makeHiveUnicodeString(String text) {
     return new NlsString(text, ConversionUtil.NATIVE_UTF16_CHARSET_NAME, SqlCollation.IMPLICIT);
   }
-
 }

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector;
@@ -814,6 +815,42 @@ public class VectorMapOperator extends AbstractMapOperator {
     return true;
   }
 
+  /**
+   * Reset all the columns excluding
+   * - partition columns because they are read only once per file during first batch read
+   * - any columns that defaulted to NULL because they are not present in this partition
+   *
+   * See {@link #setupPartitionContextVars(Path)}
+   */
+  private void resetVectorizedRowBatchForDeserialize() {
+    /**
+     * Reset existing input columns
+     */
+    for (int c = 0; c < currentDataColumnCount; c++) {
+      resetColumnVector(deserializerBatch.cols[c]);
+    }
+
+    /**
+     * Reset output and scratch columns
+     */
+    for (int c = dataColumnCount + partitionColumnCount; c < deserializerBatch.cols.length; c++) {
+      if (c == rowIdentifierColumnNum) {
+        continue;
+      }
+      resetColumnVector(deserializerBatch.cols[c]);
+    }
+    deserializerBatch.selectedInUse = false;
+    deserializerBatch.size = 0;
+    deserializerBatch.endOfFile = false;
+  }
+
+  private void resetColumnVector(ColumnVector columnVector) {
+    if (columnVector != null) {
+      columnVector.reset();
+      columnVector.init();
+    }
+  }
+
   @Override
   public void process(Writable value) throws HiveException {
 
@@ -885,20 +922,7 @@ public class VectorMapOperator extends AbstractMapOperator {
             batchCounter++;
             oneRootOperator.process(deserializerBatch, 0);
 
-            /**
-             * Only reset the current data columns.  Not any data columns defaulted to NULL
-             * because they are not present in the partition, and not partition columns.
-             */
-            for (int c = 0; c < currentDataColumnCount; c++) {
-              ColumnVector colVector = deserializerBatch.cols[c];
-              if (colVector != null) {
-                colVector.reset();
-                colVector.init();
-              }
-            }
-            deserializerBatch.selectedInUse = false;
-            deserializerBatch.size = 0;
-            deserializerBatch.endOfFile = false;
+            resetVectorizedRowBatchForDeserialize();
 
             if (oneRootOperator.getDone()) {
               setDone(true);

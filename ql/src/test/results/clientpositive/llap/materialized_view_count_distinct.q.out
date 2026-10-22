@@ -43,7 +43,7 @@ POSTHOOK: type: QUERY
 POSTHOOK: Input: count_distinct@base
 #### A masked pattern was here ####
 CBO PLAN:
-HiveProject(_o__c0=[$1])
+HiveProject(_c0=[$1])
   HiveAggregate(group=[{1}], agg#0=[count($0)])
     HiveProject(c1=[$0], c2=[$1])
       HiveAggregate(group=[{0, 1}])
@@ -71,6 +71,8 @@ POSTHOOK: type: CREATE_MATERIALIZED_VIEW
 POSTHOOK: Input: count_distinct@base
 POSTHOOK: Output: count_distinct@base_mview1
 POSTHOOK: Output: database:count_distinct
+POSTHOOK: Lineage: base_mview1.c1 SIMPLE [(base)base.FieldSchema(name:c1, type:int, comment:null), ]
+POSTHOOK: Lineage: base_mview1.c2 SIMPLE [(base)base.FieldSchema(name:c2, type:int, comment:null), ]
 PREHOOK: query: explain cbo
 select count(distinct c1) from base group by c2
 PREHOOK: type: QUERY
@@ -84,7 +86,7 @@ POSTHOOK: Input: count_distinct@base
 POSTHOOK: Input: count_distinct@base_mview1
 #### A masked pattern was here ####
 CBO PLAN:
-HiveProject(_o__c0=[$1])
+HiveProject(_c0=[$1])
   HiveAggregate(group=[{1}], agg#0=[count($0)])
     HiveTableScan(table=[[count_distinct, base_mview1]], table:alias=[count_distinct.base_mview1])
 
@@ -120,6 +122,9 @@ POSTHOOK: type: CREATE_MATERIALIZED_VIEW
 POSTHOOK: Input: count_distinct@base
 POSTHOOK: Output: count_distinct@base_mview2
 POSTHOOK: Output: database:count_distinct
+POSTHOOK: Lineage: base_mview2._c2 EXPRESSION [(base)base.FieldSchema(name:c2, type:int, comment:null), ]
+POSTHOOK: Lineage: base_mview2.c1 SIMPLE [(base)base.FieldSchema(name:c1, type:int, comment:null), ]
+POSTHOOK: Lineage: base_mview2.c2 SIMPLE [(base)base.FieldSchema(name:c2, type:int, comment:null), ]
 PREHOOK: query: explain cbo
 select count(distinct c1) from base group by c2
 PREHOOK: type: QUERY
@@ -133,7 +138,7 @@ POSTHOOK: Input: count_distinct@base
 POSTHOOK: Input: count_distinct@base_mview2
 #### A masked pattern was here ####
 CBO PLAN:
-HiveProject(_o__c0=[$1])
+HiveProject(_c0=[$1])
   HiveAggregate(group=[{1}], agg#0=[count($0)])
     HiveTableScan(table=[[count_distinct, base_mview2]], table:alias=[count_distinct.base_mview2])
 
@@ -163,7 +168,9 @@ PREHOOK: query: drop table base
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: count_distinct@base
 PREHOOK: Output: count_distinct@base
+PREHOOK: Output: database:count_distinct
 POSTHOOK: query: drop table base
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: count_distinct@base
 POSTHOOK: Output: count_distinct@base
+POSTHOOK: Output: database:count_distinct

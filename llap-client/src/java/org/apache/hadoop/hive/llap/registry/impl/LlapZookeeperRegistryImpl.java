@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap.registry.impl;
@@ -168,6 +169,16 @@ public class LlapZookeeperRegistryImpl
     String uniqueId = UNIQUE_ID.toString();
     long znodeCreationTimeout = 120;
 
+    /* When no LLAP executors are running, the getInstances()/ llapRegistryService.getInstances() method results in
+     InvalidACL exception when Hive tries to evict the cache in DROP DATABASE/TABLE
+
+     As ContainerManager of zookeeper makes sure to cleanup znodes periodically, once query-coordinator zookeeper
+     client session is terminated,entire path will get deleted sooner or later. This results in InvalidACL exception
+
+     PersistentNode created on server will be preserved through restarts of query executor and makes sure
+     proactive eviction call of DROP DATABASE/ DROP TABLE go through
+     successfully. */
+    ensurePersistentNodePath(daemonZkRecord);
     initializeWithoutRegisteringInternal();
     // Create a znode under the rootNamespace parent for this instance of the server
     try {

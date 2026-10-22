@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.log.syslog;
 
@@ -44,18 +45,18 @@ import org.apache.hadoop.hive.common.type.Timestamp;
  * about the way hive logs using syslog format (specifically RFC5424).
  *
  * This implementation also parses structured data, returns all parsed fields as map and also un-escapes messages.
- * This parser also gracefully handles some corner cases where 'msg' can be empty or line can start with '<' but not
+ * This parser also gracefully handles some corner cases where 'msg' can be empty or line can start with '&lt;' but not
  * a valid RFC5424 format etc.
  *
  * Assumption:
  * 1) This parser assumes the linebreaks '\n' in stack traces for example are replaced by '\r' to make single
  * line message. The reader will do replacement of '\r' with '\n' at the time of read.
  * 2) This parser assumes structured data values are html escaped. So it will html unescape when parsing structured
- * data. (hive writes log lines directly to stderr that look like rfc5424 layout starting with '<' so the expectation
+ * data. (hive writes log lines directly to stderr that look like rfc5424 layout starting with '&lt;' so the expectation
  * from log4j2 is to escape those lines using html escaping).
- * 3) Read event returns List<Object> conforming to sys.logs table schema in hive. The schema for sys.logs table is
+ * 3) Read event returns List&lt;Object&gt; conforming to sys.logs table schema in hive. The schema for sys.logs table is
  * expected to be (facility STRING, severity STRING, version STRING, ts TIMESTAMP, hostname STRING, app_name STRING,
- * proc_id STRING, msg_id STRING, structured_data map<STRING,STRING>, msg BINARY, unmatched BINARY)
+ * proc_id STRING, msg_id STRING, structured_data map&lt;STRING,STRING&gt;, msg BINARY, unmatched BINARY)
  * 4) Timestamps are in UTC
  *
  * This parser is tested with Log4j2's RFC5424 layout generated using the following properties
@@ -112,6 +113,7 @@ public class SyslogParser implements Closeable {
 
   private InputStream in;
   private boolean parseTag;
+  private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
   private static final Charset UTF8 = StandardCharsets.UTF_8;
   private Charset charset;
 
@@ -160,8 +162,7 @@ public class SyslogParser implements Closeable {
    * Read the next Syslog message from the stream.
    *
    * @return a parsed map of object, or null on EOF.
-   * @throw EOFException if EOF is found in an inappropriate place.
-   * @throw IOException if the underlying stream fails, or unexpected
+   * @throws IOException if the underlying stream fails, or unexpected
    * bytes are seen.
    */
   public List<Object> readEvent() throws IOException {
@@ -252,7 +253,7 @@ public class SyslogParser implements Closeable {
         }
       }
 
-      cal = new GregorianCalendar(TimeZone.getTimeZone("UTC"), Locale.getDefault());
+      cal = new GregorianCalendar(UTC, Locale.getDefault());
 
       cal.set(y, m - 1, d, hh, mm, ss);
       cal.set(Calendar.MILLISECOND, (int) (subss * 1000));
@@ -295,13 +296,13 @@ public class SyslogParser implements Closeable {
 
     expect(' ');
 
-    byte[] appname = null;
+    byte[] appName = null;
     byte[] procId = null;
     byte[] msgId = null;
     Map<String, String> structuredData = null;
 
     if (version >= 1) {
-      appname = readWordOrNil(48);
+      appName = readWordOrNil(48);
       expect(' ');
       procId = readWordOrNil(12);
       expect(' ');
@@ -310,7 +311,7 @@ public class SyslogParser implements Closeable {
       structuredData = readAndParseStructuredData();
     } else if (version == 0 && parseTag) {
       // Try to find a colon terminated tag.
-      appname = readTag();
+      appName = readTag();
       if (peek() == '[') {
         procId = readPid();
       }
@@ -323,7 +324,7 @@ public class SyslogParser implements Closeable {
     if (c != -1) {
       msg = readLine();
     }
-    createEvent(version, priority, cal, hostname, appname, procId, msgId, structuredData, msg, row);
+    createEvent(version, priority, cal, hostname, appName, procId, msgId, structuredData, msg, row);
     return row;
   }
 
@@ -339,25 +340,27 @@ public class SyslogParser implements Closeable {
 
   /**
    * Create a log event from the given parameters.
+   * https://www.rfc-editor.org/rfc/rfc3164
+   * https://www.rfc-editor.org/rfc/rfc5424
    *
    * @param version        the syslog version, 0 for RFC 3164
    * @param priority       the syslog priority, according to RFC 5424
    * @param cal            the timestamp of the message. Note that timezone matters
    * @param hostname       the hostname
-   * @param appname        the RFC 5424 appname
+   * @param appName        the RFC 5424 app-name
    * @param procId         the RFC 5424 proc-id
    * @param msgId          the RFC 5424 msg-id
    * @param structuredData the RFC 5424 structured-data
    * @param body           the message body
    */
   private void createEvent(int version, int priority, Calendar cal, String hostname,
-    byte[] appname, byte[] procId, byte[] msgId, Map<String, String> structuredData, byte[] body, List<Object> row) {
+    byte[] appName, byte[] procId, byte[] msgId, Map<String, String> structuredData, byte[] body, List<Object> row) {
     row.add(FACILITIES[priority / 8]);
     row.add(getEventPriorityBySyslog(priority));
     row.add(version == 0 ? "RFC3164" : "RFC5424");
     row.add(Timestamp.ofEpochMilli(cal.getTimeInMillis()));
     row.add(hostname != null ? hostname : "");
-    row.add(appname != null ? new String(appname) : "");
+    row.add(appName != null ? new String(appName) : "");
     row.add(procId != null ? new String(procId) : "");
     row.add(msgId != null ? new String(msgId) : "");
     row.add(structuredData);

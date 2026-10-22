@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.expressions;
@@ -47,7 +48,6 @@ import org.apache.hive.common.util.BloomKFilter;
 public class VectorInBloomFilterColDynamicValue extends VectorExpression {
   private static final long serialVersionUID = 1L;
 
-  protected final int colNum;
   protected final DynamicValue bloomFilterDynamicValue;
 
   protected transient boolean initialized = false;
@@ -58,8 +58,7 @@ public class VectorInBloomFilterColDynamicValue extends VectorExpression {
   private ObjectCache runtimeCache;
 
   public VectorInBloomFilterColDynamicValue(int colNum, DynamicValue bloomFilterDynamicValue) {
-    super();
-    this.colNum = colNum;
+    super(colNum, -1);
     this.bloomFilterDynamicValue = bloomFilterDynamicValue;
   }
 
@@ -67,7 +66,6 @@ public class VectorInBloomFilterColDynamicValue extends VectorExpression {
     super();
 
     // Dummy final assignments.
-    colNum = -1;
     bloomFilterDynamicValue = null;
   }
 
@@ -105,7 +103,7 @@ public class VectorInBloomFilterColDynamicValue extends VectorExpression {
       throw new IllegalStateException("Unsupported type " + colVectorType);
     }
 
-    String queryId = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEQUERYID);
+    String queryId = HiveConf.getVar(conf, HiveConf.ConfVars.HIVE_QUERY_ID);
     runtimeCache = ObjectCacheFactory.getCache(conf, queryId, false, true);
   }
 
@@ -130,7 +128,7 @@ public class VectorInBloomFilterColDynamicValue extends VectorExpression {
                   BloomKFilter bloomKFilter = BloomKFilter.deserialize(in);
                   return bloomKFilter;
                 } else {
-                  return new BloomKFilter(1);
+                  return BloomKFilter.build(1);
                 }
               } finally {
                 IOUtils.closeStream(in);
@@ -153,7 +151,7 @@ public class VectorInBloomFilterColDynamicValue extends VectorExpression {
       initValue();
     }
 
-    ColumnVector inputColVector = batch.cols[colNum];
+    ColumnVector inputColVector = batch.cols[inputColumnNum[0]];
     int[] sel = batch.selected;
     boolean[] nullPos = inputColVector.isNull;
     int n = batch.size;

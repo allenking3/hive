@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse;
 
@@ -44,12 +45,14 @@ public class TestMacroSemanticAnalyzer {
   public void setup() throws Exception {
     queryState = new QueryState.Builder().build();
     conf = queryState.getConf();
+    // the test doesn't involve DAG execution, skip TezSessionState initialization
+    conf.setBoolean(HiveConf.ConfVars.HIVE_CLI_TEZ_INITIALIZE_SESSION.varname, false);
     SessionState.start(conf);
     context = new Context(conf);
   }
 
   private ASTNode parse(String command) throws Exception {
-    return ParseUtils.parse(command);
+    return ParseUtils.parse(command, context);
   }
 
   private void analyze(ASTNode ast) throws Exception {

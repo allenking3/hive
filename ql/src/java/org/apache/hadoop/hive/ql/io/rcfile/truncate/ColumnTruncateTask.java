@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.rcfile.truncate;
@@ -78,7 +79,7 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
    */
   @Override
   public int execute() {
-    HiveConf.setVar(job, HiveConf.ConfVars.HIVEINPUTFORMAT,
+    HiveConf.setVar(job, HiveConf.ConfVars.HIVE_INPUT_FORMAT,
         BucketizedHiveInputFormat.class.getName());
     success = true;
     HiveFileFormatUtils.prepareJobOutput(job);
@@ -87,15 +88,9 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
 
     Context ctx = context;
     boolean ctxCreated = false;
-    try {
-      if (ctx == null) {
-        ctx = new Context(job);
-        ctxCreated = true;
-      }
-    }catch (IOException e) {
-      LOG.error(org.apache.hadoop.util.StringUtils.stringifyException(e));
-      setException(e);
-      return 5;
+    if (ctx == null) {
+      ctx = new Context(job);
+      ctxCreated = true;
     }
 
     job.setMapOutputKeyClass(NullWritable.class);
@@ -111,16 +106,16 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
     job.setBoolean(MRJobConfig.MAP_SPECULATIVE, false);
 
     if (work.getMinSplitSize() != null) {
-      HiveConf.setLongVar(job, HiveConf.ConfVars.MAPREDMINSPLITSIZE, work
+      HiveConf.setLongVar(job, HiveConf.ConfVars.MAPRED_MIN_SPLIT_SIZE, work
           .getMinSplitSize().longValue());
     }
 
     if (work.getInputformat() != null) {
-      HiveConf.setVar(job, HiveConf.ConfVars.HIVEINPUTFORMAT, work
+      HiveConf.setVar(job, HiveConf.ConfVars.HIVE_INPUT_FORMAT, work
           .getInputformat());
     }
 
-    String inpFormat = HiveConf.getVar(job, HiveConf.ConfVars.HIVEINPUTFORMAT);
+    String inpFormat = HiveConf.getVar(job, HiveConf.ConfVars.HIVE_INPUT_FORMAT);
     LOG.info("Using " + inpFormat);
 
     try {
@@ -152,7 +147,7 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
 
     String jobName = null;
     if (noName && this.getQueryPlan() != null) {
-      int maxlen = conf.getIntVar(HiveConf.ConfVars.HIVEJOBNAMELENGTH);
+      int maxlen = conf.getIntVar(HiveConf.ConfVars.HIVE_JOBNAME_LENGTH);
       jobName = Utilities.abbreviate(this.getQueryPlan().getQueryStr(),
           maxlen - 6);
     }
@@ -172,9 +167,9 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
 
       // remove the pwd from conf file so that job tracker doesn't show this
       // logs
-      String pwd = HiveConf.getVar(job, HiveConf.ConfVars.METASTOREPWD);
+      String pwd = HiveConf.getVar(job, HiveConf.ConfVars.METASTORE_PWD);
       if (pwd != null) {
-        HiveConf.setVar(job, HiveConf.ConfVars.METASTOREPWD, "HIVE");
+        HiveConf.setVar(job, HiveConf.ConfVars.METASTORE_PWD, "HIVE");
       }
       JobClient jc = new JobClient(job);
 
@@ -196,7 +191,7 @@ public class ColumnTruncateTask extends Task<ColumnTruncateWork> implements Seri
       String mesg = rj != null ? ("Ended Job = " + rj.getJobID()) : "Job Submission failed";
       // Has to use full name to make sure it does not conflict with
       // org.apache.commons.lang3.StringUtils
-      LOG.error(mesg, org.apache.hadoop.util.StringUtils.stringifyException(e));
+      LOG.error(mesg, e);
       setException(e);
 
       success = false;

@@ -1,15 +1,20 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.io.parquet.write;
 
@@ -37,6 +42,7 @@ public class DataWritableWriteSupport extends WriteSupport<ParquetHiveRecord> {
   public static final String PARQUET_HIVE_SCHEMA = "parquet.hive.schema";
   public static final String WRITER_TIMEZONE = "writer.time.zone";
   public static final String WRITER_DATE_PROLEPTIC = "writer.date.proleptic";
+  public static final String WRITER_ZONE_CONVERSION_LEGACY = "writer.zone.conversion.legacy";
 
   private DataWritableWriter writer;
   private MessageType schema;
@@ -60,6 +66,8 @@ public class DataWritableWriteSupport extends WriteSupport<ParquetHiveRecord> {
     defaultDateProleptic = HiveConf.getBoolVar(
         configuration, HiveConf.ConfVars.HIVE_PARQUET_DATE_PROLEPTIC_GREGORIAN);
     metaData.put(WRITER_DATE_PROLEPTIC, String.valueOf(defaultDateProleptic));
+    metaData.put(WRITER_ZONE_CONVERSION_LEGACY, String
+        .valueOf(HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_PARQUET_TIMESTAMP_WRITE_LEGACY_CONVERSION_ENABLED)));
     return new WriteContext(schema, metaData);
   }
 

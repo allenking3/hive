@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.optimizer.correlation;
 
-import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVECONVERTJOIN;
-import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVECONVERTJOINNOCONDITIONALTASK;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_CONVERT_JOIN;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_CONVERT_JOIN_NOCONDITIONALTASK;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -73,10 +74,10 @@ public class ReduceSinkDeDuplication extends Transform {
     ReduceSinkDeduplicateProcCtx cppCtx = new ReduceSinkDeduplicateProcCtx(pGraphContext);
 
     // for auto convert map-joins, it not safe to dedup in here (todo)
-    boolean mergeJoins = !pctx.getConf().getBoolVar(HIVECONVERTJOIN) &&
-        !pctx.getConf().getBoolVar(HIVECONVERTJOINNOCONDITIONALTASK) &&
+    boolean mergeJoins = !pctx.getConf().getBoolVar(HIVE_CONVERT_JOIN) &&
+        !pctx.getConf().getBoolVar(HIVE_CONVERT_JOIN_NOCONDITIONALTASK) &&
         !pctx.getConf().getBoolVar(ConfVars.HIVE_CONVERT_JOIN_BUCKET_MAPJOIN_TEZ) &&
-        !pctx.getConf().getBoolVar(ConfVars.HIVEDYNAMICPARTITIONHASHJOIN);
+        !pctx.getConf().getBoolVar(ConfVars.HIVE_DYNAMIC_PARTITION_HASHJOIN);
 
     // If multiple rules can be matched with same cost, last rule will be choosen as a processor
     // see DefaultRuleDispatcher#dispatch()
@@ -141,7 +142,7 @@ public class ReduceSinkDeDuplication extends Transform {
     }
   }
 
-  public abstract static class AbsctractReducerReducerProc implements SemanticNodeProcessor {
+  public abstract static class AbstractReducerReducerProc implements SemanticNodeProcessor {
 
     @Override
     public Object process(Node nd, Stack<Node> stack, NodeProcessorCtx procCtx,
@@ -175,7 +176,7 @@ public class ReduceSinkDeDuplication extends Transform {
         ReduceSinkDeduplicateProcCtx dedupCtx) throws SemanticException;
   }
 
-  static class GroupbyReducerProc extends AbsctractReducerReducerProc {
+  static class GroupbyReducerProc extends AbstractReducerReducerProc {
 
     // given a group by operator this determines if that group by belongs to semi-join branch
     // note that this works only for second last group by in semi-join branch (X-GB-RS-GB-RS)
@@ -245,7 +246,7 @@ public class ReduceSinkDeDuplication extends Transform {
     }
   }
 
-  static class JoinReducerProc extends AbsctractReducerReducerProc {
+  static class JoinReducerProc extends AbstractReducerReducerProc {
 
     // pRS-pJOIN-cRS
     @Override
@@ -293,7 +294,7 @@ public class ReduceSinkDeDuplication extends Transform {
     }
   }
 
-  static class ReducerReducerProc extends AbsctractReducerReducerProc {
+  static class ReducerReducerProc extends AbstractReducerReducerProc {
 
     // pRS-cRS
     @Override
@@ -329,7 +330,7 @@ public class ReduceSinkDeDuplication extends Transform {
               start, ReduceSinkOperator.class, dedupCtx.trustScript());
       if (pRS != null && ReduceSinkDeDuplicationUtils
           .merge(dedupCtx.getPctx().getConf(), cRS, pRS, dedupCtx.minReducer())) {
-        if (dedupCtx.getPctx().getConf().getBoolVar(HiveConf.ConfVars.HIVEGROUPBYSKEW)) {
+        if (dedupCtx.getPctx().getConf().getBoolVar(HiveConf.ConfVars.HIVE_GROUPBY_SKEW)) {
           return false;
         }
         CorrelationUtilities.removeReduceSinkForGroupBy(cRS, cGBY, dedupCtx.getPctx(), dedupCtx);

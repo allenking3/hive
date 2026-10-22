@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.repl;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.codehaus.jackson.map.ObjectMapper;
-import org.codehaus.jackson.map.SerializationConfig;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,16 +30,14 @@ import org.slf4j.LoggerFactory;
  * Logger class for Repl Events.
  **/
 public abstract class ReplState {
-  @JsonIgnoreProperties
   private static final Logger REPL_LOG = LoggerFactory.getLogger("ReplState");
 
-  @JsonIgnoreProperties
   private static final ObjectMapper mapper = new ObjectMapper(); // Thread-safe.
 
   static {
-    mapper.configure(SerializationConfig.Feature.AUTO_DETECT_GETTERS, false);
-    mapper.configure(SerializationConfig.Feature.AUTO_DETECT_IS_GETTERS, false);
-    mapper.configure(SerializationConfig.Feature.AUTO_DETECT_FIELDS, false);
+    mapper.configure(MapperFeature.AUTO_DETECT_GETTERS, false);
+    mapper.configure(MapperFeature.AUTO_DETECT_IS_GETTERS, false);
+    mapper.configure(MapperFeature.AUTO_DETECT_FIELDS, false);
   }
 
   public enum LogTag {
@@ -57,7 +56,8 @@ public abstract class ReplState {
     ATLAS_LOAD_END,
     RANGER_LOAD_START,
     RANGER_LOAD_END,
-    END
+    END,
+    DATA_COPY_END
   }
 
   public void log(LogTag tag) {

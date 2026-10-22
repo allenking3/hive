@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.parse.type;
 
@@ -26,7 +27,6 @@ import org.apache.hadoop.hive.ql.parse.ASTNode;
 import org.apache.hadoop.hive.ql.parse.RowResolver;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
 import org.apache.hadoop.hive.ql.plan.SubqueryType;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDF;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hive.common.util.DateUtils;
@@ -270,7 +270,7 @@ public abstract class ExprFactory<T> {
    * Interpret the input constant value of source type as target type.
    */
   protected abstract Object interpretConstantAsPrimitive(PrimitiveTypeInfo targetType,
-      Object constantValue, PrimitiveTypeInfo sourceType);
+      Object constantValue, PrimitiveTypeInfo sourceType, boolean isEqual);
 
   /**
    * Returns value stored in a constant expression.
@@ -337,6 +337,8 @@ public abstract class ExprFactory<T> {
 
   protected abstract boolean isEqualFunction(FunctionInfo fi);
 
+  protected abstract boolean isNSCompareFunction(FunctionInfo fi);
+
   protected abstract boolean isConsistentWithinQuery(FunctionInfo fi);
 
   protected abstract boolean isStateful(FunctionInfo fi);
@@ -344,6 +346,12 @@ public abstract class ExprFactory<T> {
    * Returns true if a CASE expression can be converted into a COALESCE function call.
    */
   protected abstract boolean convertCASEIntoCOALESCEFuncCallExpr(FunctionInfo fi, List<T> inputs);
+  /**
+   * Returns true if a CASE expression can be converted into an IF function call.
+   */
+  protected boolean convertCASEIntoIFFuncCallExpr(FunctionInfo fi, List<T> inputs) {
+    return false;
+  }
 
   /* SUBQUERIES */
   /**
@@ -411,4 +419,5 @@ public abstract class ExprFactory<T> {
    */
   protected abstract FunctionInfo getFunctionInfo(String funcName) throws SemanticException;
 
+  protected abstract T replaceFieldNamesInStruct(T expr, List<String> newFieldNames);
 }

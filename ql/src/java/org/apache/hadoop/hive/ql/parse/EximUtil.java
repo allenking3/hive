@@ -9,37 +9,40 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.hive.common.repl.ReplConst;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.ReplChangeManager;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.ql.Context;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.exec.Task;
-import org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils;
+import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.exec.repl.util.StringConvertibleObject;
 import org.apache.hadoop.hive.ql.hooks.ReadEntity;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
 import org.apache.hadoop.hive.ql.metadata.Hive;
+import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.Partition;
 import org.apache.hadoop.hive.ql.metadata.Table;
 import org.apache.hadoop.hive.ql.parse.repl.DumpType;
-import org.apache.hadoop.hive.ql.parse.repl.dump.Utils;
 import org.apache.hadoop.hive.ql.parse.repl.dump.io.DBSerializer;
 import org.apache.hadoop.hive.ql.parse.repl.dump.io.JsonWriter;
 import org.apache.hadoop.hive.ql.parse.repl.dump.io.ReplicationSpecSerializer;
@@ -53,17 +56,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.StringTokenizer;
+import java.util.regex.Pattern;
 
 /**
  *
@@ -77,10 +84,13 @@ public class EximUtil {
   public static final String FILES_NAME = "_files";
   public static final String FILE_LIST = "_file_list";
   public static final String FILE_LIST_EXTERNAL = "_file_list_external";
+  public static final String FILE_LIST_EXTERNAL_SNAPSHOT_CURRENT = "_file_list_external_current";
+  public static final String FILE_LIST_EXTERNAL_SNAPSHOT_OLD = "_file_list_external_old";
   public static final String DATA_PATH_NAME = "data";
   public static final String METADATA_PATH_NAME = "metadata";
 
   private static final Logger LOG = LoggerFactory.getLogger(EximUtil.class);
+  private static final String DATABASE_PATH_SUFFIX = ".db";
 
   /**
    * Wrapper class for common BaseSemanticAnalyzer non-static members
@@ -254,8 +264,8 @@ public class EximUtil {
    */
   public static URI getValidatedURI(HiveConf conf, String dcPath) throws SemanticException {
     try {
-      boolean testMode = conf.getBoolVar(HiveConf.ConfVars.HIVETESTMODE)
-          || conf.getBoolVar(HiveConf.ConfVars.HIVEEXIMTESTMODE);
+      boolean testMode = conf.getBoolVar(HiveConf.ConfVars.HIVE_TEST_MODE)
+          || conf.getBoolVar(HiveConf.ConfVars.HIVE_EXIM_TEST_MODE);
       URI uri = new Path(dcPath).toUri();
       FileSystem fs = FileSystem.get(uri, conf);
       // Get scheme from FileSystem
@@ -311,8 +321,8 @@ public class EximUtil {
   public static String relativeToAbsolutePath(HiveConf conf, String location)
       throws SemanticException {
     try {
-      boolean testMode = conf.getBoolVar(HiveConf.ConfVars.HIVETESTMODE)
-        || conf.getBoolVar(HiveConf.ConfVars.HIVEEXIMTESTMODE);;
+      boolean testMode = conf.getBoolVar(HiveConf.ConfVars.HIVE_TEST_MODE)
+        || conf.getBoolVar(HiveConf.ConfVars.HIVE_EXIM_TEST_MODE);;
       if (testMode) {
         URI uri = new Path(location).toUri();
         FileSystem fs = FileSystem.get(uri, conf);
@@ -350,7 +360,8 @@ public class EximUtil {
   public static final String METADATA_FORMAT_FORWARD_COMPATIBLE_VERSION = null;
 
   public static void createDbExportDump(FileSystem fs, Path metadataPath, Database dbObj,
-      ReplicationSpec replicationSpec) throws IOException, SemanticException {
+      ReplicationSpec replicationSpec, Configuration conf) throws IOException, SemanticException {
+    updateIfCustomDbLocations(dbObj, conf);
 
     // WARNING NOTE : at this point, createDbExportDump lives only in a world where ReplicationSpec is in replication scope
     // If we later make this work for non-repl cases, analysis of this logic might become necessary. Also, this is using
@@ -361,10 +372,11 @@ public class EximUtil {
     if (parameters != null) {
       Map<String, String> tmpParameters = new HashMap<>(parameters);
       tmpParameters.entrySet()
-                .removeIf(e -> e.getKey().startsWith(Utils.BOOTSTRAP_DUMP_STATE_KEY_PREFIX)
-                            || e.getKey().equals(ReplUtils.REPL_CHECKPOINT_KEY)
-                            || e.getKey().equals(ReplChangeManager.SOURCE_OF_REPLICATION)
-                            || e.getKey().equals(ReplUtils.REPL_FIRST_INC_PENDING_FLAG));
+                .removeIf(e -> e.getKey().startsWith(ReplConst.BOOTSTRAP_DUMP_STATE_KEY_PREFIX)
+                            || e.getKey().equals(ReplConst.REPL_TARGET_DB_PROPERTY)
+                            || e.getKey().equals(ReplConst.SOURCE_OF_REPLICATION)
+                            || e.getKey().equals(ReplConst.REPL_FIRST_INC_PENDING_FLAG)
+                            || e.getKey().equals(ReplConst.REPL_FAILOVER_ENDPOINT));
       dbObj.setParameters(tmpParameters);
     }
     try (JsonWriter jsonWriter = new JsonWriter(fs, metadataPath)) {
@@ -372,6 +384,26 @@ public class EximUtil {
     }
     if (parameters != null) {
       dbObj.setParameters(parameters);
+    }
+  }
+
+  private static void updateIfCustomDbLocations(Database database, Configuration conf) throws SemanticException {
+    try {
+      String whLocatoion = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.WAREHOUSE_EXTERNAL,
+              MetastoreConf.getVar(conf, MetastoreConf.ConfVars.WAREHOUSE));
+      Path dbDerivedLoc = new Path(whLocatoion, database.getName().toLowerCase() + DATABASE_PATH_SUFFIX);
+      String defaultDbLoc = Utilities.getQualifiedPath((HiveConf) conf, dbDerivedLoc);
+      database.putToParameters(ReplConst.REPL_IS_CUSTOM_DB_LOC,
+              Boolean.toString(!defaultDbLoc.equals(database.getLocationUri())));
+      String whManagedLocatoion = MetastoreConf.getVar(conf, MetastoreConf.ConfVars.WAREHOUSE);
+      Path dbDerivedManagedLoc = new Path(whManagedLocatoion, database.getName().toLowerCase()
+              + DATABASE_PATH_SUFFIX);
+      String defaultDbManagedLoc = Utilities.getQualifiedPath((HiveConf) conf, dbDerivedManagedLoc);
+      database.getParameters().put(ReplConst.REPL_IS_CUSTOM_DB_MANAGEDLOC, Boolean.toString(
+              !(database.getManagedLocationUri() == null
+                      ||defaultDbManagedLoc.equals(database.getManagedLocationUri()))));
+    } catch (HiveException ex) {
+      throw new SemanticException(ex);
     }
   }
 
@@ -423,6 +455,30 @@ public class EximUtil {
     try (FSDataInputStream stream = fs.open(fromMetadataPath)) {
       return IOUtils.toString(stream, StandardCharsets.UTF_8);
     }
+  }
+
+  public static Set<Long> readAsLong(final FileSystem fs, final Path fromMetadataPath, String delimiter) throws IOException {
+    Set<Long> longValues = new HashSet<>();
+    try (FSDataInputStream stream = fs.open(fromMetadataPath);
+         InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8);
+         Scanner scanner = new Scanner(reader)) {
+
+      scanner.useDelimiter(Pattern.compile(Pattern.quote(delimiter)));
+
+      while (scanner.hasNext()) {
+        String token = scanner.next().trim();
+        if (!token.isEmpty()) {
+          try {
+            longValues.add(Long.parseLong(token));
+          } catch (NumberFormatException e) {
+              LOG.warn("Skipping invalid number format in file '{}'. Found: '{}'", fromMetadataPath, token);
+          }
+        }
+      }
+    }
+
+    LOG.debug("read {} long values from file '{}'", longValues.size(), fromMetadataPath);
+    return longValues;
   }
 
   /* check the forward and backward compatibility */

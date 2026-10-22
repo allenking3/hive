@@ -7,20 +7,20 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.io;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,7 +39,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.ql.io.AcidInputFormat.DeltaMetaData;
-import org.apache.hive.common.util.MockFileSystem;
+import org.apache.hadoop.hive.ql.io.HdfsUtils.HdfsFileStatusWithoutId;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -51,7 +51,7 @@ public class TestAcidInputFormat {
 
   @Mock
   private DataInput mockDataInput;
-
+  
   @Test
   public void testDeltaMetaDataReadFieldsNoStatementIds() throws Exception {
     when(mockDataInput.readLong()).thenReturn(1L, 2L);
@@ -99,7 +99,7 @@ public class TestAcidInputFormat {
   public void testDeltaMetaWithFile() throws Exception {
     FileStatus fs = new FileStatus(200, false, 100, 100, 100, new Path("mypath"));
     DeltaMetaData deltaMetaData = new AcidInputFormat.DeltaMetaData(2000L, 2001L, new ArrayList<>(), 0,
-        Collections.singletonList(new AcidInputFormat.DeltaFileMetaData(new AcidUtils.HdfsFileStatusWithoutId(fs), null, 1)));
+        Collections.singletonList(new AcidInputFormat.DeltaFileMetaData(new HdfsFileStatusWithoutId(fs), null, 1)));
 
     assertEquals(2000L, deltaMetaData.getMinWriteId());
     assertEquals(2001L, deltaMetaData.getMaxWriteId());
@@ -192,7 +192,7 @@ public class TestAcidInputFormat {
   public void testDeltaMetaWithFileMultiStatement() throws Exception {
     FileStatus fs = new FileStatus(200, false, 100, 100, 100, new Path("mypath"));
     DeltaMetaData deltaMetaData = new AcidInputFormat.DeltaMetaData(2000L, 2001L, Arrays.asList(97, 98, 99), 0,
-        Collections.singletonList(new AcidInputFormat.DeltaFileMetaData(new AcidUtils.HdfsFileStatusWithoutId(fs), 97, 1)));
+        Collections.singletonList(new AcidInputFormat.DeltaFileMetaData(new HdfsFileStatusWithoutId(fs), 97, 1)));
 
     assertEquals(2000L, deltaMetaData.getMinWriteId());
     assertEquals(2001L, deltaMetaData.getMaxWriteId());

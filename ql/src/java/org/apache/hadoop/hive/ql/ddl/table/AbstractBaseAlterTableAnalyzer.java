@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table;
@@ -96,7 +97,7 @@ public abstract class AbstractBaseAlterTableAnalyzer extends BaseSemanticAnalyze
       re.noLockNeeded();
       inputs.add(re);
 
-      if (AlterTableUtils.isFullPartitionSpec(table, partitionSpec)) {
+      if (AlterTableUtils.isFullPartitionSpec(table, partitionSpec) || table.hasNonNativePartitionSupport()) {
         // Fully specified partition spec
         Partition part = PartitionUtils.getPartition(db, table, partitionSpec, true);
         outputs.add(new WriteEntity(part, writeType));
@@ -105,7 +106,7 @@ public abstract class AbstractBaseAlterTableAnalyzer extends BaseSemanticAnalyze
         if (!AlterTableType.SUPPORT_PARTIAL_PARTITION_SPEC.contains(op)) {
           throw new SemanticException(
               ErrorMsg.ALTER_TABLE_TYPE_PARTIAL_PARTITION_SPEC_NO_SUPPORTED, op.getName());
-        } else if (!conf.getBoolVar(HiveConf.ConfVars.DYNAMICPARTITIONING)) {
+        } else if (!conf.getBoolVar(HiveConf.ConfVars.DYNAMIC_PARTITIONING)) {
           throw new SemanticException(ErrorMsg.DYNAMIC_PARTITION_DISABLED);
         }
 
@@ -132,7 +133,7 @@ public abstract class AbstractBaseAlterTableAnalyzer extends BaseSemanticAnalyze
       // See HIVE-16688 for use cases.
       return WriteType.DDL_EXCLUSIVE;
     }
-    return WriteEntity.determineAlterTableWriteType(op);
+    return WriteEntity.determineAlterTableWriteType(op, table, conf);
   }
 
   protected void validateAlterTableType(Table table, AlterTableType op, boolean expectView)
@@ -159,9 +160,10 @@ public abstract class AbstractBaseAlterTableAnalyzer extends BaseSemanticAnalyze
         throw new SemanticException(ErrorMsg.ALTER_COMMAND_FOR_TABLES.getMsg());
       }
     }
-    if (table.isNonNative() && !AlterTableType.NON_NATIVE_TABLE_ALLOWED.contains(op)) {
-      throw new SemanticException(ErrorMsg.ALTER_TABLE_NON_NATIVE.format(
-          AlterTableType.NON_NATIVE_TABLE_ALLOWED.toString(), table.getTableName()));
+    if (table.isNonNative() && table.getStorageHandler() != null &&
+        !table.getStorageHandler().isAllowedAlterOperation(op)) {
+        throw new SemanticException(ErrorMsg.ALTER_TABLE_NON_NATIVE.format(
+            AlterTableType.NON_NATIVE_TABLE_ALLOWED.toString(), table.getTableName()));
     }
   }
 }

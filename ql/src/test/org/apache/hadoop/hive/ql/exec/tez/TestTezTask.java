@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.tez;
 
@@ -22,6 +23,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.metrics.common.Metrics;
 import org.apache.hadoop.hive.common.metrics.common.MetricsConstant;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConfForTest;
 import org.apache.hadoop.hive.ql.Context;
 import org.apache.hadoop.hive.ql.QueryPlan;
 import org.apache.hadoop.hive.ql.exec.Operator;
@@ -93,7 +95,6 @@ public class TestTezTask {
   Path path;
   FileSystem fs;
 
-  @SuppressWarnings("unchecked")
   @Before
   public void setUp() throws Exception {
     utils = mock(DagUtils.class);
@@ -171,16 +172,16 @@ public class TestTezTask {
     conf = new JobConf();
     appLr = createResource("foo.jar");
 
-    HiveConf hiveConf = new HiveConf();
+    HiveConf hiveConf = new HiveConfForTest(getClass());
     hiveConf
         .setVar(HiveConf.ConfVars.HIVE_AUTHORIZATION_MANAGER,
             "org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory");
     SessionState.start(hiveConf);
     session = mock(TezClient.class);
     sessionState = mock(TezSessionState.class);
-    when(sessionState.getSession()).thenReturn(session);
+    when(sessionState.getTezClient()).thenReturn(session);
     when(sessionState.reopen()).thenReturn(sessionState);
-    when(session.submitDAG(any(DAG.class)))
+    when(sessionState.submitDAG(any(DAG.class)))
       .thenThrow(new SessionNotRunning(""))
       .thenReturn(mock(DAGClient.class));
   }
@@ -196,7 +197,7 @@ public class TestTezTask {
   }
 
   @Test
-  public void testBuildDag() throws IllegalArgumentException, IOException, Exception {
+  public void testBuildDag() throws Exception {
     DAG dag = task.build(conf, work, path, new Context(conf),
         DagUtils.createTezLrMap(appLr, null));
     for (BaseWork w: work.getAllWork()) {
@@ -217,7 +218,7 @@ public class TestTezTask {
   }
 
   @Test
-  public void testEmptyWork() throws IllegalArgumentException, IOException, Exception {
+  public void testEmptyWork() throws Exception {
     DAG dag = task.build(conf, new TezWork("", null), path, new Context(conf),
         DagUtils.createTezLrMap(appLr, null));
     assertEquals(dag.getVertices().size(), 0);
@@ -229,7 +230,7 @@ public class TestTezTask {
     task.submit(dag, Ref.from(sessionState));
     // validate close/reopen
     verify(sessionState, times(1)).reopen();
-    verify(session, times(2)).submitDAG(any(DAG.class));
+    verify(sessionState, times(2)).submitDAG(any(DAG.class));
   }
 
   @Test
@@ -240,15 +241,15 @@ public class TestTezTask {
     TezSessionState tezSessionState = mock(TezSessionState.class);
     TezClient tezClient = mock(TezClient.class);
     when(tezSessionState.reopen()).thenThrow(new HiveException("Dag cannot be submitted"));
-    when(tezSessionState.getSession()).thenReturn(tezClient);
-    when(tezClient.submitDAG(any(DAG.class))).thenThrow(new SessionNotRunning(""));
+    when(tezSessionState.getTezClient()).thenReturn(tezClient);
+    when(tezSessionState.submitDAG(any(DAG.class))).thenThrow(new SessionNotRunning(""));
     doNothing().when(tezSessionState).destroy();
     boolean isException = false;
     try {
       task.submit(dag, Ref.from(tezSessionState));
     } catch (Exception e) {
       isException = true;
-      verify(tezClient, times(1)).submitDAG(any(DAG.class));
+      verify(tezSessionState, times(1)).submitDAG(any(DAG.class));
       verify(tezSessionState, times(2)).reopen();
       verify(tezSessionState, times(1)).destroy();
       verify(tezSessionState, times(0)).returnToSessionManager();
@@ -264,15 +265,15 @@ public class TestTezTask {
     TezClient tezClient = mock(TezClient.class);
     when(tezSessionPoolSession.reopen()).thenThrow(new HiveException("Dag cannot be submitted"));
     doNothing().when(tezSessionPoolSession).returnToSessionManager();
-    when(tezSessionPoolSession.getSession()).thenReturn(tezClient);
+    when(tezSessionPoolSession.getTezClient()).thenReturn(tezClient);
     when(tezSessionPoolSession.isDefault()).thenReturn(true);
-    when(tezClient.submitDAG(any(DAG.class))).thenThrow(new SessionNotRunning(""));
+    when(tezSessionPoolSession.submitDAG(any(DAG.class))).thenThrow(new SessionNotRunning(""));
     boolean isException = false;
     try {
       task.submit(dag, Ref.from(tezSessionPoolSession));
     } catch (Exception e) {
       isException = true;
-      verify(tezClient, times(1)).submitDAG(any(DAG.class));
+      verify(tezSessionPoolSession, times(1)).submitDAG(any(DAG.class));
       verify(tezSessionPoolSession, times(2)).reopen();
       verify(tezSessionPoolSession, times(0)).destroy();
       verify(tezSessionPoolSession, times(1)).returnToSessionManager();
@@ -357,7 +358,7 @@ public class TestTezTask {
   }
 
   @Test
-  public void tezTask_updates_Metrics() throws IOException {
+  public void testTezTaskUpdatesMetrics() throws IOException {
 
     Metrics mockMetrics = Mockito.mock(Metrics.class);
 
@@ -365,7 +366,6 @@ public class TestTezTask {
     tezTask.updateTaskMetrics(mockMetrics);
 
     verify(mockMetrics, times(1)).incrementCounter(MetricsConstant.HIVE_TEZ_TASKS);
-    verify(mockMetrics, never()).incrementCounter(MetricsConstant.HIVE_SPARK_TASKS);
     verify(mockMetrics, never()).incrementCounter(MetricsConstant.HIVE_MR_TASKS);
   }
 }

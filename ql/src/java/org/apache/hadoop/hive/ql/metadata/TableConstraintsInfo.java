@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.metadata;
@@ -89,11 +90,11 @@ public class TableConstraintsInfo {
   }
 
   public boolean isTableConstraintsInfoNotEmpty() {
-    return PrimaryKeyInfo.isPrimaryKeyInfoNotEmpty(this.getPrimaryKeyInfo()) || ForeignKeyInfo
-        .isForeignKeyInfoNotEmpty(this.getForeignKeyInfo()) || UniqueConstraint
-        .isUniqueConstraintNotEmpty(this.getUniqueConstraint()) || NotNullConstraint
-        .isNotNullConstraintNotEmpty(this.getNotNullConstraint()) || CheckConstraint
-        .isCheckConstraintNotEmpty(this.getCheckConstraint()) || DefaultConstraint
-        .isCheckConstraintNotEmpty(this.getDefaultConstraint());
+    return PrimaryKeyInfo.isNotEmpty(this.getPrimaryKeyInfo()) ||
+      ForeignKeyInfo.isNotEmpty(this.getForeignKeyInfo()) ||
+      UniqueConstraint.isNotEmpty(this.getUniqueConstraint()) ||
+      NotNullConstraint.isNotEmpty(this.getNotNullConstraint()) ||
+      CheckConstraint.isNotEmpty(this.getCheckConstraint()) ||
+      DefaultConstraint.isNotEmpty(this.getDefaultConstraint());
   }
 }

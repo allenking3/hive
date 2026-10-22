@@ -1,15 +1,20 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.llap;
@@ -41,6 +46,7 @@ import javax.net.SocketFactory;
 
 import com.google.protobuf.ServiceException;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.llap.security.LlapTokenIdentifier;
 // TODO: LlapNodeId is just a host+port pair; we could make this class more generic.
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.io.retry.RetryPolicies;
@@ -80,8 +86,8 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
   private final SocketFactory socketFactory;
   private final ListeningExecutorService requestManagerExecutor;
   private volatile ListenableFuture<Void> requestManagerFuture;
-  private final Token<TokenType> token;
-  private final String tokenUser;
+  protected Token<TokenType> token;
+  protected String tokenUser;
 
   @VisibleForTesting
   public static class RequestManager implements Callable<Void> {
@@ -302,7 +308,7 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
           LOG.warn("RequestManager shutdown with error", t);
         }
       }
-    });
+    }, MoreExecutors.directExecutor());
   }
 
   @Override
@@ -454,9 +460,7 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
                 numRetries = 0;
                 nextBackoffMs = nextBackoffMs * 2;
               }
-              if (LOG.isTraceEnabled()) {
-                LOG.trace("Async call limit exceeded.", ex.getCause());
-              }
+              LOG.trace("Async call limit exceeded", ex);
             } else {
               throw ex;
             }
@@ -518,20 +522,11 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
     }
     this.hostProxies = cb.build();
     this.socketFactory = NetUtils.getDefaultSocketFactory(conf);
-    this.token = token;
-    if (token != null) {
-      String tokenUser = getTokenUser(token);
-      if (tokenUser == null) {
-        try {
-          tokenUser = UserGroupInformation.getCurrentUser().getShortUserName();
-        } catch (IOException e) {
-          throw new RuntimeException(e);
-        }
-        LOG.warn("Cannot determine token user from the token; using {}", tokenUser);
-      }
-      this.tokenUser = tokenUser;
-    } else {
-      this.tokenUser = null;
+
+    try {
+      setToken(token);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
 
     this.retryPolicy = RetryPolicies.retryUpToMaximumTimeWithFixedSleep(
@@ -548,6 +543,41 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
         "retrySleep(millis)=" + retrySleepMs);
   }
 
+  protected void setToken(Token<TokenType> newToken) throws IOException {
+    if (tokensAreEqual(newToken)) {
+      return;
+    }
+    LOG.info("Setting new token as it's not equal to the old one, new token is: {}", newToken);
+    // clear cache to make proxies use the new token
+    hostProxies.invalidateAll();
+
+    this.token = newToken;
+    if (token != null) {
+      String tokenUser = getTokenUser(token);
+      if (tokenUser == null) {
+        try {
+          tokenUser = UserGroupInformation.getCurrentUser().getShortUserName();
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+        LOG.warn("Cannot determine token user from the token; using {}", tokenUser);
+      }
+      this.tokenUser = tokenUser;
+    } else {
+      this.tokenUser = null;
+    }
+  }
+
+  protected boolean tokensAreEqual(Token<TokenType> otherToken) throws IOException {
+    int oldSeqNumber =
+        this.token == null ? -1 : ((LlapTokenIdentifier) this.token.decodeIdentifier()).getSequenceNumber();
+    int newSeqNumber =
+        otherToken == null ? -1 : ((LlapTokenIdentifier) otherToken.decodeIdentifier()).getSequenceNumber();
+
+    LOG.debug("Check token equality be sequenceNumber: {} <-> {}", oldSeqNumber, newSeqNumber);
+    return oldSeqNumber == newSeqNumber;
+  }
+
   /**
    * @param nodeId Hostname + post.
    * @param nodeToken A custom node token. If not specified, the default token is used.
@@ -556,9 +586,7 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
   protected final ProtocolType getProxy(
       final LlapNodeId nodeId, final Token<TokenType> nodeToken) {
     String hostId = getHostIdentifier(nodeId.getHostname(), nodeId.getPort());
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Getting host proxies for {}", hostId);
-    }
+    LOG.debug("Getting host proxies for {}", hostId);
     try {
       return hostProxies.get(hostId, new Callable<ProtocolType>() {
         @Override
@@ -574,9 +602,7 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
   private ProtocolType createProxy(
       final LlapNodeId nodeId, Token<TokenType> nodeToken) throws IOException {
     if (nodeToken == null && this.token == null) {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Creating a client without a token for " + nodeId);
-      }
+      LOG.debug("Creating a client without a token for {}", nodeId);
       return createProtocolImpl(getConfig(), nodeId.getHostname(),
           nodeId.getPort(), null, retryPolicy, socketFactory);
     }
@@ -597,9 +623,7 @@ public abstract class AsyncPbRpcProxy<ProtocolType, TokenType extends TokenIdent
     SecurityUtil.setTokenService(nodeToken, NetUtils.createSocketAddrForHost(
         nodeId.getHostname(), nodeId.getPort()));
     ugi.addToken(nodeToken);
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Creating a client for " + nodeId + "; the token is " + nodeToken);
-    }
+    LOG.debug("Creating a client for {}; the token is {}", nodeId, nodeToken);
     return ugi.doAs(new PrivilegedAction<ProtocolType>() {
       @Override
       public ProtocolType run() {

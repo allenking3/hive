@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hive.streaming;
@@ -147,7 +148,7 @@ public abstract class AbstractRecordWriter implements RecordWriter {
     this.curBatchMaxWriteId = maxWriteId;
     this.statementId = statementId;
     this.conf = conn.getHiveConf();
-    this.defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULTPARTITIONNAME);
+    this.defaultPartitionName = conf.getVar(HiveConf.ConfVars.DEFAULT_PARTITION_NAME);
     this.table = conn.getTable();
     String location = table.getSd().getLocation();
     try {
@@ -639,8 +640,8 @@ public abstract class AbstractRecordWriter implements RecordWriter {
     }
     LOG.debug("{} [record-updaters: {}, partitions: {}, buffered-records: {} total-records: {} " +
         "buffered-ingest-size: {}, total-ingest-size: {} tenured-memory-usage: {}]", prefix, openRecordUpdaters,
-      partitionPaths.size(), bufferedRecords, conn.getConnectionStats().getRecordsWritten(),
+      partitionPaths.size(), bufferedRecords, conn == null ? 0 : conn.getConnectionStats().getRecordsWritten(),
       LlapUtil.humanReadableByteCount(ingestSizeBytes),
-      LlapUtil.humanReadableByteCount(conn.getConnectionStats().getRecordsSize()), oldGenUsage);
+      LlapUtil.humanReadableByteCount(conn == null ? 0 : conn.getConnectionStats().getRecordsSize()), oldGenUsage);
   }
 }

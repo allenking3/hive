@@ -25,6 +25,8 @@ k=3;
 }
 
 @members {
+  public List<Pair<String, String>> tables = new ArrayList<Pair<String, String>>();
+
   @Override
   public Object recoverFromMismatchedSet(IntStream input,
       RecognitionException re, BitSet follow) throws RecognitionException {
@@ -46,10 +48,10 @@ catch (RecognitionException e) {
 //-----------------------------------------------------------------------------------
 
 tableAllColumns
-    : STAR
-        -> ^(TOK_ALLCOLREF)
-    | tableName DOT STAR
-        -> ^(TOK_ALLCOLREF tableName)
+    : STAR (KW_EXCLUDE LPAREN columnNameList RPAREN)?
+        -> ^(TOK_ALLCOLREF columnNameList?)
+    | tableName DOT STAR (KW_EXCLUDE LPAREN columnNameList RPAREN)?
+        -> ^(TOK_ALLCOLREF tableName columnNameList?)
     ;
 
 // (table|column)
@@ -58,6 +60,13 @@ tableOrColumn
 @after { gParent.popMsg(state); }
     :
     identifier -> ^(TOK_TABLE_OR_COL identifier)
+    ;
+
+defaultValue
+@init { gParent.pushMsg("default value", state); }
+@after { gParent.popMsg(state); }
+    :
+    KW_DEFAULT -> ^(TOK_TABLE_OR_COL TOK_DEFAULT_VALUE)
     ;
 
 expressionList
@@ -99,7 +108,8 @@ atomjoinSource
     :  tableSource (lateralView^)*
     |  virtualTableSource (lateralView^)*
     |  (LPAREN (KW_WITH|KW_SELECT|KW_MAP|KW_REDUCE|KW_FROM)) => subQuerySource (lateralView^)*
-    |  (LPAREN LPAREN atomSelectStatement RPAREN setOperator ) => subQuerySource (lateralView^)*
+    |  (LPAREN LPAREN selectStatement RPAREN setOperator ) => subQuerySource (lateralView^)*
+    |  (LPAREN valuesSource) => subQuerySource (lateralView^)*
     |  partitionedTableFunction (lateralView^)*
     |  LPAREN! joinSource RPAREN!
     ;
@@ -199,8 +209,19 @@ tableSample
 tableSource
 @init { gParent.pushMsg("table source", state); }
 @after { gParent.popMsg(state); }
-    : tabname=tableName props=tableProperties? ts=tableSample? (KW_AS? alias=identifier)?
-    -> ^(TOK_TABREF $tabname $props? $ts? $alias?)
+    : tabname=tableName props=tableProperties? ts=tableSample? (asOf=asOfClause)? (KW_AS? alias=identifier)?
+    -> ^(TOK_TABREF $tabname $props? $ts? $alias? $asOf?)
+    ;
+
+asOfClause
+@init { gParent.pushMsg("as of system_time / system_version clause for table", state); }
+@after { gParent.popMsg(state); }
+    :
+    (KW_FOR KW_SYSTEM_TIME KW_AS KW_OF asOfTime=expression)
+    -> ^(TOK_AS_OF_TIME $asOfTime)
+    |
+    (KW_FOR KW_SYSTEM_VERSION KW_AS KW_OF asOfVersion=expression)
+    -> ^(TOK_AS_OF_VERSION $asOfVersion)
     ;
 
 uniqueJoinTableSource
@@ -210,14 +231,24 @@ uniqueJoinTableSource
     -> ^(TOK_TABREF $tabname $ts? $alias?)
     ;
 
+databaseName
+@init { gParent.pushMsg("database name", state); }
+@after { gParent.popMsg(state); }
+    :
+    (catalog=identifier DOT)? db=identifier
+    -> ^(TOK_DBNAME $catalog? $db)
+    ;
+
 tableName
 @init { gParent.pushMsg("table name", state); }
 @after { gParent.popMsg(state); }
     :
-    db=identifier DOT tab=identifier
-    -> ^(TOK_TABNAME $db $tab)
+    db=identifier DOT tab=identifier (DOT meta=identifier)?
+    {tables.add(new ImmutablePair<>($db.text, $tab.text));}
+    -> ^(TOK_TABNAME $db $tab $meta?)
     |
     tab=identifier
+    {tables.add(new ImmutablePair<>(null, $tab.text));}
     -> ^(TOK_TABNAME $tab)
     ;
 
@@ -287,6 +318,15 @@ searchCondition
 //-----------------------------------------------------------------------------------
 
 //-------- Row Constructor ----------------------------------------------------------
+valuesSource
+    :
+    valuesClause
+       -> ^(TOK_QUERY ^(TOK_INSERT
+               ^(TOK_DESTINATION ^(TOK_DIR TOK_TMP_FILE))
+               ^(TOK_SELECT ^(TOK_SELEXPR ^(TOK_FUNCTION Identifier["inline"] valuesClause)))
+               ))
+    ;
+
 //in support of SELECT * FROM (VALUES(1,2,3),(4,5,6),...) as FOO(a,b,c) and
 // INSERT INTO <table> (col1,col2,...) VALUES(...),(...),...
 // INSERT INTO <table> (col1,col2,...) SELECT * FROM (VALUES(1,2,3),(4,5,6),...) as Foo(a,b,c)
@@ -306,7 +346,9 @@ valuesTableConstructor
 @init { gParent.pushMsg("values table constructor", state); }
 @after { gParent.popMsg(state); }
     :
-    valueRowConstructor (COMMA! valueRowConstructor)*
+    (valueRowConstructor (COMMA! valueRowConstructor)*) => (valueRowConstructor (COMMA! valueRowConstructor)*)
+    |
+    firstValueRowConstructor (COMMA! valueRowConstructor)*
     ;
 
 valueRowConstructor
@@ -314,6 +356,13 @@ valueRowConstructor
 @after { gParent.popMsg(state); }
     :
     expressionsInParenthesis[true, true]
+    ;
+
+firstValueRowConstructor
+@init { gParent.pushMsg("first value row constructor", state); }
+@after { gParent.popMsg(state); }
+    :
+    LPAREN! firstExpressionsWithAlias RPAREN!
     ;
 
 /*

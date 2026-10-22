@@ -9,21 +9,26 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.exec.repl.bootstrap.load.table;
 
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.common.repl.ReplConst;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.GetPartitionsRequest;
+import org.apache.hadoop.hive.metastore.api.GetProjectionsSpec;
+import org.apache.hadoop.hive.metastore.client.builder.GetPartitionProjectionsSpecBuilder;
 import org.apache.hadoop.hive.ql.ddl.DDLWork;
 import org.apache.hadoop.hive.ql.ddl.table.partition.add.AlterTableAddPartitionDesc;
 import org.apache.hadoop.hive.ql.ddl.table.partition.drop.AlterTableDropPartitionDesc;
@@ -37,6 +42,7 @@ import org.apache.hadoop.hive.ql.exec.repl.bootstrap.events.TableEvent;
 import org.apache.hadoop.hive.ql.exec.repl.bootstrap.load.ReplicationState;
 import org.apache.hadoop.hive.ql.exec.repl.util.TaskTracker;
 import org.apache.hadoop.hive.ql.exec.repl.bootstrap.load.util.Context;
+import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.Partition;
 import org.apache.hadoop.hive.ql.metadata.Table;
@@ -51,6 +57,7 @@ import org.datanucleus.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,7 +69,6 @@ import java.util.Map;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.REPL_DUMP_METADATA_ONLY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.REPL_DUMP_SKIP_IMMUTABLE_DATA_COPY;
 import static org.apache.hadoop.hive.ql.exec.repl.bootstrap.load.ReplicationState.PartitionState;
-import static org.apache.hadoop.hive.ql.exec.repl.util.ReplUtils.REPL_CHECKPOINT_KEY;
 import static org.apache.hadoop.hive.ql.parse.ImportSemanticAnalyzer.isPartitioned;
 import static org.apache.hadoop.hive.ql.parse.ImportSemanticAnalyzer.partSpecToString;
 
@@ -80,21 +86,19 @@ public class LoadPartitions {
   private final ReplicationMetricCollector metricCollector;
 
   private final ImportTableDesc tableDesc;
+  private final List<String> tablesToBootstrap;
   private Table table;
 
-  public LoadPartitions(Context context, ReplLogger replLogger, TaskTracker tableTracker,
-                        TableEvent event, String dbNameToLoadIn,
-                        TableContext tableContext, ReplicationMetricCollector metricCollector) throws HiveException {
-    this(context, replLogger, tableContext, tableTracker, event, dbNameToLoadIn, null,
-      metricCollector, null, PartitionState.Stage.PARTITION);
+  public LoadPartitions(Context context, ReplLogger replLogger, TaskTracker tableTracker, TableEvent event, String dbNameToLoadIn,
+      TableContext tableContext, ReplicationMetricCollector metricCollector, List<String> tablesToBootstrap) throws HiveException {
+    this(context, replLogger, tableContext, tableTracker, event, dbNameToLoadIn, null, metricCollector, null,
+        PartitionState.Stage.PARTITION, tablesToBootstrap);
   }
 
-  public LoadPartitions(Context context, ReplLogger replLogger, TableContext tableContext,
-                        TaskTracker limiter, TableEvent event, String dbNameToLoadIn,
-                        AlterTableAddPartitionDesc lastReplicatedPartition,
-                        ReplicationMetricCollector metricCollector,
-                        AlterTableAddPartitionDesc.PartitionDesc lastReplicatedPartitionDesc,
-                        ReplicationState.PartitionState.Stage lastReplicatedStage) throws HiveException {
+  public LoadPartitions(Context context, ReplLogger replLogger, TableContext tableContext, TaskTracker limiter,
+      TableEvent event, String dbNameToLoadIn, AlterTableAddPartitionDesc lastReplicatedPartition,
+      ReplicationMetricCollector metricCollector, AlterTableAddPartitionDesc.PartitionDesc lastReplicatedPartitionDesc,
+      PartitionState.Stage lastReplicatedStage, List<String> tablesToBootstrap) throws HiveException {
     this.tracker = new TaskTracker(limiter);
     this.event = event;
     this.context = context;
@@ -106,6 +110,7 @@ public class LoadPartitions {
     this.metricCollector = metricCollector;
     this.lastReplicatedPartitionDesc = lastReplicatedPartitionDesc;
     this.lastReplicatedStage = lastReplicatedStage;
+    this.tablesToBootstrap = tablesToBootstrap;
   }
 
   public TaskTracker tasks() throws Exception {
@@ -134,6 +139,26 @@ public class LoadPartitions {
     } else {
       // existing
       if (table.isPartitioned()) {
+        if (tablesToBootstrap.stream().anyMatch(table.getTableName()::equalsIgnoreCase)) {
+          Hive hiveDb = Hive.get(context.hiveConf);
+          // Collect the non-existing partitions to drop.
+          GetProjectionsSpec getProjectionsSpec = new GetPartitionProjectionsSpecBuilder()
+              .addProjectFieldList(Arrays.asList("values")).build();
+          GetPartitionsRequest request = new GetPartitionsRequest(table.getDbName(), table.getTableName(),
+              getProjectionsSpec, null);
+          List<Partition> partitions;
+          try {
+            partitions = hiveDb.getPartitionsWithSpecs(table, request);
+          } catch (Exception e) {
+            throw new HiveException(e);
+          }
+          List<String> newParts = event.partitions(tableDesc);
+          for (Partition part : partitions) {
+            if (!newParts.contains(part.getName())) {
+              hiveDb.dropPartition(table.getDbName(), table.getTableName(), part.getValues(), true);
+            }
+          }
+        }
         List<AlterTableAddPartitionDesc> partitionDescs = event.partitionDescriptions(tableDesc);
         if (!event.replicationSpec().isMetadataOnly() && !partitionDescs.isEmpty()) {
           updateReplicationState(initialReplicationState());
@@ -210,7 +235,7 @@ public class LoadPartitions {
         if (partParams == null) {
           partParams = new HashMap<>();
         }
-        partParams.put(REPL_CHECKPOINT_KEY, context.dumpDirectory);
+        partParams.put(ReplConst.REPL_TARGET_DB_PROPERTY, context.dumpDirectory);
         Path replicaWarehousePartitionLocation = locationOnReplicaWarehouse(table, src);
         partitions.add(new AlterTableAddPartitionDesc.PartitionDesc(
           src.getPartSpec(), replicaWarehousePartitionLocation.toString(), partParams, src.getInputFormat(),
@@ -376,7 +401,7 @@ public class LoadPartitions {
       AlterTableAddPartitionDesc.PartitionDesc src = addPartitionDesc.getPartitions().get(0);
       //Add check point task as part of add partition
       Map<String, String> partParams = new HashMap<>();
-      partParams.put(REPL_CHECKPOINT_KEY, context.dumpDirectory);
+      partParams.put(ReplConst.REPL_TARGET_DB_PROPERTY, context.dumpDirectory);
       Path replicaWarehousePartitionLocation = locationOnReplicaWarehouse(table, src);
       src.setLocation(replicaWarehousePartitionLocation.toString());
       src.addPartParams(partParams);

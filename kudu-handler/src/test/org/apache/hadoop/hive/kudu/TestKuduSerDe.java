@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.kudu;
 
@@ -27,10 +28,12 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectIn
 import org.apache.kudu.Schema;
 import org.apache.kudu.Type;
 import org.apache.kudu.client.CreateTableOptions;
+import org.apache.kudu.client.KuduClient;
 import org.apache.kudu.client.PartialRow;
-import org.apache.kudu.test.KuduTestHarness;
+import org.apache.kudu.test.cluster.MiniKuduCluster;
+
+import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
@@ -65,26 +68,35 @@ public class TestKuduSerDe {
   private static final Properties TBL_PROPS = new Properties();
 
   private static final long NOW_MS = System.currentTimeMillis();
-
-  @Rule
-  public KuduTestHarness harness = new KuduTestHarness();
+  private MiniKuduCluster cluster;
+  private KuduClient client;
 
   @Before
   public void setUp() throws Exception {
+    cluster = new MiniKuduCluster.MiniKuduClusterBuilder().numMasterServers(3).numTabletServers(3).build();
+    client = new KuduClient.KuduClientBuilder(cluster.getMasterAddressesAsString()).build();
     // Set the base configuration values.
-    BASE_CONF.set(KUDU_MASTER_ADDRS_KEY, harness.getMasterAddressesAsString());
+    BASE_CONF.set(KUDU_MASTER_ADDRS_KEY, cluster.getMasterAddressesAsString());
     TBL_PROPS.setProperty(KUDU_TABLE_NAME_KEY, TABLE_NAME);
 
     // Create the test Kudu table.
     CreateTableOptions options = new CreateTableOptions()
         .setRangePartitionColumns(ImmutableList.of("key"));
-    harness.getClient().createTable(TABLE_NAME, SCHEMA, options);
+    client.createTable(TABLE_NAME, SCHEMA, options);
+  }
+
+  @After
+  public void tearDown() throws Exception {
+    if (client != null)
+      client.close();
+    if (cluster != null)
+      cluster.shutdown();
   }
 
   @Test
   public void testSerDeRoundTrip() throws Exception {
     KuduSerDe serDe = new KuduSerDe();
-    serDe.initialize(BASE_CONF, TBL_PROPS);
+    serDe.initialize(BASE_CONF, TBL_PROPS, null);
 
     PartialRow before = SCHEMA.newPartialRow();
     before.addByte("key", (byte) 1);
@@ -149,7 +161,7 @@ public class TestKuduSerDe {
     conf.unset(KUDU_MASTER_ADDRS_KEY);
 
     try {
-      serDe.initialize(conf, TBL_PROPS);
+      serDe.initialize(conf, TBL_PROPS, null);
       fail("Should fail on missing table");
     } catch (SerDeException ex) {
       assertThat(ex.getMessage(),
@@ -164,7 +176,7 @@ public class TestKuduSerDe {
     Properties tblProps = new Properties();
 
     try {
-      serDe.initialize(BASE_CONF, tblProps);
+      serDe.initialize(BASE_CONF, tblProps, null);
       fail("Should fail on missing table");
     } catch (SerDeException ex) {
       assertThat(ex.getMessage(), containsString("kudu.table_name is not set"));
@@ -179,7 +191,7 @@ public class TestKuduSerDe {
     tblProps.setProperty(KUDU_TABLE_NAME_KEY, "default.notatable");
 
     try {
-      serDe.initialize(BASE_CONF, tblProps);
+      serDe.initialize(BASE_CONF, tblProps, null);
       fail("Should fail on a bad table");
     } catch (SerDeException ex) {
       assertThat(ex.getMessage(),

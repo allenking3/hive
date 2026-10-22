@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.common;
 
@@ -40,6 +41,10 @@ public class AcidConstants {
   public static final String VISIBILITY_PREFIX = "_v";
   public static final Pattern VISIBILITY_PATTERN = Pattern.compile(VISIBILITY_PREFIX + "\\d+");
 
+  public static final String SOFT_DELETE_PATH_SUFFIX = ".v";
+  public static final String SOFT_DELETE_TABLE_PATTERN = "\\" + SOFT_DELETE_PATH_SUFFIX + "\\d+";
+  public static final String SOFT_DELETE_TABLE = "soft_delete";
+  
   public static String baseDir(long writeId) {
     return BASE_PREFIX + String.format(DELTA_DIGITS, writeId);
   }

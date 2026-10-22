@@ -9,39 +9,34 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.partition.drop;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-import org.antlr.runtime.tree.CommonTree;
-import org.antlr.runtime.tree.Tree;
 import org.apache.hadoop.hive.common.TableName;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
-import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.ql.ErrorMsg;
 import org.apache.hadoop.hive.ql.QueryState;
 import org.apache.hadoop.hive.ql.ddl.DDLWork;
 import org.apache.hadoop.hive.ql.ddl.table.AbstractAlterTableAnalyzer;
 import org.apache.hadoop.hive.ql.ddl.table.AlterTableType;
-import org.apache.hadoop.hive.ql.ddl.table.partition.PartitionUtils;
-import org.apache.hadoop.hive.ql.exec.FunctionRegistry;
 import org.apache.hadoop.hive.ql.exec.TaskFactory;
 import org.apache.hadoop.hive.ql.hooks.ReadEntity;
 import org.apache.hadoop.hive.ql.hooks.WriteEntity;
+import org.apache.hadoop.hive.ql.hooks.WriteEntity.WriteType;
+import org.apache.hadoop.hive.ql.io.AcidUtils;
 import org.apache.hadoop.hive.ql.metadata.InvalidTableException;
 import org.apache.hadoop.hive.ql.metadata.Partition;
 import org.apache.hadoop.hive.ql.metadata.Table;
@@ -50,24 +45,13 @@ import org.apache.hadoop.hive.ql.parse.HiveParser;
 import org.apache.hadoop.hive.ql.parse.ParseUtils;
 import org.apache.hadoop.hive.ql.parse.ReplicationSpec;
 import org.apache.hadoop.hive.ql.parse.SemanticException;
-import org.apache.hadoop.hive.ql.parse.type.ExprNodeTypeCheck;
-import org.apache.hadoop.hive.ql.parse.type.TypeCheckCtx;
-import org.apache.hadoop.hive.ql.plan.ExprNodeColumnDesc;
-import org.apache.hadoop.hive.ql.plan.ExprNodeConstantDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
-import org.apache.hadoop.hive.ql.udf.generic.GenericUDF;
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorConverters;
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorConverters.Converter;
-import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
-
-import com.google.common.collect.Lists;
 
 /**
  * Analyzer for drop partition commands.
  */
 abstract class AbstractDropPartitionAnalyzer extends AbstractAlterTableAnalyzer {
+
   AbstractDropPartitionAnalyzer(QueryState queryState) throws SemanticException {
     super(queryState);
   }
@@ -102,7 +86,7 @@ abstract class AbstractDropPartitionAnalyzer extends AbstractAlterTableAnalyzer 
         // We just return in that case, no drop needed.
         return;
         // TODO : the contains message check is fragile, we should refactor SemanticException to be
-        // queriable for error code, and not simply have a message
+        // queryable for error code, and not simply have a message
         // NOTE : IF_EXISTS might also want to invoke this, but there's a good possibility
         // that IF_EXISTS is stricter about table existence, and applies only to the ptn.
         // Therefore, ignoring IF_EXISTS here.
@@ -110,21 +94,30 @@ abstract class AbstractDropPartitionAnalyzer extends AbstractAlterTableAnalyzer 
         throw se;
       }
     }
+    validateAlterTableType(table, AlterTableType.DROPPARTITION, expectView());
+
     Map<Integer, List<ExprNodeGenericFuncDesc>> partitionSpecs = ParseUtils.getFullPartitionSpecs(command, table,
         conf, canGroupExprs);
     if (partitionSpecs.isEmpty()) { // nothing to do
       return;
     }
 
-    validateAlterTableType(table, AlterTableType.DROPPARTITION, expectView());
     ReadEntity re = new ReadEntity(table);
     re.noLockNeeded();
     inputs.add(re);
 
-    addTableDropPartsOutputs(table, partitionSpecs.values(), !ifExists);
+    boolean dropPartUseBase = HiveConf.getBoolVar(conf, ConfVars.HIVE_ACID_DROP_PARTITION_USE_BASE)
+        || HiveConf.getBoolVar(conf, ConfVars.HIVE_ACID_LOCKLESS_READS_ENABLED)
+      && AcidUtils.isTransactionalTable(table);
+
+    addTableDropPartsOutputs(table, partitionSpecs.values(), !ifExists, dropPartUseBase);
 
     AlterTableDropPartitionDesc desc =
-        new AlterTableDropPartitionDesc(tableName, partitionSpecs, mustPurge, replicationSpec);
+        new AlterTableDropPartitionDesc(tableName, partitionSpecs, mustPurge, replicationSpec, !dropPartUseBase, table);
+
+    if (desc.mayNeedWriteId()) {
+      setAcidDdlDesc(desc);
+    }
     rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(), desc)));
   }
 
@@ -135,17 +128,21 @@ abstract class AbstractDropPartitionAnalyzer extends AbstractAlterTableAnalyzer 
    * pre-execution hook. If the partition does not exist, throw an error if
    * throwIfNonExistent is true, otherwise ignore it.
    */
-  private void addTableDropPartsOutputs(Table tab, Collection<List<ExprNodeGenericFuncDesc>> partitionSpecs,
-      boolean throwIfNonExistent) throws SemanticException {
+  private void addTableDropPartsOutputs(Table table, Collection<List<ExprNodeGenericFuncDesc>> partitionSpecs,
+      boolean throwIfNonExistent, boolean  dropPartUseBase) throws SemanticException {
+    WriteType writeType =
+        dropPartUseBase ? WriteType.DDL_EXCL_WRITE : WriteType.DDL_EXCLUSIVE;
+
     for (List<ExprNodeGenericFuncDesc> specs : partitionSpecs) {
       for (ExprNodeGenericFuncDesc partitionSpec : specs) {
         List<Partition> parts = new ArrayList<>();
 
         boolean hasUnknown = false;
         try {
-          hasUnknown = db.getPartitionsByExpr(tab, partitionSpec, conf, parts);
+          hasUnknown = db.getPartitionsByExpr(table, partitionSpec, conf, parts);
         } catch (Exception e) {
-          throw new SemanticException(ErrorMsg.INVALID_PARTITION.getMsg(partitionSpec.getExprString()), e);
+          throw new SemanticException("Error fetching partitions for " + partitionSpec.getExprString() +
+             ", message: " + e.getMessage(), e);
         }
         if (hasUnknown) {
           throw new SemanticException("Unexpected unknown partitions for " + partitionSpec.getExprString());
@@ -160,7 +157,7 @@ abstract class AbstractDropPartitionAnalyzer extends AbstractAlterTableAnalyzer 
           }
         }
         for (Partition p : parts) {
-          outputs.add(new WriteEntity(p, WriteEntity.WriteType.DDL_EXCLUSIVE));
+          outputs.add(new WriteEntity(p, writeType));
         }
       }
     }

@@ -9,16 +9,17 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.storage.serde;
 
-import org.apache.commons.collections.MapUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreUtils;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -67,9 +68,9 @@ public class AlterTableSetSerdeOperation extends AbstractAlterTableOperation<Alt
         // the fields so that new SerDe could operate. Note that this may fail if some fields
         // from old SerDe are too long to be stored in metastore, but there's nothing we can do.
         try {
-          Deserializer oldSerde = HiveMetaStoreUtils.getDeserializer(context.getConf(), table.getTTable(), false,
-              oldSerdeName);
-          table.setFields(Hive.getFieldsFromDeserializer(table.getTableName(), oldSerde));
+          Deserializer oldSerde = HiveMetaStoreUtils.getDeserializer(context.getConf(), table.getTTable(), null,
+              false, oldSerdeName);
+          table.setFields(Hive.getFieldsFromDeserializer(table.getTableName(), oldSerde, context.getConf()));
         } catch (MetaException ex) {
           throw new HiveException(ex);
         }

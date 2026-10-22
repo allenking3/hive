@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.serde2.lazybinary;
 
@@ -23,7 +24,6 @@ import junit.framework.TestCase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.lazy.ByteArrayRef;
 import org.apache.hadoop.hive.serde2.lazybinary.objectinspector.LazyBinaryObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.lazybinary.objectinspector.LazyBinaryStructObjectInspector;
@@ -59,7 +59,7 @@ public class TestLazyBinaryStruct extends TestCase {
     schema.setProperty(serdeConstants.LIST_COLUMN_TYPES, "struct<>");
 
     LazyBinarySerDe serde = new LazyBinarySerDe();
-    SerDeUtils.initializeSerDe(serde, new Configuration(), schema, null);
+    serde.initialize(new Configuration(), schema, null);
     Writable writable = serde.serialize(standardOI.create(), standardOI);
     Object out = serde.deserialize(writable);
     assertNull(oi.getStructFieldsDataAsList(out));

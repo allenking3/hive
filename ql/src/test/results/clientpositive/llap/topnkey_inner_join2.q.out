@@ -1,11 +1,15 @@
 PREHOOK: query: drop table if exists customer
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists customer
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: drop table if exists customer_address
 PREHOOK: type: DROPTABLE
+PREHOOK: Output: database:default
 POSTHOOK: query: drop table if exists customer_address
 POSTHOOK: type: DROPTABLE
+POSTHOOK: Output: database:default
 PREHOOK: query: create table customer(id bigint, address_id bigint, name char(20))
 PREHOOK: type: CREATETABLE
 PREHOOK: Output: database:default
@@ -24,12 +28,20 @@ POSTHOOK: Output: database:default
 POSTHOOK: Output: default@address
 PREHOOK: query: alter table address add constraint pk_ca1 primary key (id) disable novalidate rely
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@address
+PREHOOK: Output: default@address
 POSTHOOK: query: alter table address add constraint pk_ca1 primary key (id) disable novalidate rely
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@address
+POSTHOOK: Output: default@address
 PREHOOK: query: alter table customer add constraint fk_ca1 foreign key (address_id) references address (id) disable novalidate rely
 PREHOOK: type: ALTERTABLE_ADDCONSTRAINT
+PREHOOK: Input: default@customer
+PREHOOK: Output: default@customer
 POSTHOOK: query: alter table customer add constraint fk_ca1 foreign key (address_id) references address (id) disable novalidate rely
 POSTHOOK: type: ALTERTABLE_ADDCONSTRAINT
+POSTHOOK: Input: default@customer
+POSTHOOK: Output: default@customer
 PREHOOK: query: insert into address values
   (1, 'London'),
   (2, 'Washington'),
@@ -187,23 +199,27 @@ STAGE PLANS:
             Execution mode: vectorized, llap
             Reduce Operator Tree:
               Select Operator
-                expressions: VALUE._col0 (type: char(20)), 'Hopewell' (type: varchar(60))
-                outputColumnNames: _col0, _col1
-                Statistics: Num rows: 2 Data size: 362 Basic stats: COMPLETE Column stats: COMPLETE
+                expressions: VALUE._col0 (type: char(20))
+                outputColumnNames: _col0
+                Statistics: Num rows: 2 Data size: 178 Basic stats: COMPLETE Column stats: COMPLETE
                 Limit
                   Number of rows: 3
-                  Statistics: Num rows: 2 Data size: 362 Basic stats: COMPLETE Column stats: COMPLETE
-                  File Output Operator
-                    compressed: false
+                  Statistics: Num rows: 2 Data size: 178 Basic stats: COMPLETE Column stats: COMPLETE
+                  Select Operator
+                    expressions: _col0 (type: char(20)), 'Hopewell' (type: varchar(60))
+                    outputColumnNames: _col0, _col1
                     Statistics: Num rows: 2 Data size: 362 Basic stats: COMPLETE Column stats: COMPLETE
-                    table:
-                        input format: org.apache.hadoop.mapred.SequenceFileInputFormat
-                        output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
-                        serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+                    File Output Operator
+                      compressed: false
+                      Statistics: Num rows: 2 Data size: 362 Basic stats: COMPLETE Column stats: COMPLETE
+                      table:
+                          input format: org.apache.hadoop.mapred.SequenceFileInputFormat
+                          output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
+                          serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
 
   Stage: Stage-0
     Fetch Operator
-      limit: 3
+      limit: -1
       Processor Tree:
         ListSink
 
@@ -276,10 +292,10 @@ STAGE PLANS:
             Map Operator Tree:
                 TableScan
                   alias: customer
-                  filterExpr: ((name) IN ('Joe                 ', 'Robert              ', 'Heisenberg          ') and address_id is not null) (type: boolean)
+                  filterExpr: ((name) IN ('Heisenberg          ', 'Joe                 ', 'Robert              ') and address_id is not null) (type: boolean)
                   Statistics: Num rows: 6 Data size: 582 Basic stats: COMPLETE Column stats: COMPLETE
                   Filter Operator
-                    predicate: ((name) IN ('Joe                 ', 'Robert              ', 'Heisenberg          ') and address_id is not null) (type: boolean)
+                    predicate: ((name) IN ('Heisenberg          ', 'Joe                 ', 'Robert              ') and address_id is not null) (type: boolean)
                     Statistics: Num rows: 3 Data size: 291 Basic stats: COMPLETE Column stats: COMPLETE
                     Top N Key Operator
                       sort order: +
@@ -345,13 +361,13 @@ STAGE PLANS:
               Select Operator
                 expressions: VALUE._col0 (type: char(20)), VALUE._col1 (type: varchar(60))
                 outputColumnNames: _col0, _col1
-                Statistics: Num rows: 3 Data size: 567 Basic stats: COMPLETE Column stats: COMPLETE
+                Statistics: Num rows: 3 Data size: 543 Basic stats: COMPLETE Column stats: COMPLETE
                 Limit
                   Number of rows: 3
-                  Statistics: Num rows: 3 Data size: 567 Basic stats: COMPLETE Column stats: COMPLETE
+                  Statistics: Num rows: 3 Data size: 543 Basic stats: COMPLETE Column stats: COMPLETE
                   File Output Operator
                     compressed: false
-                    Statistics: Num rows: 3 Data size: 567 Basic stats: COMPLETE Column stats: COMPLETE
+                    Statistics: Num rows: 3 Data size: 543 Basic stats: COMPLETE Column stats: COMPLETE
                     table:
                         input format: org.apache.hadoop.mapred.SequenceFileInputFormat
                         output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat

@@ -27,18 +27,18 @@ STAGE PLANS:
                 TableScan
                   alias: alltypesorc
                   Row Limit Per Split: 1
-                  Statistics: Num rows: 12288 Data size: 2907994 Basic stats: COMPLETE Column stats: COMPLETE
+                  Statistics: Num rows: 12288 Data size: 2957146 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:ctinyint:tinyint, 1:csmallint:smallint, 2:cint:int, 3:cbigint:bigint, 4:cfloat:float, 5:cdouble:double, 6:cstring1:string, 7:cstring2:string, 8:ctimestamp1:timestamp, 9:ctimestamp2:timestamp, 10:cboolean1:boolean, 11:cboolean2:boolean, 12:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:ctinyint:tinyint, 1:csmallint:smallint, 2:cint:int, 3:cbigint:bigint, 4:cfloat:float, 5:cdouble:double, 6:cstring1:string, 7:cstring2:string, 8:ctimestamp1:timestamp, 9:ctimestamp2:timestamp, 10:cboolean1:boolean, 11:cboolean2:boolean, 12:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 13:ROW__IS__DELETED:boolean]
                   Select Operator
                     expressions: 'key1' (type: string), 'value1' (type: string)
                     outputColumnNames: _col0, _col1
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [13, 14]
-                        selectExpressions: ConstantVectorExpression(val key1) -> 13:string, ConstantVectorExpression(val value1) -> 14:string
+                        projectedOutputColumnNums: [14, 15]
+                        selectExpressions: ConstantVectorExpression(val key1) -> 14:string, ConstantVectorExpression(val value1) -> 15:string
                     Statistics: Num rows: 12288 Data size: 2187264 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
@@ -125,18 +125,18 @@ STAGE PLANS:
                 TableScan
                   alias: alltypesorc
                   Row Limit Per Split: 1
-                  Statistics: Num rows: 12288 Data size: 2907994 Basic stats: COMPLETE Column stats: COMPLETE
+                  Statistics: Num rows: 12288 Data size: 2957146 Basic stats: COMPLETE Column stats: COMPLETE
                   TableScan Vectorization:
                       native: true
-                      vectorizationSchemaColumns: [0:ctinyint:tinyint, 1:csmallint:smallint, 2:cint:int, 3:cbigint:bigint, 4:cfloat:float, 5:cdouble:double, 6:cstring1:string, 7:cstring2:string, 8:ctimestamp1:timestamp, 9:ctimestamp2:timestamp, 10:cboolean1:boolean, 11:cboolean2:boolean, 12:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>]
+                      vectorizationSchemaColumns: [0:ctinyint:tinyint, 1:csmallint:smallint, 2:cint:int, 3:cbigint:bigint, 4:cfloat:float, 5:cdouble:double, 6:cstring1:string, 7:cstring2:string, 8:ctimestamp1:timestamp, 9:ctimestamp2:timestamp, 10:cboolean1:boolean, 11:cboolean2:boolean, 12:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 13:ROW__IS__DELETED:boolean]
                   Select Operator
                     expressions: 17.29 (type: decimal(18,9))
                     outputColumnNames: _col0
                     Select Vectorization:
                         className: VectorSelectOperator
                         native: true
-                        projectedOutputColumnNums: [13]
-                        selectExpressions: ConstantVectorExpression(val 17.29) -> 13:decimal(18,9)
+                        projectedOutputColumnNums: [14]
+                        selectExpressions: ConstantVectorExpression(val 17.29) -> 14:decimal(18,9)
                     Statistics: Num rows: 12288 Data size: 1376256 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
@@ -209,10 +209,12 @@ _c0
 PREHOOK: query: drop table decimal_2_n0
 PREHOOK: type: DROPTABLE
 PREHOOK: Input: default@decimal_2_n0
+PREHOOK: Output: database:default
 PREHOOK: Output: default@decimal_2_n0
 POSTHOOK: query: drop table decimal_2_n0
 POSTHOOK: type: DROPTABLE
 POSTHOOK: Input: default@decimal_2_n0
+POSTHOOK: Output: database:default
 POSTHOOK: Output: default@decimal_2_n0
 PREHOOK: query: explain vectorization detail
 select count(1) from (select * from (Select 1 a) x order by x.a) y
@@ -247,31 +249,59 @@ STAGE PLANS:
                   alias: _dummy_table
                   Row Limit Per Split: 1
                   Statistics: Num rows: 1 Data size: 10 Basic stats: COMPLETE Column stats: COMPLETE
+                  TableScan Vectorization:
+                      native: true
+                      vectorizationSchemaColumns: [0:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 1:ROW__IS__DELETED:boolean]
                   Select Operator
+                    Select Vectorization:
+                        className: VectorSelectOperator
+                        native: true
+                        projectedOutputColumnNums: []
                     Statistics: Num rows: 1 Data size: 10 Basic stats: COMPLETE Column stats: COMPLETE
                     Group By Operator
                       aggregations: count()
-                      minReductionHashAggr: 0.0
+                      Group By Vectorization:
+                          aggregators: VectorUDAFCountStar(*) -> bigint
+                          className: VectorGroupByOperator
+                          groupByMode: HASH
+                          native: false
+                          vectorProcessingMode: HASH
+                          projectedOutputColumnNums: [0]
+                      minReductionHashAggr: 0.4
                       mode: hash
                       outputColumnNames: _col0
                       Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
                       Reduce Output Operator
                         null sort order: 
                         sort order: 
+                        Reduce Sink Vectorization:
+                            className: VectorReduceSinkEmptyKeyOperator
+                            native: true
+                            nativeConditionsMet: hive.vectorized.execution.reducesink.new.enabled IS true, hive.execution.engine tez IN [tez] IS true, No PTF TopN IS true, No DISTINCT columns IS true, BinarySortableSerDe for keys IS true, LazyBinarySerDe for values IS true
+                            valueColumns: 0:bigint
                         Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: COMPLETE
                         value expressions: _col0 (type: bigint)
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: no inputs
             Map Vectorization:
-                enabled: false
+                enabled: true
                 enabledConditionsMet: hive.vectorized.use.vectorized.input.format IS true
-                enabledConditionsNotMet: Could not enable vectorization due to partition column names size 1 is greater than the number of table column names size 0 IS false
+                inputFormatFeatureSupport: []
+                featureSupportInUse: []
                 inputFileFormats: org.apache.hadoop.hive.ql.io.NullRowsInputFormat
+                allNative: false
+                usesVectorUDFAdaptor: false
+                vectorized: true
+                rowBatchContext:
+                    dataColumnCount: 0
+                    includeColumns: []
+                    partitionColumnCount: 0
+                    scratchColumnTypeNames: []
         Reducer 2 
             Execution mode: vectorized, llap
             Reduce Vectorization:
                 enabled: true
-                enableConditionsMet: hive.vectorized.execution.reduce.enabled IS true, hive.execution.engine tez IN [tez, spark] IS true
+                enableConditionsMet: hive.vectorized.execution.reduce.enabled IS true, hive.execution.engine tez IN [tez] IS true
                 reduceColumnNullOrder: 
                 reduceColumnSortOrder: 
                 allNative: false
@@ -357,25 +387,45 @@ STAGE PLANS:
                   alias: _dummy_table
                   Row Limit Per Split: 1
                   Statistics: Num rows: 1 Data size: 10 Basic stats: COMPLETE Column stats: COMPLETE
+                  TableScan Vectorization:
+                      native: true
+                      vectorizationSchemaColumns: [0:ROW__ID:struct<writeid:bigint,bucketid:int,rowid:bigint>, 1:ROW__IS__DELETED:boolean]
                   Select Operator
                     expressions: 1 (type: int)
                     outputColumnNames: _col0
+                    Select Vectorization:
+                        className: VectorSelectOperator
+                        native: true
+                        projectedOutputColumnNums: [2]
+                        selectExpressions: ConstantVectorExpression(val 1) -> 2:int
                     Statistics: Num rows: 1 Data size: 4 Basic stats: COMPLETE Column stats: COMPLETE
                     File Output Operator
                       compressed: false
+                      File Sink Vectorization:
+                          className: VectorFileSinkOperator
+                          native: false
                       Statistics: Num rows: 1 Data size: 4 Basic stats: COMPLETE Column stats: COMPLETE
                       table:
                           input format: org.apache.hadoop.mapred.TextInputFormat
                           output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
                           serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
                           name: default.dual
-            Execution mode: llap
+            Execution mode: vectorized, llap
             LLAP IO: no inputs
             Map Vectorization:
-                enabled: false
+                enabled: true
                 enabledConditionsMet: hive.vectorized.use.vectorized.input.format IS true
-                enabledConditionsNotMet: Could not enable vectorization due to partition column names size 1 is greater than the number of table column names size 0 IS false
+                inputFormatFeatureSupport: []
+                featureSupportInUse: []
                 inputFileFormats: org.apache.hadoop.hive.ql.io.NullRowsInputFormat
+                allNative: false
+                usesVectorUDFAdaptor: false
+                vectorized: true
+                rowBatchContext:
+                    dataColumnCount: 0
+                    includeColumns: []
+                    partitionColumnCount: 0
+                    scratchColumnTypeNames: [bigint]
 
   Stage: Stage-2
     Dependency Collection
@@ -410,6 +460,7 @@ POSTHOOK: type: CREATETABLE_AS_SELECT
 POSTHOOK: Input: _dummy_database@_dummy_table
 POSTHOOK: Output: database:default
 POSTHOOK: Output: default@dual
+POSTHOOK: Lineage: dual._c0 SIMPLE []
 _c0
 PREHOOK: query: select * from dual
 PREHOOK: type: QUERY

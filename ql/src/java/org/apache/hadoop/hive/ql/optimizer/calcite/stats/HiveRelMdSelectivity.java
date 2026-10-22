@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.ql.optimizer.calcite.stats;
 
@@ -149,11 +150,8 @@ public class HiveRelMdSelectivity extends RelMdSelectivity {
       if (j.isSemiJoin() || (j.getJoinType().equals(JoinRelType.ANTI))) {
         ndvEstimate = Math.min(mq.getRowCount(j.getLeft()),
             ndvEstimate);
-      } else if (j instanceof HiveJoin) {
-        ndvEstimate = Math.min(mq.getRowCount(j.getLeft())
-            * mq.getRowCount(j.getRight()), ndvEstimate);
       } else {
-        throw new RuntimeException("Unexpected Join type: " + j.getClass().getName());
+        ndvEstimate = Math.min(mq.getRowCount(j.getLeft()) * mq.getRowCount(j.getRight()), ndvEstimate);
       }
     }
 
@@ -218,7 +216,7 @@ public class HiveRelMdSelectivity extends RelMdSelectivity {
   }
 
   /*
-   * a) Order predciates based on ndv in reverse order. b) ndvCrossProduct =
+   * a) Order predicates based on ndv in reverse order. b) ndvCrossProduct =
    * ndv(pe0) * ndv(pe1) ^(1/2) * ndv(pe2) ^(1/4) * ndv(pe3) ^(1/8) ...
    */
   protected double exponentialBackoff(List<JoinLeafPredicateInfo> peLst,

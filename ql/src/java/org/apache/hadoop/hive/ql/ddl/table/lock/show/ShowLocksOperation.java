@@ -9,17 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.lock.show;
 
 import org.apache.hadoop.hive.ql.ddl.DDLOperationContext;
-import org.apache.hadoop.hive.ql.ddl.DDLUtils;
+import org.apache.hadoop.hive.ql.ddl.ShowUtils;
 import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.lockmgr.DbLockManager;
 import org.apache.hadoop.hive.ql.lockmgr.HiveLock;
@@ -45,6 +46,7 @@ import org.apache.hadoop.hive.metastore.api.ShowLocksResponseElement;
 import org.apache.hadoop.hive.ql.Context;
 import org.apache.hadoop.hive.ql.ddl.DDLOperation;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
+import org.apache.hadoop.hive.ql.metadata.HiveUtils;
 import org.apache.hadoop.hive.ql.session.SessionState;
 
 /**
@@ -74,7 +76,7 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
     }
 
     // write the results in the file
-    try (DataOutputStream os = DDLUtils.getOutputStream(new Path(desc.getResFile()), context)) {
+    try (DataOutputStream os = ShowUtils.getOutputStream(new Path(desc.getResFile()), context)) {
       List<HiveLock> locks = getLocksForOldFormat(lockMgr);
       writeLocksInOldFormat(os, locks);
     } catch (IOException e) {
@@ -89,11 +91,12 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
 
   private List<HiveLock> getLocksForOldFormat(HiveLockManager lockMgr) throws LockException, HiveException {
     List<HiveLock> locks = null;
-    if (desc.getTableName() == null) {
+    if (desc.getTableName() == null && desc.getDbName() == null) {
       // TODO should be doing security check here. Users should not be able to see each other's locks.
       locks = lockMgr.getLocks(false, desc.isExt());
     } else {
-      HiveLockObject lockObject = HiveLockObject.createFrom(context.getDb(), desc.getTableName(), desc.getPartSpec());
+      HiveLockObject lockObject = HiveLockObject.createFrom(context.getDb(), desc.getDbName(), 
+              desc.getTableName(), desc.getPartSpec());
       locks = lockMgr.getLocks(lockObject, true, desc.isExt());
     }
     Collections.sort(locks, new Comparator<HiveLock>() {
@@ -143,7 +146,7 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
     ShowLocksResponse response = getLocksForNewFormat(lockMgr);
 
     // write the results in the file
-    try (DataOutputStream os = DDLUtils.getOutputStream(new Path(desc.getResFile()), context)) {
+    try (DataOutputStream os = ShowUtils.getOutputStream(new Path(desc.getResFile()), context)) {
       dumpLockInfo(os, response);
     } catch (IOException e) {
       LOG.warn("show function: ", e);
@@ -161,6 +164,11 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
     }
 
     ShowLocksRequest request = new ShowLocksRequest();
+    if (desc.getCatName() == null && (desc.getDbName() != null || desc.getTableName() != null)) {
+      request.setCatname(HiveUtils.getCurrentCatalogOrDefault(context.getConf()));
+    } else {
+      request.setCatname(desc.getCatName());
+    }
     if (desc.getDbName() == null && desc.getTableName() != null) {
       request.setDbname(SessionState.get().getCurrentDatabase());
     } else {
@@ -187,6 +195,8 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
     // Write a header for CliDriver
     if (!sessionState.isHiveServerQuery()) {
       os.writeBytes("Lock ID");
+      os.write(Utilities.tabCode);
+      os.writeBytes("Catalog");
       os.write(Utilities.tabCode);
       os.writeBytes("Database");
       os.write(Utilities.tabCode);
@@ -222,6 +232,8 @@ public class ShowLocksOperation extends DDLOperation<ShowLocksDesc> {
         } else {
           os.writeBytes(Long.toString(lock.getLockid()));
         }
+        os.write(Utilities.tabCode);
+        os.writeBytes(lock.getCatname());
         os.write(Utilities.tabCode);
         os.writeBytes(lock.getDbname());
         os.write(Utilities.tabCode);

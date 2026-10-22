@@ -9,16 +9,21 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl.table.create.like;
 
+import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.TABLE_IS_CTAS;
+import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.TABLE_IS_CTLT;
+
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.hadoop.hive.ql.ddl.DDLDesc;
@@ -33,7 +38,7 @@ public class CreateTableLikeDesc implements DDLDesc, Serializable {
   private static final long serialVersionUID = 1L;
 
   private final String tableName;
-  private final boolean isExternal;
+  private boolean isExternal;
   private final boolean isTemporary;
   private final String defaultInputFormat;
   private final String defaultOutputFormat;
@@ -92,6 +97,10 @@ public class CreateTableLikeDesc implements DDLDesc, Serializable {
     return isExternal;
   }
 
+  public void setIsExternal(boolean isExternal) {
+    this.isExternal = isExternal;
+  }
+
   @Explain(displayName = "default serde name")
   public String getDefaultSerName() {
     return defaultSerName;
@@ -107,9 +116,16 @@ public class CreateTableLikeDesc implements DDLDesc, Serializable {
     return likeTableName;
   }
 
-  @Explain(displayName = "table properties")
   public Map<String, String> getTblProps() {
     return tblProps;
+  }
+
+  @Explain(displayName = "table properties")
+  public Map<String, String> getTblPropsExplain() {
+    HashMap<String, String> copy = new HashMap<>(tblProps);
+    copy.remove(TABLE_IS_CTAS);
+    copy.remove(TABLE_IS_CTLT);
+    return copy;
   }
 
   @Explain(displayName = "isTemporary", displayOnlyOnTrue = true)

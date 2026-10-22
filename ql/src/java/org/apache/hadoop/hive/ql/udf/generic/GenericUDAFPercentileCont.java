@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.udf.generic;
@@ -57,7 +58,7 @@ import org.apache.hadoop.io.LongWritable;
  * GenericUDAFPercentileCont.
  */
 @Description(
-        name = "dense_rank",
+        name = "percentile_cont",
         value = "_FUNC_(input, pc) "
                 + "- Returns the percentile of expr at pc (range: [0,1]).")
 @WindowFunctionDescription(

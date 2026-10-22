@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.serde2.lazy;
 
@@ -29,7 +30,6 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.ByteStream.Output;
 import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.SerdeRandomRowSource;
 import org.apache.hadoop.hive.serde2.VerifyFast;
 import org.apache.hadoop.hive.serde2.binarysortable.MyTestClass;
@@ -245,7 +245,7 @@ public class TestLazySimpleFast {
         }
       }
       if (!VerifyLazy.lazyCompare(typeInfo, complexFieldObj, expectedObject)) {
-        fail("Comparision failed typeInfo " + typeInfo.toString());
+        fail("Comparison failed typeInfo " + typeInfo.toString());
       }
     }
   }
@@ -275,7 +275,7 @@ public class TestLazySimpleFast {
     LazySimpleSerDe serDe = new LazySimpleSerDe();
     Configuration conf = new Configuration();
     Properties tbl = createProperties(fieldNames, fieldTypes);
-    SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+    serDe.initialize(conf, tbl, null);
     return serDe;
   }
 

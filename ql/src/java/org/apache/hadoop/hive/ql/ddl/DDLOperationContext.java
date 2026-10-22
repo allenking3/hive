@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.ddl;
@@ -24,18 +25,14 @@ import org.apache.hadoop.hive.ql.QueryPlan;
 import org.apache.hadoop.hive.ql.QueryState;
 import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
-import org.apache.hadoop.hive.ql.metadata.formatting.MetaDataFormatUtils;
-import org.apache.hadoop.hive.ql.metadata.formatting.MetaDataFormatter;
 import org.apache.hadoop.hive.ql.session.SessionState.LogHelper;
 
 /**
  * Context for DDL operations.
  */
 public class DDLOperationContext {
-  private final Hive db;
   private final HiveConf conf;
   private final Context context;
-  private final MetaDataFormatter formatter;
   private final DDLTask task;
   private final DDLWork work;
   private final QueryState queryState;
@@ -43,11 +40,9 @@ public class DDLOperationContext {
   private final LogHelper console;
 
   public DDLOperationContext(HiveConf conf, Context context, DDLTask task, DDLWork work, QueryState queryState,
-      QueryPlan queryPlan, LogHelper console) throws HiveException {
-    this.db = Hive.get(conf);
+      QueryPlan queryPlan, LogHelper console){
     this.conf = conf;
     this.context = context;
-    this.formatter = MetaDataFormatUtils.getFormatter(conf);
     this.task = task;
     this.work = work;
     this.queryState = queryState;
@@ -55,8 +50,8 @@ public class DDLOperationContext {
     this.console = console;
   }
 
-  public Hive getDb() {
-    return db;
+  public Hive getDb() throws HiveException {
+    return Hive.get(conf);
   }
 
   public HiveConf getConf() {
@@ -65,10 +60,6 @@ public class DDLOperationContext {
 
   public Context getContext() {
     return context;
-  }
-
-  public MetaDataFormatter getFormatter() {
-    return formatter;
   }
 
   public DDLTask getTask() {

@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2;
@@ -66,7 +67,7 @@ public class TestStatsSerde {
       LazySimpleSerDe serDe = new LazySimpleSerDe();
       Configuration conf = new Configuration();
       Properties tbl = createProperties();
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       Text t = new Text("123\t456\t789\t1000\t5.3\thive and hadoop\t1.\tNULL");
@@ -130,7 +131,7 @@ public class TestStatsSerde {
       schema.setProperty(serdeConstants.LIST_COLUMN_TYPES, fieldTypes);
 
       LazyBinarySerDe serDe = new LazyBinarySerDe();
-      SerDeUtils.initializeSerDe(serDe, new Configuration(), schema, null);
+      serDe.initialize(new Configuration(), schema, null);
 
       deserializeAndSerializeLazyBinary(serDe, rows, rowOI);
       System.out.println("test: testLazyBinarySerDe - OK");
@@ -177,7 +178,7 @@ public class TestStatsSerde {
       ColumnarSerDe serDe = new ColumnarSerDe();
       Configuration conf = new Configuration();
       Properties tbl = createProperties();
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       BytesRefArrayWritable braw = new BytesRefArrayWritable(8);

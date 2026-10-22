@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.expressions;
@@ -66,7 +67,7 @@ public class ConstantVectorExpression extends VectorExpression {
   }
 
   ConstantVectorExpression(int outputColumnNum, TypeInfo outputTypeInfo) throws HiveException {
-    super(outputColumnNum);
+    super(-1, outputColumnNum);
 
     this.outputTypeInfo = outputTypeInfo;
     outputDataTypePhysicalVariation = DataTypePhysicalVariation.NONE;
@@ -92,13 +93,13 @@ public class ConstantVectorExpression extends VectorExpression {
   public ConstantVectorExpression(int outputColumnNum, HiveChar value, TypeInfo outputTypeInfo)
       throws HiveException {
     this(outputColumnNum, outputTypeInfo);
-    setBytesValue(value.getStrippedValue().getBytes());
+    setBytesValue(value.getStrippedValue().getBytes(StandardCharsets.UTF_8));
   }
 
   public ConstantVectorExpression(int outputColumnNum, HiveVarchar value, TypeInfo outputTypeInfo)
       throws HiveException {
     this(outputColumnNum, outputTypeInfo);
-    setBytesValue(value.getValue().getBytes());
+    setBytesValue(value.getValue().getBytes(StandardCharsets.UTF_8));
   }
 
   // Include type name for precision/scale.
@@ -205,7 +206,7 @@ public class ConstantVectorExpression extends VectorExpression {
               outputColumnNum, (HiveDecimal) constantValue, outputTypeInfo);
         case STRING:
           return new ConstantVectorExpression(
-              outputColumnNum, ((String) constantValue).getBytes(), outputTypeInfo);
+              outputColumnNum, ((String) constantValue).getBytes(StandardCharsets.UTF_8), outputTypeInfo);
         case VARCHAR:
           return new ConstantVectorExpression(
               outputColumnNum, ((HiveVarchar) constantValue), outputTypeInfo);
@@ -474,7 +475,7 @@ public class ConstantVectorExpression extends VectorExpression {
 
   public void setStructValue(Object structValue) throws HiveException {
     StructTypeInfo structTypeInfo = (StructTypeInfo) outputTypeInfo;
-    ArrayList<TypeInfo> fieldTypeInfoList = structTypeInfo.getAllStructFieldTypeInfos();
+    List<TypeInfo> fieldTypeInfoList = structTypeInfo.getAllStructFieldTypeInfos();
     final int size = fieldTypeInfoList.size();
     this.structValue = new ConstantVectorExpression[size];
     List<Object> fieldValueList = (List<Object>) structValue;

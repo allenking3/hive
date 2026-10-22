@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.io.orc;
@@ -237,7 +238,8 @@ public class TestOrcFile {
 
   @Parameters
   public static Collection<Boolean[]> data() {
-    return Arrays.asList(new Boolean[][] { {false}, {true}});
+    // Test Disabled with ZeroCopy=True until ORC-701
+    return Arrays.asList(new Boolean[][] { {false}, /* {true} */});
   }
 
   public TestOrcFile(Boolean zcr) {
@@ -325,7 +327,7 @@ public class TestOrcFile {
         + "binary,string1:string,middle:struct<list:array<struct<int1:int,"
         + "string1:string>>>,list:array<struct<int1:int,string1:string>>,"
         + "map:map<string,struct<int1:int,string1:string>>,ts:timestamp,"
-        + "decimal1:decimal(38,18)>", readerInspector.getTypeName());
+        + "decimal1:decimal(38,10)>", readerInspector.getTypeName());
     List<? extends StructField> fields = readerInspector
         .getAllStructFieldRefs();
     BooleanObjectInspector bo = (BooleanObjectInspector) readerInspector
@@ -555,6 +557,7 @@ public class TestOrcFile {
     boolean[] expected = new boolean[] {false};
     boolean[] included = OrcUtils.includeColumns("", writer.getSchema());
     assertEquals(true, Arrays.equals(expected, included));
+    rows.close();
   }
 
   @Test
@@ -591,6 +594,7 @@ public class TestOrcFile {
     assertEquals(2, stats[0].getNumberOfValues());
     assertEquals(0, stats[1].getNumberOfValues());
     assertEquals(true, stats[1].hasNull());
+    rows.close();
   }
 
   @Test
@@ -659,6 +663,7 @@ public class TestOrcFile {
     assertEquals(HiveDecimal.create(1), ((DecimalColumnStatistics) stats[1]).getMinimum());
     assertEquals(HiveDecimal.create(6), ((DecimalColumnStatistics) stats[1]).getSum());
     assertEquals(true, stats[1].hasNull());
+    rows.close();
   }
 
   @Test
@@ -703,7 +708,7 @@ public class TestOrcFile {
 
     assertEquals(3, stats[1].getNumberOfValues());
     assertEquals(15, ((BinaryColumnStatistics) stats[1]).getSum());
-    assertEquals("count: 3 hasNull: true bytesOnDisk: 28 sum: 15", stats[1].toString());
+    assertEquals("count: 3 hasNull: true bytesOnDisk: 30 sum: 15", stats[1].toString());
 
     assertEquals(3, stats[2].getNumberOfValues());
     assertEquals("bar", ((StringColumnStatistics) stats[2]).getMinimum());
@@ -853,6 +858,7 @@ public class TestOrcFile {
     items = index[1].getEntryList();
     assertEquals(2,
         items.get(0).getStatistics().getIntStatistics().getMaximum());
+    reader.close();
   }
 
   @Test
@@ -940,7 +946,7 @@ public class TestOrcFile {
     assertEquals(-15.0, ((DoubleColumnStatistics) stats[7]).getMinimum());
     assertEquals(-5.0, ((DoubleColumnStatistics) stats[7]).getMaximum());
     assertEquals(-20.0, ((DoubleColumnStatistics) stats[7]).getSum(), 0.00001);
-    assertEquals("count: 2 hasNull: false bytesOnDisk: 15 min: -15.0 max: -5.0 sum: -20.0",
+    assertEquals("count: 2 hasNull: false bytesOnDisk: 19 min: -15.0 max: -5.0 sum: -20.0",
         stats[7].toString());
 
     assertEquals("count: 2 hasNull: false bytesOnDisk: 14 min: bye max: hi sum: 5", stats[9].toString());
@@ -1229,10 +1235,11 @@ public class TestOrcFile {
     assertEquals(false, reader.rows().hasNext());
     assertEquals(CompressionKind.NONE, reader.getCompression());
     assertEquals(0, reader.getNumberOfRows());
-    assertEquals(0, reader.getCompressionSize());
+    assertEquals(262144, reader.getCompressionSize());
     assertEquals(false, reader.getMetadataKeys().iterator().hasNext());
     assertEquals(3, reader.getContentLength());
     assertEquals(false, reader.getStripes().iterator().hasNext());
+    reader.close();
   }
 
   @Test
@@ -1287,6 +1294,7 @@ public class TestOrcFile {
     assertEquals(3, i);
     int numStripes = reader.getStripeStatistics().size();
     assertEquals(1, numStripes);
+    reader.close();
   }
 
   /**
@@ -1339,6 +1347,7 @@ public class TestOrcFile {
             row.getFieldValue(1));
       }
     }
+    rows.close();
   }
 
   @Test
@@ -1970,6 +1979,7 @@ public class TestOrcFile {
     }
     assertEquals(25, i);
     assertEquals(2500, reader.getNumberOfRows());
+    reader.close();
   }
 
   @Test
@@ -2016,6 +2026,7 @@ public class TestOrcFile {
     // compared to 25 stripes in version 0.11 (above test case)
     assertEquals(3, i);
     assertEquals(2500, reader.getNumberOfRows());
+    reader.close();
   }
 
   @Test
@@ -2102,6 +2113,7 @@ public class TestOrcFile {
     }
     assertTrue(!rows.hasNext());
     assertEquals(3500, rows.getRowNumber());
+    rows.close();
   }
 
   @Test
@@ -2134,6 +2146,7 @@ public class TestOrcFile {
       Object row = rows.next(null);
       Assert.assertEquals(input.get(idx++).longValue(), ((LongWritable) row).get());
     }
+    rows.close();
   }
 
   static class MyList {

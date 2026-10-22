@@ -31,9 +31,10 @@ import org.apache.commons.lang3.ArrayUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.serde.serdeConstants;
-import org.apache.hadoop.hive.serde2.AbstractSerDe;
+import org.apache.hadoop.hive.serde2.AbstractEncodingAwareSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeSpec;
+import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.StructTypeInfo;
 import org.apache.hadoop.io.Text;
@@ -46,20 +47,23 @@ import org.slf4j.LoggerFactory;
 
 @SerDeSpec(schemaProps = {serdeConstants.LIST_COLUMNS,
                           serdeConstants.LIST_COLUMN_TYPES,
-                          serdeConstants.TIMESTAMP_FORMATS})
-public class JsonSerDe extends AbstractSerDe {
+                          serdeConstants.TIMESTAMP_FORMATS,
+                          serdeConstants.SERIALIZATION_ENCODING})
+public class JsonSerDe extends AbstractEncodingAwareSerDe {
 
   private static final Logger LOG = LoggerFactory.getLogger(JsonSerDe.class);
+
   private HCatSchema schema;
 
   private HCatRecordObjectInspector cachedObjectInspector;
   private org.apache.hadoop.hive.serde2.JsonSerDe jsonSerde = new org.apache.hadoop.hive.serde2.JsonSerDe();
 
   @Override
-  public void initialize(Configuration conf, Properties tbl)
-    throws SerDeException {
+  public void initialize(Configuration configuration, Properties tableProperties, Properties partitionProperties)
+      throws SerDeException {
+    super.initialize(configuration, tableProperties, partitionProperties);
 
-    jsonSerde.initialize(conf, tbl, false);
+    jsonSerde.initialize(configuration, tableProperties, partitionProperties, false);
 
     StructTypeInfo rowTypeInfo = jsonSerde.getTypeInfo();
     cachedObjectInspector = HCatRecordObjectInspectorFactory.getHCatRecordObjectInspector(rowTypeInfo);
@@ -80,7 +84,7 @@ public class JsonSerDe extends AbstractSerDe {
    * our own object implementation, and we use HCatRecord for it
    */
   @Override
-  public Object deserialize(Writable blob) throws SerDeException {
+  public Object doDeserialize(Writable blob) throws SerDeException {
     try {
       List<?> row = (List<?>) jsonSerde.deserialize(blob);
       List<Object> fatRow = fatLand(row);
@@ -167,7 +171,7 @@ public class JsonSerDe extends AbstractSerDe {
    * and generate a Text representation of the object.
    */
   @Override
-  public Writable serialize(Object obj, ObjectInspector objInspector)
+  public Writable doSerialize(Object obj, ObjectInspector objInspector)
     throws SerDeException {
     return jsonSerde.serialize(obj, objInspector);
   }
@@ -184,6 +188,24 @@ public class JsonSerDe extends AbstractSerDe {
   @Override
   public Class<? extends Writable> getSerializedClass() {
     return Text.class;
+  }
+
+  /**
+   * Transform Writable data from UTF-8 to charset before serialize.
+   * @param blob
+   * @return
+   */
+  
+  @Override
+  protected Writable transformFromUTF8(Writable blob) {
+    Text text = (Text)blob;
+    return SerDeUtils.transformTextFromUTF8(text, this.charset);
+  }
+
+  @Override
+  protected Writable transformToUTF8(Writable blob) {
+    Text text = (Text)blob;
+    return SerDeUtils.transformTextToUTF8(text, this.charset);
   }
 
 }

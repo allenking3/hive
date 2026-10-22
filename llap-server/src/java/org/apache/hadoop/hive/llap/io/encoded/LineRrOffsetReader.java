@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.llap.io.encoded;
 
@@ -24,6 +25,7 @@ import java.lang.reflect.Method;
 import org.apache.hadoop.hive.llap.io.api.impl.LlapIoImpl;
 import org.apache.hadoop.hive.llap.io.encoded.SerDeEncodedDataReader.ReaderWithOffsets;
 import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.mapred.FileSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.LineRecordReader;
 
@@ -44,7 +46,8 @@ final class LineRrOffsetReader extends PassThruOffsetReader {
     isCompressedMethod = isCompressedMethodTmp;
   }
 
-  static ReaderWithOffsets create(LineRecordReader sourceReader, JobConf jobConf, int skipHeaderCnt, int skipFooterCnt) {
+  static ReaderWithOffsets create(LineRecordReader sourceReader, JobConf jobConf,
+      int skipHeaderCnt, int skipFooterCnt, FileSplit split) {
     // File not compressed, skipping is already done as part of SkippingTextInputFormat
     if (isCompressedMethod == null) {
       return new PassThruOffsetReader(sourceReader, jobConf, 0, 0);
@@ -59,6 +62,11 @@ final class LineRrOffsetReader extends PassThruOffsetReader {
     if (isCompressed) {
       // Cannot slice compressed files - do header/footer skipping within the Reader
       LlapIoImpl.LOG.info("Reader is compressed; offsets not supported");
+      return new PassThruOffsetReader(sourceReader, jobConf, skipHeaderCnt, skipFooterCnt);
+    }
+    if (skipHeaderCnt > 0 && split.getStart() == 0) {
+      // Skipping empty/null lines leading to Split start -1 being zero
+      LlapIoImpl.LOG.info("Reader with blank head line(s)");
       return new PassThruOffsetReader(sourceReader, jobConf, skipHeaderCnt, skipFooterCnt);
     }
     // For non-compressed Text Files Header/Footer Skipping is already done as part of SkippingTextInputFormat

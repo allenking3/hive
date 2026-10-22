@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.exec.vector.expressions;
@@ -37,7 +38,6 @@ import java.util.Arrays;
 public class CastLongToDecimal64 extends VectorExpression {
 
   private static final long serialVersionUID = 1L;
-  private final int inputColumn;
 
   private static final long[] powerOfTenTable = {
       1L,                   // 0
@@ -62,15 +62,11 @@ public class CastLongToDecimal64 extends VectorExpression {
   };
 
   public CastLongToDecimal64(int inputColumn, int outputColumnNum) {
-    super(outputColumnNum);
-    this.inputColumn = inputColumn;
+    super(inputColumn, outputColumnNum);
   }
 
   public CastLongToDecimal64() {
     super();
-
-    // Dummy final assignments.
-    inputColumn = -1;
   }
 
   protected void scaleUp(Decimal64ColumnVector outV, LongColumnVector inV, int i, long scaleFactor) {
@@ -84,7 +80,7 @@ public class CastLongToDecimal64 extends VectorExpression {
       super.evaluateChildren(batch);
     }
 
-    LongColumnVector inputColVector = (LongColumnVector) batch.cols[inputColumn];
+    LongColumnVector inputColVector = (LongColumnVector) batch.cols[inputColumnNum[0]];
     int[] sel = batch.selected;
     int n = batch.size;
     Decimal64ColumnVector outputColVector = (Decimal64ColumnVector) batch.cols[outputColumnNum];
@@ -171,7 +167,7 @@ public class CastLongToDecimal64 extends VectorExpression {
   }
 
   public String vectorExpressionParameters() {
-    return getColumnParamString(0, inputColumn);
+    return getColumnParamString(0, inputColumnNum[0]);
   }
 
   @Override
@@ -184,5 +180,10 @@ public class CastLongToDecimal64 extends VectorExpression {
         .setInputExpressionTypes(
             VectorExpressionDescriptor.InputExpressionType.COLUMN);
     return b.build();
+  }
+
+  @Override
+  public boolean shouldConvertDecimal64ToDecimal() {
+    return false;
   }
 }

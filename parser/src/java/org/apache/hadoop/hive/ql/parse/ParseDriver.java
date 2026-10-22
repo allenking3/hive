@@ -9,16 +9,18 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.parse;
 
 
+import java.util.List;
 import org.antlr.runtime.CommonToken;
 import org.antlr.runtime.ParserRuleReturnScope;
 import org.antlr.runtime.RecognitionException;
@@ -28,6 +30,7 @@ import org.antlr.runtime.TokenStream;
 import org.antlr.runtime.tree.CommonTree;
 import org.antlr.runtime.tree.CommonTreeAdaptor;
 import org.antlr.runtime.tree.TreeAdaptor;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +79,7 @@ public class ParseDriver {
 
     @Override
     public Object dupTree(Object t, Object parent) {
-      // Overriden to copy start index / end index, that is needed through optimization,
+      // Overridden to copy start index / end index, that is needed through optimization,
       // e.g., for masking/filtering
       ASTNode astNode = (ASTNode) t;
       ASTNode astNodeCopy = (ASTNode) super.dupTree(t, parent);
@@ -109,9 +112,7 @@ public class ParseDriver {
    */
   public ParseResult parse(String command, Configuration configuration)
       throws ParseException {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Parsing command: " + command);
-    }
+    LOG.debug("Parsing command: {}", command);
 
     GenericHiveLexer lexer = GenericHiveLexer.of(command, configuration);
     TokenRewriteStream tokens = new TokenRewriteStream(lexer);
@@ -122,7 +123,7 @@ public class ParseDriver {
     try {
       r = parser.statement();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
 
     if (lexer.getErrors().size() == 0 && parser.errors.size() == 0) {
@@ -135,7 +136,7 @@ public class ParseDriver {
 
     ASTNode tree = (ASTNode) r.getTree();
     tree.setUnknownTokenBoundaries();
-    return new ParseResult(tree, tokens);
+    return new ParseResult(tree, tokens, parser.gFromClauseParser.tables);
   }
 
   /*
@@ -152,7 +153,7 @@ public class ParseDriver {
     try {
       r = parser.hint();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
 
     if (lexer.getErrors().size() == 0 && parser.errors.size() == 0) {
@@ -191,7 +192,7 @@ public class ParseDriver {
     try {
       r = parser.selectClause();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
 
     if (lexer.getErrors().size() == 0 && parser.errors.size() == 0) {
@@ -202,7 +203,7 @@ public class ParseDriver {
       throw new ParseException(parser.errors);
     }
 
-    return new ParseResult((ASTNode) r.getTree(), tokens);
+    return new ParseResult((ASTNode) r.getTree(), tokens, parser.gFromClauseParser.tables);
   }
   public ASTNode parseExpression(String command) throws ParseException {
     LOG.debug("Parsing expression: {}", command);
@@ -215,7 +216,7 @@ public class ParseDriver {
     try {
       r = parser.expression();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
 
     if (lexer.getErrors().size() == 0 && parser.errors.size() == 0) {
@@ -238,7 +239,7 @@ public class ParseDriver {
     try {
       r = parser.triggerExpressionStandalone();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
     if (lexer.getErrors().size() != 0) {
       throw new ParseException(lexer.getErrors());
@@ -258,7 +259,7 @@ public class ParseDriver {
     try {
       r = parser.triggerActionExpressionStandalone();
     } catch (RecognitionException e) {
-      throw new ParseException(parser.errors);
+      throw new ParseException(parser.errors, e);
     }
     if (lexer.getErrors().size() != 0) {
       throw new ParseException(lexer.getErrors());

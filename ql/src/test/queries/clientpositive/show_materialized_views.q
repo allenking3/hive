@@ -19,6 +19,12 @@ SELECT * FROM shtb_test1 where KEY > 100 and KEY < 200;
 CREATE MATERIALIZED VIEW shtb_full_view2
 TBLPROPERTIES ('rewriting.time.window' = '5min') AS
 SELECT * FROM shtb_test1;
+CREATE MATERIALIZED VIEW shtb_aggr_view1 AS
+SELECT a.value, sum(a.key) FROM shtb_test1 a join shtb_test1 b on (a.key = b.key) group by a.value;
+CREATE MATERIALIZED VIEW shtb_aggr_view2 AS
+SELECT a.value, count(1), sum(a.key) FROM shtb_test1 a join shtb_test1 b on (a.key = b.key) group by a.value;
+CREATE MATERIALIZED VIEW aggr_view_min AS
+SELECT a.value, count(*), min(a.key) FROM shtb_test1 a join shtb_test1 b on (a.key = b.key) group by a.value;
 
 USE test2;
 CREATE TABLE shtb_test1(KEY INT, VALUE STRING) PARTITIONED BY(ds STRING)
@@ -72,8 +78,12 @@ DROP TABLE foo_n0;
 
 USE test1;
 DROP MATERIALIZED VIEW shtb_test1_view1;
+DROP MATERIALIZED VIEW aggr_view_min;
 DROP MATERIALIZED VIEW shtb_test1_view2;
 DROP MATERIALIZED VIEW shtb_full_view2;
+DROP MATERIALIZED VIEW shtb_aggr_view1;
+DROP MATERIALIZED VIEW shtb_aggr_view2;
+
 DROP TABLE shtb_test1;
 DROP DATABASE test1;
 

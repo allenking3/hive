@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.apache.hadoop.hive.serde2.lazy;
 
@@ -29,7 +30,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.ByteStream;
 import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.binarysortable.MyTestClass;
 import org.apache.hadoop.hive.serde2.binarysortable.MyTestPrimitiveClass.ExtraTypeInfo;
 import org.apache.hadoop.hive.serde2.io.ByteWritable;
@@ -70,7 +70,7 @@ public class TestLazySimpleSerDe {
       tbl.setProperty("columns.types",
           "tinyint:smallint:int:bigint:double:string:int:string:binary");
       tbl.setProperty(serdeConstants.SERIALIZATION_NULL_FORMAT, "NULL");
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       Text t = new Text("123\t456\t789\t1000\t5.3\thive and hadoop\t1.\tNULL\t");
@@ -104,7 +104,7 @@ public class TestLazySimpleSerDe {
       Configuration conf = new Configuration();
       Properties tbl = createProperties();
       tbl.setProperty(serdeConstants.SERIALIZATION_LAST_COLUMN_TAKES_REST, "true");
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       Text t = new Text("123\t456\t789\t1000\t5.3\thive and hadoop\t1.\ta\tb\t");
@@ -133,7 +133,7 @@ public class TestLazySimpleSerDe {
       LazySimpleSerDe serDe = new LazySimpleSerDe();
       Configuration conf = new Configuration();
       Properties tbl = createProperties();
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       Text t = new Text("123\t456\t789\t1000\t5.3\thive and hadoop\t1.\ta\tb\t");
@@ -162,7 +162,7 @@ public class TestLazySimpleSerDe {
       LazySimpleSerDe serDe = new LazySimpleSerDe();
       Configuration conf = new Configuration();
       Properties tbl = createProperties();
-      SerDeUtils.initializeSerDe(serDe, conf, tbl, null);
+      serDe.initialize(conf, tbl, null);
 
       // Data
       Text t = new Text("123\t456\t789\t1000\t5.3\t");
@@ -207,7 +207,7 @@ public class TestLazySimpleSerDe {
     schema.setProperty(serdeConstants.LIST_COLUMNS, fieldNames);
     schema.setProperty(serdeConstants.LIST_COLUMN_TYPES, fieldTypes);
 
-    SerDeUtils.initializeSerDe(serDe, conf, schema, null);
+    serDe.initialize(conf, schema, null);
     SerDeParameters serdeParams = LazySimpleSerDe.initSerdeParams(conf, schema, "testSerdeName");
 
     // Test

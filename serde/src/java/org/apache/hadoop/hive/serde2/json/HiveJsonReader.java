@@ -9,11 +9,12 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.serde2.json;
@@ -37,6 +38,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.hive.common.type.Date;
@@ -45,15 +47,19 @@ import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.common.type.Timestamp;
 import org.apache.hadoop.hive.common.type.TimestampTZ;
+import org.apache.hadoop.hive.serde2.JsonSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector.PrimitiveCategory;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.BaseCharTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.HiveDecimalUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TimestampLocalTZTypeInfo;
 import org.apache.hive.common.util.TimestampParser;
@@ -69,9 +75,10 @@ import com.google.common.base.Preconditions;
 /**
  * This class converts JSON strings into Java or Hive Primitive objects.
  *
- * Support types are:<br/>
- * <br/>
+ * Support types are:<br>
+ * <br>
  * <table border="1">
+ *     <caption></caption>
  * <tr>
  * <th>JSON Type</th>
  * <th>Java Type</th>
@@ -110,15 +117,17 @@ public class HiveJsonReader {
   private final ObjectMapper objectMapper;
 
   private final TimestampParser tsParser;
-  private BinaryEncoding binaryEncoding;
   private final ObjectInspector oi;
+  private static final Pattern BASE64_PATTERN = Pattern.compile(
+          "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+  );
 
   /**
    * Enumeration that defines all on/off features for this reader.
    * <ul>
    * <li>{@link #COL_INDEX_PARSING}</li>
    * <li>{@link #PRIMITIVE_TO_WRITABLE}</li>
-   * <li>{@link #IGNORE_UKNOWN_FIELDS}</li>
+   * <li>{@link #IGNORE_UNKNOWN_FIELDS}</li>
    * </ul>
    */
   public enum Feature {
@@ -141,7 +150,13 @@ public class HiveJsonReader {
      * produce a log warnings. If this feature is disabled, an Exception will be
      * thrown and parsing will stop.
      */
-    IGNORE_UKNOWN_FIELDS
+    IGNORE_UNKNOWN_FIELDS,
+    /**
+     * If the JSON object being parsed includes a complex field with non defined Hive schema,
+     * enabling this feature will cause the JSON reader to treat the field as a String.
+     * If the feature is disabled, an Exception will be thrown and parsing will stop.
+     */
+    STRINGIFY_COMPLEX_FIELDS
   }
 
   /**
@@ -160,10 +175,9 @@ public class HiveJsonReader {
    * @param tsParser Custom timestamp parser
    */
   public HiveJsonReader(ObjectInspector oi, TimestampParser tsParser) {
-    this.binaryEncoding = BinaryEncoding.BASE64;
     this.tsParser = tsParser;
     this.oi = oi;
-    this.objectMapper = new ObjectMapper();
+    this.objectMapper = new ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
   }
 
   /**
@@ -371,11 +385,13 @@ public class HiveJsonReader {
    */
   private Object visitLeafNode(final JsonNode leafNode,
       final ObjectInspector oi) throws SerDeException {
-    Preconditions.checkArgument(leafNode.getNodeType() != JsonNodeType.OBJECT);
-    Preconditions.checkArgument(leafNode.getNodeType() != JsonNodeType.ARRAY);
-
     final PrimitiveObjectInspector poi = (PrimitiveObjectInspector) oi;
     final PrimitiveTypeInfo typeInfo = poi.getTypeInfo();
+
+    if (typeInfo.getPrimitiveCategory() != PrimitiveCategory.STRING) {
+      Preconditions.checkArgument(leafNode.getNodeType() != JsonNodeType.OBJECT);
+      Preconditions.checkArgument(leafNode.getNodeType() != JsonNodeType.ARRAY);
+    }
 
     switch (typeInfo.getPrimitiveCategory()) {
     case INT:
@@ -387,13 +403,27 @@ public class HiveJsonReader {
     case LONG:
       return Long.valueOf(leafNode.asLong());
     case BOOLEAN:
-      return Boolean.valueOf(leafNode.asBoolean());
+      if ("false".equalsIgnoreCase(leafNode.asText())) {
+        return Boolean.FALSE;
+      } else {
+        return Boolean.valueOf(leafNode.asBoolean(true));
+      }
     case FLOAT:
       return Float.valueOf((float) leafNode.asDouble());
     case DOUBLE:
       return Double.valueOf(leafNode.asDouble());
     case STRING:
-      return leafNode.asText();
+      if (leafNode.isValueNode()) {
+        return leafNode.asText();
+      } else {
+        if (isEnabled(Feature.STRINGIFY_COMPLEX_FIELDS)) {
+          return leafNode.toString();
+        } else {
+          throw new SerDeException(
+              "Complex field found in JSON does not match table definition: " + typeInfo.getTypeName()
+                  + ", please consider enabling `" + JsonSerDe.STRINGIFY_COMPLEX + "` table property");
+        }
+      }
     case BINARY:
       return getByteValue(leafNode);
     case DATE:
@@ -401,7 +431,8 @@ public class HiveJsonReader {
     case TIMESTAMP:
       return tsParser.parseTimestamp(leafNode.asText());
     case DECIMAL:
-      return HiveDecimal.create(leafNode.asText());
+      HiveDecimal decimal = HiveDecimal.create(leafNode.asText());
+      return HiveDecimalUtils.enforcePrecisionScale(decimal, (DecimalTypeInfo) typeInfo);
     case TIMESTAMPLOCALTZ:
       final Timestamp ts = tsParser.parseTimestamp(leafNode.asText());
       final ZoneId zid = ((TimestampLocalTZTypeInfo) typeInfo).timeZone();
@@ -430,15 +461,19 @@ public class HiveJsonReader {
    */
   private byte[] getByteValue(final JsonNode binaryNode) throws SerDeException {
     try {
-      switch (this.binaryEncoding) {
+      BinaryEncoding binaryEncoding = getBinaryEncodingForNode(binaryNode);
+      switch (binaryEncoding) {
       case RAWSTRING:
-        final String byteText = binaryNode.textValue();
+        final String byteText = binaryNode.asText();
+        if (byteText == null) {
+          return null;
+        }
         return byteText.getBytes(StandardCharsets.UTF_8);
       case BASE64:
         return binaryNode.binaryValue();
       default:
         throw new SerDeException(
-            "No such binary encoding: " + this.binaryEncoding);
+            "No such binary encoding: " + binaryEncoding);
       }
     } catch (IOException e) {
       throw new SerDeException("Error generating JSON binary type from record.",
@@ -446,10 +481,20 @@ public class HiveJsonReader {
     }
   }
 
+  private BinaryEncoding getBinaryEncodingForNode(JsonNode binaryNode) {
+    String jsonValue = binaryNode.textValue();
+
+    if (jsonValue == null || jsonValue.length() % 4 != 0 || !BASE64_PATTERN.matcher(jsonValue).matches()) {
+      return BinaryEncoding.RAWSTRING;
+    }
+
+    return BinaryEncoding.BASE64;
+  }
+
   /**
    * Matches the JSON object's field name with the Hive data type.
    *
-   * @param oi The ObjectInsepctor to lookup the matching in
+   * @param oi The ObjectInspector to lookup the matching in
    * @param fieldName The name of the field parsed from the JSON text
    * @return The meta data of regarding this field
    * @throws SerDeException The SerDe is not configured correctly
@@ -490,7 +535,7 @@ public class HiveJsonReader {
       this.discoveredFields.put(pair, structField);
     } else {
       // Tried everything and did not discover this field
-      if (isEnabled(Feature.IGNORE_UKNOWN_FIELDS)
+      if (isEnabled(Feature.IGNORE_UNKNOWN_FIELDS)
           && this.discoveredUnknownFields.add(pair)) {
         LOG.warn("Discovered unknown field: {}. Ignoring.", fieldName);
       } else {
@@ -540,18 +585,8 @@ public class HiveJsonReader {
     return oi;
   }
 
-  public BinaryEncoding getBinaryEncodingType() {
-    return binaryEncoding;
-  }
-
-  public void setBinaryEncoding(BinaryEncoding encoding) {
-    this.binaryEncoding = encoding;
-  }
-
   @Override
   public String toString() {
-    return "HiveJsonReader [features=" + features + ", tsParser=" + tsParser
-        + ", binaryEncoding=" + binaryEncoding + "]";
+    return "HiveJsonReader [features=" + features + ", tsParser=" + tsParser;
   }
-
 }

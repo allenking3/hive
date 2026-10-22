@@ -9,21 +9,31 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hadoop.hive.ql.stats;
 
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Queue;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.hadoop.hive.common.HiveStatsUtils;
+import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.Constants;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -32,6 +42,7 @@ import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsDesc;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
+import org.apache.hadoop.hive.metastore.api.EnvironmentContext;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.SetPartitionsStatsRequest;
@@ -55,13 +66,11 @@ import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 public class ColStatsProcessor implements IStatsProcessor {
-  private static transient final Logger LOG = LoggerFactory.getLogger(ColStatsProcessor.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ColStatsProcessor.class);
 
   private FetchOperator ftOp;
   private FetchWork fWork;
@@ -83,7 +92,7 @@ public class ColStatsProcessor implements IStatsProcessor {
       JobConf job = new JobConf(conf);
       ftOp = new FetchOperator(fWork, job);
     } catch (Exception e) {
-      LOG.error(StringUtils.stringifyException(e));
+      LOG.error("Failed to initialize", e);
       throw new RuntimeException(e);
     }
   }
@@ -93,15 +102,18 @@ public class ColStatsProcessor implements IStatsProcessor {
     return persistColumnStats(db, tbl);
   }
 
-  private List<ColumnStatistics> constructColumnStatsFromPackedRows(Table tbl)
+  private boolean constructColumnStatsFromPackedRows(Table tbl, List<ColumnStatistics> stats, long maxNumStats)
       throws HiveException, MetaException, IOException {
     String partName = null;
+    // the rows of one fetch share an inspector, so the table is asked once how to name them
+    Function<Object, String> partitionNameResolver = null;
+
     List<String> colName = colStatDesc.getColName();
     List<String> colType = colStatDesc.getColType();
     boolean isTblLevel = colStatDesc.isTblLevel();
 
-    List<ColumnStatistics> stats = new ArrayList<ColumnStatistics>();
     InspectableObject packedRow;
+    long numStats = 0;
     while ((packedRow = ftOp.getNextRow()) != null) {
       if (packedRow.oi.getCategory() != ObjectInspector.Category.STRUCT) {
         throw new HiveException("Unexpected object type encountered while unpacking row");
@@ -119,10 +131,12 @@ public class ColStatsProcessor implements IStatsProcessor {
         String columnType = colType.get(i);
         PrimitiveTypeInfo typeInfo = (PrimitiveTypeInfo) TypeInfoUtils.getTypeInfoFromTypeString(columnType);
         List<ColumnStatsField> columnStatsFields = ColumnStatsType.getColumnStats(typeInfo);
+        columnStatsFields = ColumnStatsType.removeDisabledStatistics(conf, columnStatsFields);
         try {
           ColumnStatisticsObj statObj = ColumnStatisticsObjTranslator.readHiveColumnStatistics(
               columnName, columnType, columnStatsFields, pos, fields, values);
           statsObjs.add(statObj);
+          numStats++;
         } catch (Exception e) {
           if (isStatsReliable) {
             throw new HiveException("Statistics collection failed while (hive.stats.reliable)", e);
@@ -135,16 +149,31 @@ public class ColStatsProcessor implements IStatsProcessor {
 
       if (!statsObjs.isEmpty()) {
         if (!isTblLevel) {
-          List<FieldSchema> partColSchema = tbl.getPartCols();
-          List<String> partVals = new ArrayList<>();
-          // Iterate over partition columns to figure out partition name
-          for (int i = pos; i < pos + partColSchema.size(); i++) {
-            Object partVal = ((PrimitiveObjectInspector) fields.get(i).getFieldObjectInspector())
+          if (tbl.hasNonNativePartitionSupport()) {
+            ObjectInspector inspector = fields.get(pos).getFieldObjectInspector();
+            if (inspector instanceof StructObjectInspector oi) {
+              // a write groups by the partition transforms, so only the table can name the group
+              if (partitionNameResolver == null) {
+                partitionNameResolver = tbl.getStorageHandler().partitionNameResolver(tbl, oi);
+              }
+              partName = partitionNameResolver.apply(values.get(pos));
+            } else if (inspector instanceof PrimitiveObjectInspector poi) {
+              // an ANALYZE rewrite groups by the read-side partition name the reader materialized
+              Object partVal = poi.getPrimitiveJavaObject(values.get(pos));
+              partName = partVal == null ? null : partVal.toString();
+            }
+          } else {
+            List<FieldSchema> partColSchema = new ArrayList<>(tbl.getPartCols());
+            List<String> partVals = new ArrayList<>();
+            // Iterate over partition columns to figure out partition name
+            for (int i = pos; i < pos + partColSchema.size(); i++) {
+              Object partVal = ((PrimitiveObjectInspector) fields.get(i).getFieldObjectInspector())
                 .getPrimitiveJavaObject(values.get(i));
-            partVals.add(partVal == null ? // could be null for default partition
-              this.conf.getVar(ConfVars.DEFAULTPARTITIONNAME) : partVal.toString());
+              partVals.add(partVal == null ? // could be null for default partition
+                this.conf.getVar(ConfVars.DEFAULT_PARTITION_NAME) : partVal.toString());
+            }
+            partName = Warehouse.makePartName(partColSchema, partVals);
           }
-          partName = Warehouse.makePartName(partColSchema, partVals);
         }
 
         ColumnStatisticsDesc statsDesc = buildColumnStatsDesc(tbl, partName, isTblLevel);
@@ -153,10 +182,13 @@ public class ColStatsProcessor implements IStatsProcessor {
         colStats.setStatsObj(statsObjs);
         colStats.setEngine(Constants.HIVE_ENGINE);
         stats.add(colStats);
+        if (numStats >= maxNumStats) {
+          return false;
+        }
       }
     }
     ftOp.clearFetchContext();
-    return stats;
+    return true;
   }
 
   private ColumnStatisticsDesc buildColumnStatsDesc(Table table, String partName, boolean isTblLevel) {
@@ -178,30 +210,115 @@ public class ColStatsProcessor implements IStatsProcessor {
   public int persistColumnStats(Hive db, Table tbl) throws HiveException, MetaException, IOException {
     // Construct a column statistics object from the result
 
-    List<ColumnStatistics> colStats = constructColumnStatsFromPackedRows(tbl);
-    // Persist the column statistics object to the metastore
-    // Note, this function is shared for both table and partition column stats.
-    if (colStats.isEmpty()) {
+    long writeId = -1;
+    ValidWriteIdList validWriteIdList = null;
+    HiveTxnManager txnMgr = AcidUtils.isTransactionalTable(tbl) ? SessionState.get().getTxnMgr() : null;
+    if (txnMgr != null) {
+      writeId = txnMgr.getAllocatedTableWriteId(tbl.getDbName(), tbl.getTableName());
+      validWriteIdList =
+              AcidUtils.getTableValidWriteIdList(conf, AcidUtils.getFullTableName(tbl.getDbName(), tbl.getTableName()));
+    }
+
+    boolean done = false;
+    boolean useStorageHandler = tbl.isNonNative() && tbl.getStorageHandler().canSetColStatistics(tbl);
+    if (!useStorageHandler && tbl.getSnapshotRef() != null) {
+      // the metastore holds only the table's statistics; a branch has nowhere to store its own
       return 0;
     }
-    SetPartitionsStatsRequest request = new SetPartitionsStatsRequest(colStats, Constants.HIVE_ENGINE);
-    request.setNeedMerge(colStatDesc.isNeedMerge());
-    HiveTxnManager txnMgr = AcidUtils.isTransactionalTable(tbl)
-        ? SessionState.get().getTxnMgr() : null;
-    if (txnMgr != null) {
-      request.setWriteId(txnMgr.getAllocatedTableWriteId(tbl.getDbName(), tbl.getTableName()));
-      ValidWriteIdList validWriteIdList =
-          AcidUtils.getTableValidWriteIdList(conf, AcidUtils.getFullTableName(tbl.getDbName(), tbl.getTableName()));
-      if (validWriteIdList != null) {
-        request.setValidWriteIdList(validWriteIdList.toString());
+    long maxNumStats = conf.getLongVar(HiveConf.ConfVars.HIVE_STATS_MAX_NUM_STATS);
+    if (useStorageHandler) {
+      // the handler pulls the statistics batch by batch and persists them in one pass, so the
+      // whole of a large table's statistics is never held here at once
+      Iterator<ColumnStatistics> stats = columnStatsIterator(tbl, maxNumStats);
+      if (stats.hasNext()) {
+        boolean success = tbl.getStorageHandler().setColStatistics(tbl, stats);
+        // COLUMN_STATS_ACCURATE describes the table, so a branch write leaves it alone
+        if (!(tbl.isMaterializedView() || tbl.isView() || tbl.isTemporary()) && tbl.getSnapshotRef() == null) {
+          setOrRemoveColumnStatsAccurateProperty(db, tbl, colStatDesc.getColName(), success);
+        }
       }
+      return 0;
     }
-    db.setPartitionColumnStatistics(request);
+    while (!done) {
+      List<ColumnStatistics> colStats = new ArrayList<>();
+
+      long start = System. currentTimeMillis();
+      done = constructColumnStatsFromPackedRows(tbl, colStats, maxNumStats);
+      long end = System.currentTimeMillis();
+      LOG.info("Time taken to build " + colStats.size() + " stats desc : " + ((end - start)/1000F) + " seconds.");
+
+      // Persist the column statistics object to the metastore
+      // Note, this function is shared for both table and partition column stats.
+      if (colStats.isEmpty()) {
+        continue;
+      }
+      SetPartitionsStatsRequest request = new SetPartitionsStatsRequest(colStats);
+      request.setNeedMerge(colStatDesc.isNeedMerge());
+      if (txnMgr != null) {
+        request.setWriteId(writeId);
+        if (validWriteIdList != null) {
+          request.setValidWriteIdList(validWriteIdList.toString());
+        }
+      }
+
+      start = System. currentTimeMillis();
+      db.setPartitionColumnStatistics(request);
+      end = System.currentTimeMillis();
+      LOG.info("Time taken to update " + colStats.size() + " stats : " + ((end - start)/1000F) + " seconds.");
+    }
     return 0;
+  }
+
+  /** The computed statistics, fetched and decoded a batch at a time as they are pulled. */
+  private Iterator<ColumnStatistics> columnStatsIterator(Table tbl, long maxNumStats) {
+    return new Iterator<>() {
+      private final Queue<ColumnStatistics> batch = new ArrayDeque<>();
+      private boolean done = false;
+
+      @Override
+      public boolean hasNext() {
+        while (batch.isEmpty() && !done) {
+          List<ColumnStatistics> next = new ArrayList<>();
+          try {
+            done = constructColumnStatsFromPackedRows(tbl, next, maxNumStats);
+          } catch (HiveException | IOException | MetaException e) {
+            // Iterator declares no checked exceptions, so what the fetch throws travels unchecked
+            throw new RuntimeException("Failed to fetch computed column statistics", e);
+          }
+          batch.addAll(next);
+        }
+        return !batch.isEmpty();
+      }
+
+      @Override
+      public ColumnStatistics next() {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+        return batch.poll();
+      }
+    };
   }
 
   @Override
   public void setDpPartSpecs(Collection<Partition> dpPartSpecs) {
+  }
+
+  private void setOrRemoveColumnStatsAccurateProperty(Hive db, Table tbl, List<String> colNames, boolean success) throws HiveException {
+    // a storage handler table has no HMS partition objects to carry per-partition flags:
+    // the table-level flag summarizes its partition statistics as a whole
+    boolean tableLevelFlag = colStatDesc.isTblLevel() || tbl.isNonNative();
+    if (CollectionUtils.isEmpty(colNames) || !tableLevelFlag) {
+      return;
+    }
+    EnvironmentContext environmentContext = new EnvironmentContext();
+    environmentContext.putToProperties(StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
+    if (success) {
+      StatsSetupConst.setColumnStatsState(tbl.getParameters(), colNames);
+    } else {
+      StatsSetupConst.removeColumnStatsState(tbl.getParameters(), colNames);
+    }
+    db.alterTable(tbl.getFullyQualifiedName(), tbl, environmentContext, false);
   }
 
   /**
@@ -217,6 +334,7 @@ public class ColStatsProcessor implements IStatsProcessor {
     MAX("max"),
     NDV("numdistinctvalues"),
     BITVECTOR("ndvbitvector"),
+    KLL_SKETCH("kllsketch"),
     MAX_LENGTH("maxlength"),
     AVG_LENGTH("avglength");
 
@@ -251,7 +369,8 @@ public class ColStatsProcessor implements IStatsProcessor {
             ColumnStatsField.MAX,
             ColumnStatsField.COUNT_NULLS,
             ColumnStatsField.NDV,
-            ColumnStatsField.BITVECTOR)),
+            ColumnStatsField.BITVECTOR,
+            ColumnStatsField.KLL_SKETCH)),
     DOUBLE(
         ImmutableList.of(
             ColumnStatsField.COLUMN_STATS_TYPE,
@@ -259,7 +378,8 @@ public class ColStatsProcessor implements IStatsProcessor {
             ColumnStatsField.MAX,
             ColumnStatsField.COUNT_NULLS,
             ColumnStatsField.NDV,
-            ColumnStatsField.BITVECTOR)),
+            ColumnStatsField.BITVECTOR,
+            ColumnStatsField.KLL_SKETCH)),
     STRING(
         ImmutableList.of(
             ColumnStatsField.COLUMN_STATS_TYPE,
@@ -281,7 +401,8 @@ public class ColStatsProcessor implements IStatsProcessor {
             ColumnStatsField.MAX,
             ColumnStatsField.COUNT_NULLS,
             ColumnStatsField.NDV,
-            ColumnStatsField.BITVECTOR)),
+            ColumnStatsField.BITVECTOR,
+            ColumnStatsField.KLL_SKETCH)),
     DATE(
         ImmutableList.of(
             ColumnStatsField.COLUMN_STATS_TYPE,
@@ -289,7 +410,8 @@ public class ColStatsProcessor implements IStatsProcessor {
             ColumnStatsField.MAX,
             ColumnStatsField.COUNT_NULLS,
             ColumnStatsField.NDV,
-            ColumnStatsField.BITVECTOR)),
+            ColumnStatsField.BITVECTOR,
+            ColumnStatsField.KLL_SKETCH)),
     TIMESTAMP(
         ImmutableList.of(
             ColumnStatsField.COLUMN_STATS_TYPE,
@@ -297,8 +419,8 @@ public class ColStatsProcessor implements IStatsProcessor {
             ColumnStatsField.MAX,
             ColumnStatsField.COUNT_NULLS,
             ColumnStatsField.NDV,
-            ColumnStatsField.BITVECTOR));
-
+            ColumnStatsField.BITVECTOR,
+            ColumnStatsField.KLL_SKETCH));
 
     private final List<ColumnStatsField> columnStats;
 
@@ -347,5 +469,13 @@ public class ColStatsProcessor implements IStatsProcessor {
       return getColumnStatsType(typeInfo).getColumnStats();
     }
 
+    public static List<ColumnStatsField> removeDisabledStatistics(HiveConf conf, List<ColumnStatsField> columnStatsFields) {
+      if (!HiveStatsUtils.computeHistograms(conf)) {
+        return columnStatsFields.stream()
+            .filter(f -> f != ColumnStatsField.KLL_SKETCH)
+            .collect(Collectors.toList());
+      }
+      return columnStatsFields;
+    }
   }
 }
